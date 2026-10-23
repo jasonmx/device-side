@@ -15,10 +15,10 @@ CONFIRMED = {"status": "confirmed", "mode": "native", "platform": "shelly"}
 
 
 @pytest.fixture
-def claim_light_fields(monkeypatch):
-    """The light fields as a tester's report would re-claim them; until then the core refuses them first."""
+def claim_every_light(monkeypatch):
+    """Light fields and components as testers' reports would re-claim them; until then they are refused first."""
     fields = frozenset({"brightness", "transition", "color_temp_kelvin", "rgb_color"})
-    claimed = dataclasses.replace(ShellyTurnOnFor.capabilities, supports_fields=fields)
+    claimed = dataclasses.replace(ShellyTurnOnFor.capabilities, supports_fields=fields, components=None)
     monkeypatch.setattr(ShellyTurnOnFor, "capabilities", claimed)
 
 
@@ -35,7 +35,7 @@ async def test_switch_one_set_then_read_back(hass, setup_production):
     ]
 
 
-async def test_light_fields_ride_in_the_same_set(hass, setup_production, claim_light_fields):
+async def test_light_fields_ride_in_the_same_set(hass, setup_production, claim_every_light):
     entry, call_rpc = shelly_device(hass)
     add_shelly_entity(hass, entry, "light.desk", "light:0")
 
@@ -59,7 +59,7 @@ async def test_light_fields_ride_in_the_same_set(hass, setup_production, claim_l
     ],
 )
 async def test_rgbcct_sets_mode_and_clamps_kelvin_to_the_entity_range(
-    hass, setup_production, claim_light_fields, data, expected
+    hass, setup_production, claim_every_light, data, expected
 ):
     entry, call_rpc = shelly_device(hass)
     kelvin_range = {"min_color_temp_kelvin": 2700, "max_color_temp_kelvin": 6500}
@@ -90,7 +90,7 @@ async def test_switch_ignores_light_fields(hass, setup_production):
     ],
 )
 async def test_fields_the_component_cannot_take_are_refused(
-    hass, setup_production, claim_light_fields, entity_id, key, data
+    hass, setup_production, claim_every_light, entity_id, key, data
 ):
     entry, call_rpc = shelly_device(hass)
     add_shelly_entity(hass, entry, entity_id, key)
@@ -107,7 +107,7 @@ async def test_fields_the_component_cannot_take_are_refused(
     assert [args.args[0] for args in call_rpc.await_args_list] == ["Switch.Set", "Switch.GetStatus"]
 
 
-async def test_unclaimed_light_fields_are_refused_but_on_off_lights_run(hass, setup_production):
+async def test_relay_lights_run_but_unclaimed_fields_and_components_are_refused(hass, setup_production):
     entry, call_rpc = shelly_device(hass)
     add_shelly_entity(hass, entry, "light.dimmer", "light:0")
     add_shelly_entity(hass, entry, "light.relay", "switch:0")
@@ -116,9 +116,9 @@ async def test_unclaimed_light_fields_are_refused_but_on_off_lights_run(hass, se
         await call(hass, "turn_on_for", {"entity_id": "light.relay", "duration": 5, "brightness": 10})
     response = await call(hass, "turn_on_for", {"entity_id": ["light.dimmer", "light.relay"], "duration": 5})
 
-    assert response["light.relay"] == response["light.dimmer"] == CONFIRMED
-    assert rpc_call("Light.Set", {"id": 0, "on": True, "toggle_after": 5.0}) in call_rpc.await_args_list
-    assert rpc_call("Switch.Set", {"id": 0, "on": True, "toggle_after": 5.0}) in call_rpc.await_args_list
+    assert response["light.relay"] == CONFIRMED
+    assert response["light.dimmer"] == {**CONFIRMED, "status": "unsupported", "detail": "component_not_supported"}
+    assert [args.args[0] for args in call_rpc.await_args_list] == ["Switch.Set", "Switch.GetStatus"]
 
 
 async def test_gen1_and_non_timer_entities_are_unsupported(hass, setup_production):

@@ -48,12 +48,16 @@ def address(target: Target) -> RpcAddress | None:
     return RpcAddress(COMPONENTS[match["key"]], int(match["id"]))
 
 
-def unsupported_reason(target: Target, fields: frozenset[str] = frozenset()) -> str | None:
-    """Why this entity can't take a timed Set with these light fields, or None."""
+def unsupported_reason(
+    target: Target, fields: frozenset[str] = frozenset(), components: frozenset[str] | None = None
+) -> str | None:
+    """Why this entity can't take a timed Set with these light fields on the claimed components, or None."""
     if rpc_device(target) is None:
         return "gen1_unsupported"
     if (rpc := address(target)) is None:
         return "not_addressable"
+    if components is not None and rpc.component not in components:
+        return "component_not_supported"
     if target.domain == "light" and fields - COMPONENT_FIELDS[rpc.component]:
         return "fields_not_supported"
     return None
