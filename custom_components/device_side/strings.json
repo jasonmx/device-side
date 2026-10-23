@@ -31,7 +31,7 @@
   "services": {
     "turn_off_for": {
       "name": "Turn off for",
-      "description": "Turns lights or switches off now; the device turns itself back on after the duration, even if Home Assistant is offline.",
+      "description": "Devices turn off, then turn back on after a delay.",
       "fields": {
         "duration": {
           "name": "Duration",
@@ -41,7 +41,7 @@
     },
     "turn_on_for": {
       "name": "Turn on for",
-      "description": "Turns lights or switches on now; the device turns itself off after the duration, even if Home Assistant is offline.",
+      "description": "Devices turn on, then turn back off after a delay.",
       "fields": {
         "duration": {
           "name": "Duration",
