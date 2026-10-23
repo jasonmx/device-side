@@ -6,8 +6,8 @@ from typing import Any
 from homeassistant.core import State
 
 from .addressing import address, rpc_device
+from ...core.adapter import Adapter
 from ...core.capabilities import DurationLimits
-from ...core.cell import Cell
 from ...core.models import EntityResult, LightFields, Status, Target
 
 _LOGGER = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ def light_params(light: LightFields, component: str, state: State | None) -> dic
     return params
 
 
-async def set_with_timer(cell: Cell, target: Target, params: dict[str, Any]) -> EntityResult:
+async def set_with_timer(adapter: Adapter, target: Target, params: dict[str, Any]) -> EntityResult:
     """Send the Set (an error propagates, so gather() reports it rejected), then confirm the timer is running.
 
     A failed or inconclusive read-back still reports SENT: the device accepted the Set.
@@ -50,8 +50,8 @@ async def set_with_timer(cell: Cell, target: Target, params: dict[str, Any]) -> 
     try:
         status = await device.call_rpc(f"{rpc.component}.GetStatus", {"id": rpc.id})
     except Exception as err:  # noqa: BLE001 - aioshelly's errors can't be imported here; see addressing.py
-        _LOGGER.debug("%s read-back failed for %s: %s", cell.feature, target.entity_id, err)
-        return cell.result(target, Status.SENT, detail="readback_failed")
+        _LOGGER.debug("%s read-back failed for %s: %s", adapter.feature, target.entity_id, err)
+        return adapter.result(target, Status.SENT, detail="readback_failed")
     if status.get("output") is params["on"] and "timer_duration" in status:
-        return cell.result(target, Status.CONFIRMED)
-    return cell.result(target, Status.SENT, detail="timer_not_reported")
+        return adapter.result(target, Status.CONFIRMED)
+    return adapter.result(target, Status.SENT, detail="timer_not_reported")

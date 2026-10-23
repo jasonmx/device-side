@@ -13,7 +13,7 @@ devices and not others; users then hand-roll `mqtt.publish` payloads and
 `zha.issue_zigbee_cluster_command` calls. `device_side` takes the permissive side of that
 tension: expose the feature through one action per feature across platforms, execute it on the
 device or bridge so it survives HA restarts and outages, and document the sharp edges per
-feature x platform cell so users choose with open eyes.
+feature x platform adapter so users choose with open eyes.
 
 Demand evidence (light-extras-research, 2023-10 to 2026-10, 248 relevant items): Turn On For
 Duration scored 101.8 (12 requests, 2 refused, 11 workaround threads), Every-Turn-On Level 54.1,
@@ -43,7 +43,7 @@ tuya 29.5%, esphome 27.3%, tplink 13.8%, zwave_js 8.3%, tasmota 7.6%.)
   4. Documented user demand (as in light-extras-research). Contributions without evidence are
      accepted but not prioritized.
 - **One action per user intent, not per protocol primitive.** Zigbee has move/step/moveto;
-  device_side exposes one `move`. Command selection is hidden in the platform cell.
+  device_side exposes one `move`. Command selection is hidden in the platform adapter.
 - **Fallback policy: opt-in "assisted" only.** HA-side help is allowed only where it adds safety
   on top of a native mechanism (example: cancel a Hue bridge timer when the light is toggled
   early). Pure emulation is never shipped; docs show how to build it with `set_attributes` plus
@@ -71,12 +71,12 @@ tuya 29.5%, esphome 27.3%, tplink 13.8%, zwave_js 8.3%, tasmota 7.6%.)
     `helpers/service.py:_FIELD_SCHEMA`), so the light fields reuse `light/services.yaml`'s
     `attribute: supported_color_modes` filters verbatim. Switches have no
     `supported_color_modes`, so a switch-only selection shows just `duration`. The schema still
-    accepts the fields for any target; cells ignore fields their domain cannot use and the result
+    accepts the fields for any target; adapters ignore fields their domain cannot use and the result
     records that under `detail`.
   - Hue port of hue_dimmer: `set_attributes`, `get_attributes`, `set_scene`, `move`/`stop`.
     `move` replaces raise/lower and grows beyond brightness. **Design principle (applies to
     every feature): fields describe what the light should do in human terms, never how the
-    device does it.** No rates, steps, mireds or cluster vocabulary; the cell converts.
+    device does it.** No rates, steps, mireds or cluster vocabulary; the adapter converts.
     `move` fields, all optional but at least one direction required:
     - `brightness: brighter | dimmer`, `color_temp: warmer | cooler`,
       `saturation: richer | paler`, `hue: forward | backward` (around the color wheel,
@@ -115,7 +115,7 @@ tuya 29.5%, esphome 27.3%, tplink 13.8%, zwave_js 8.3%, tasmota 7.6%.)
   `OnWithTimedOff` equivalent, so `turn_on_for` is not a Z-Wave goal. Jason no longer owns
   Z-Wave hardware, so **reach out to Inovelli** (who showed interest in the timer feature in a
   thread mined by light-extras-research; see `research/timed-on-backends.md` there) to ask
-  whether they will be the testers in the RC that carries the Z-Wave cells.
+  whether they will be the testers in the RC that carries the Z-Wave adapters.
 - **Not planned (2026-10-23 check of local-only, non-Zigbee/Matter candidates):** Tuya (core
   integration is cloud, fails the offline test; its Zigbee devices already arrive via Z2M/ZHA),
   ESPHome (too experimental; auto-off is compiled into device YAML, no runtime primitive),
@@ -142,26 +142,26 @@ tuya 29.5%, esphome 27.3%, tplink 13.8%, zwave_js 8.3%, tasmota 7.6%.)
      field gets plain words (`duration`, `sweep_time`, `brightness_limit`).
   5. Field *values* are human terms for the outcome (`brighter`, `warmer`, a full-sweep time,
      a stop point), never device mechanics (a rate per second, a step count, a mired value).
-     The cell owns the conversion and documents it in `docs/platforms.md`.
+     The adapter owns the conversion and documents it in `docs/platforms.md`.
   Domain `device_side`, UI title "Device Side", is final.
 - **Groups: highest aggregation the device accepts.** Two kinds of group reach the dispatcher:
   - *HA group-platform entities* (light group helper, switch group, legacy `group.*`, later
     cover/fan). Nothing downstream can address them, so `core/groups.py` always expands them,
-    for every domain, in one place. `Target.via_group` records the wrapper so a cell can still
+    for every domain, in one place. `Target.via_group` records the wrapper so an adapter can still
     batch members that came from the same group.
   - *Integration-native groups* (Hue `grouped_light`, Z2M group entities, ZHA group entities).
-    These pass through to the cell as a single target. Each cell declares `native_groups`: when
-    true the cell sends one command to the group (hue_dimmer sends `move`/`stop` to
+    These pass through to the adapter as a single target. Each adapter declares `native_groups`: when
+    true the adapter sends one command to the group (hue_dimmer sends `move`/`stop` to
     `grouped_light`; Z2M `turn_on_for` can publish to the group topic). When false, the
     dispatcher calls the platform's `expand_group(hass, target) -> list[Target]` hook
     (`PlatformInfo.expand_group`; Hue uses `grouped_light.get_lights`, exactly what hue_dimmer
-    does for `set_attributes`/`get_attributes` in `bridge.py`) and the cell sees members. A
-    platform with no hook and a cell without `native_groups` returns `unsupported`
+    does for `set_attributes`/`get_attributes` in `bridge.py`) and the adapter sees members. A
+    platform with no hook and an adapter without `native_groups` returns `unsupported`
     (`group_not_supported`). Membership knowledge therefore lives in the platform (only it can
     know Hue or Z2M membership), but the call site is single and central.
   - Why central: one implementation and one test module for HA-group expansion instead of
-    five; cells never see a wrapper they cannot address; `via_group` lets a cell re-batch when
-    useful. Cost: the dispatcher must expand before bucketing, so a cell cannot choose to
+    five; adapters never see a wrapper they cannot address; `via_group` lets an adapter re-batch when
+    useful. Cost: the dispatcher must expand before bucketing, so an adapter cannot choose to
     address an HA group natively, which is fine because no device can. Goal throughout:
     minimize radio traffic and popcorning by sending to the largest unit the device accepts.
 - **Results:** `SupportsResponse.OPTIONAL`. Response maps entity_id to
@@ -171,8 +171,8 @@ tuya 29.5%, esphome 27.3%, tplink 13.8%, zwave_js 8.3%, tasmota 7.6%.)
   failed, so mixed rooms do not abort automations.
 - **Stability tiers** per unit (feature x platform x call class): `experimental | untested |
   beta | stable`. Rules live in `CLAUDE.md` (Tiers, Releases); summary: only `experimental` is
-  declared (`CellCapabilities.experimental`), the rest are computed by `gen_docs.py` from
-  coverage and bench records keyed by the cell's fingerprint; `stable` means on `main`. There is
+  declared (`AdapterCapabilities.experimental`), the rest are computed by `gen_docs.py` from
+  coverage and bench records keyed by the adapter's fingerprint; `stable` means on `main`. There is
   no runtime tier gate and no options flow for it: a class nobody has tested is simply not
   claimed in `domains`/`supports_fields`, so `supports()` returns `unsupported`. Tier is not
   logged per call and not returned in results. Mode (`native | assisted`) is objective and
@@ -186,7 +186,7 @@ tuya 29.5%, esphome 27.3%, tplink 13.8%, zwave_js 8.3%, tasmota 7.6%.)
      result shapes against a real `hass` fixture; platform calls mocked at the boundary
      (`mqtt.publish`, ZHA service, aioshelly RPC, `matter_client`, aiohue).
   2. **Rig: scripted integration tests against Jason's real HA instance**, the only way to
-     scale verification across many feature x platform cells. Tests are marked
+     scale verification across many feature x platform adapters. Tests are marked
      `@pytest.mark.rig`, skipped by default, and talk to HA over its WebSocket/REST API with a
      long-lived token: call `device_side.*` actions, assert on service responses and on
      state changes (e.g. the light is off N seconds after `turn_on_for`). A rig inventory file
@@ -195,13 +195,13 @@ tuya 29.5%, esphome 27.3%, tplink 13.8%, zwave_js 8.3%, tasmota 7.6%.)
      `custom_components/device_side` through pi-stack's `ha-shim` (`ssh ha ds-sync`; the agent key
      cannot rsync) and restarts HA (`ssh ha restart`) before the run.
      **Human approval gate:** the rig runner (`scripts/rig.py`) prints the inventory, the
-     cells to be exercised, the estimated duration and whether a restart is needed, then
+     adapters to be exercised, the estimated duration and whether a restart is needed, then
      requires an interactive y/N (and a `DEVICE_SIDE_RIG_APPROVED=1` env var for CI-style
      invocation). Both the deploy+restart and the test run sit behind that gate. The devices
      are in-use household lights, so **Claude must ask before invoking the rig, every time**;
      the gate exists so occupants are not startled by devices changing state.
-  3. Bench: a per-cell record (`docs/bench/<platform>/<feature>.md`) of the rig pass that
-     promoted a cell, with date, HA version, device model and firmware. Rig test results feed
+  3. Bench: a per-adapter record (`docs/bench/<platform>/<feature>.md`) of the rig pass that
+     promoted an adapter, with date, HA version, device model and firmware. Rig test results feed
      this record. **There is no dev HA; the live rig is the only HA.** The first time the
      integration loads in a real HA is the first approved rig deploy (slice 3); until then
      correctness rests on unit tests plus hassfest.
@@ -232,7 +232,7 @@ Load-bearing facts read from HA core 2026.2.1 (hue_dimmer venv) during planning:
   group integration is **not** expanded by `async_extract_entity_ids`; we expand it ourselves via
   `helpers.group.get_entity_ids`, which reads the `entity_id` state attribute (`group/light.py`).
 - `zha.issue_zigbee_cluster_command` is registered with `async_register_admin_service`
-  (`zha/websocket_api.py`), so the ZHA cell forwards the original `call.context`.
+  (`zha/websocket_api.py`), so the ZHA adapter forwards the original `call.context`.
 - `strings.json` `services` block and `icons.json` `services` block formats verified against
   `components/matter/`. `get_matter(hass)` reads `hass.data[matter.DOMAIN]` (one entry).
   `ShellyEntryData.rpc` on `entry.runtime_data` (`shelly/coordinator.py`). `HueBridge` is
@@ -264,15 +264,15 @@ custom_components/device_side/
   translations/en.json   copy of strings.json
   core/
     models.py            Status, Mode, Tier, FeatureKind, Target, EntityResult, LightFields + validators
-    capabilities.py      DurationLimits, CellCapabilities, PlatformInfo
+    capabilities.py      DurationLimits, AdapterCapabilities, PlatformInfo
     feature.py           Feature[RequestT] base class
-    cell.py              Cell[RequestT] base class + gather() pacing helper
-    registry.py          CellRegistry: pkgutil discovery, guarded import, lookup, matrix iteration
+    adapter.py              Adapter[RequestT] base class + gather() pacing helper
+    registry.py          AdapterRegistry: pkgutil discovery, guarded import, lookup, matrix iteration
     resolver.py          entity_id -> Target (platform key via PlatformInfo.ha_integration + detect)
     groups.py            expand HA group-platform entities (any domain) to members; call platform expand_group
-                         for native groups when the chosen cell lacks native_groups
+                         for native groups when the chosen adapter lacks native_groups
     duration.py          clamp(request, limits) -> (request, clamped_to)
-    dispatcher.py        parse, extract, expand, resolve, run cells, merge, raise rule, response
+    dispatcher.py        parse, extract, expand, resolve, run adapters, merge, raise rule, response
     services.py          register one service per Feature; _call_if_loaded gate (hue_dimmer pattern)
     runtime.py           DeviceSideData in hass.data[DOMAIN]: registry, dispatcher, semaphores, platform_state
   features/
@@ -281,7 +281,7 @@ custom_components/device_side/
     set_attributes.py  set_scene.py  move.py  stop.py        (COMMAND, Hue port)
     get_attributes.py                                         (QUERY, SupportsResponse.ONLY)
   platforms/
-    __init__.py          discover() -> modules sorted; each exports PLATFORM and CELLS
+    __init__.py          discover() -> modules sorted; each exports PLATFORM and ADAPTERS
     zigbee2mqtt/  __init__.py detect.py addressing.py turn_on_for.py
     zha/          __init__.py addressing.py turn_on_for.py
     matter/       __init__.py addressing.py turn_on_for.py
@@ -291,7 +291,7 @@ custom_components/device_side/
 scripts/
   gen_docs.py            matrix + per-page generated blocks from the registry; --check for CI
   deploy.sh              ssh ha ds-sync <branch>, then ssh ha restart homeassistant (rig only)
-  rig.py                 approval gate (inventory, cells, duration, restart?) -> y/N -> deploy -> pytest -m rig
+  rig.py                 approval gate (inventory, adapters, duration, restart?) -> y/N -> deploy -> pytest -m rig
 docs/
   device_side_handoff-2026-10-23.md          existing
   plans/2026-10-23-device-side-repo-plan.md  this plan, saved in slice 0
@@ -300,12 +300,12 @@ docs/
   features/<feature>.md  platforms.md               fixed templates with <!-- generated:start/end --> blocks
                                              (platforms.md: one section + one block per platform)
   contributing/add-a-feature.md  add-a-platform.md  bench-checklist-template.md  rig.md
-  bench/<platform>/<feature>.md              per-cell bench record; gates tier promotion
+  bench/<platform>/<feature>.md              per-adapter bench record; gates tier promotion
 tests/
   conftest.py            enable_custom_integrations autouse; setup_integration; fake_registry; call()
-  fakes/fake_platform/   PLATFORM "fake" + scripted cells for dispatcher tests
+  fakes/fake_platform/   PLATFORM "fake" + scripted adapters for dispatcher tests
   fixtures/{z2m,zha,matter,shelly,hue,groups}.py   fabricate registry entries + boundary mocks
-  core/   features/   platforms/<p>/   docs/        one module per cell; see Testing
+  core/   features/   platforms/<p>/   docs/        one module per adapter; see Testing
   rig/    conftest.py (HA WS/REST client, inventory loader, snapshot/restore), inventory.yaml (gitignored),
           inventory.example.yaml, test_<feature>_<platform>.py
 ```
@@ -321,7 +321,7 @@ copied from `/Users/jason/projects/hue-smooth-dimming`, plus `docs.yml` running
 # core/models.py
 class Status(StrEnum): UNSUPPORTED, REJECTED, SENT, CONFIRMED
 class Mode(StrEnum): NATIVE, ASSISTED
-class Tier(StrEnum): STABLE, BETA, UNTESTED, EXPERIMENTAL   # computed by gen_docs, never stored on a cell
+class Tier(StrEnum): STABLE, BETA, UNTESTED, EXPERIMENTAL   # computed by gen_docs, never stored on an adapter
 class FeatureKind(StrEnum): COMMAND, SETTING, QUERY
 
 @dataclass(frozen=True, slots=True)
@@ -337,7 +337,7 @@ class EntityResult: entity_id, status, platform, mode, clamped_to, detail, data
 
 # core/capabilities.py
 @dataclass(frozen=True) class DurationLimits: min_s, max_s, resolution_s
-@dataclass(frozen=True) class CellCapabilities:
+@dataclass(frozen=True) class AdapterCapabilities:
     experimental: bool = False; mode = NATIVE; domains = {"light"}; duration: DurationLimits | None
     supports_fields: frozenset[str]; confirmable: bool; native_groups: bool
     max_concurrency: int = 4; notes: tuple[str, ...] = (); bench: str | None = None
@@ -356,19 +356,19 @@ class Feature[RequestT](ABC):
     @classmethod def schema(cls) -> vol.Schema
     @classmethod @abstractmethod def parse(cls, hass, call) -> RequestT   # ServiceValidationError on bad input
     @classmethod async def run(cls, hass, request, targets, dispatcher) -> list[EntityResult]:
-        return await dispatcher.run_cells(cls.key, request, targets)      # composites override
+        return await dispatcher.run_adapters(cls.key, request, targets)      # composites override
 
-# core/cell.py
-class Cell[RequestT](ABC):
-    feature: ClassVar[str]; platform: ClassVar[str]; capabilities: ClassVar[CellCapabilities]
+# core/adapter.py
+class Adapter[RequestT](ABC):
+    feature: ClassVar[str]; platform: ClassVar[str]; capabilities: ClassVar[AdapterCapabilities]
     def supports(self, hass, request, target) -> str | None  # None = ok, else reason key; sync, cheap; request so unclaimed fields refuse
     @abstractmethod async def execute(self, hass, request, targets) -> list[EntityResult]
     def result(self, target, status, **kw) -> EntityResult  # stamps platform/mode
-    async def gather(self, hass, targets, send) -> list[EntityResult]  # platform + per-cell semaphores; exc -> that target REJECTED
+    async def gather(self, hass, targets, send) -> list[EntityResult]  # platform + per-adapter semaphores; exc -> that target REJECTED
 ```
 
 - **Registry:** `pkgutil.iter_modules` over `platforms/` and `features/`; each package exports
-  data (`PLATFORM`, `CELLS`, `FEATURE`), not decorators, so import has no side effects, order is
+  data (`PLATFORM`, `ADAPTERS`, `FEATURE`), not decorators, so import has no side effects, order is
   deterministic (sorted), the docs generator can import without `hass`, and tests can build a
   registry from an explicit module list. Each platform import is guarded: a failing import
   (library absent because the core integration is not installed) records
@@ -382,27 +382,27 @@ class Cell[RequestT](ABC):
   platform is `group` (via `get_entity_ids`), any domain, max depth 4, dedupe preserving order,
   `via_group` set on members. Native groups (Hue `grouped_light`, Z2M/ZHA group entities) pass
   through as one target; after bucketing, `expand_native_groups` replaces each native-group
-  target in a bucket whose cell lacks `native_groups` with the platform's `expand_group` output
+  target in a bucket whose adapter lacks `native_groups` with the platform's `expand_group` output
   (or an `unsupported` result when the platform has no hook). Results for expanded members are
   reported per member; the wrapper itself gets no row.
 - **Dispatcher:** `handle(feature, call)`: parse, `async_extract_entity_ids`, expand HA groups,
   resolve, domain filter, `feature.run`, append `unsupported` for unresolved, total-failure
-  check, build response when `call.return_response`. `run_cells` buckets targets by cell (no
-  cell -> `no_cell`; domain mismatch; `supports()` reason), expands native groups per bucket as
-  above, then runs cells concurrently under `asyncio.timeout(30)`; cell exceptions become
+  check, build response when `call.return_response`. `run_adapters` buckets targets by adapter (no
+  adapter -> `no_adapter`; domain mismatch; `supports()` reason), expands native groups per bucket as
+  above, then runs adapters concurrently under `asyncio.timeout(30)`; adapter exceptions become
   `REJECTED` for every target; `reconcile` ensures exactly one result per target;
-  `duration.apply` clamps before the cell sees the request and stamps `clamped_to`. Total
+  `duration.apply` clamps before the adapter sees the request and stamps `clamped_to`. Total
   failure (every result unsupported/rejected) raises
   `HomeAssistantError(translation_key="all_targets_failed")` with a per-entity summary; no
   targets raises `ServiceValidationError("no_targets")`.
 - **Composite feature:** `toggle_for.run` first returns `unsupported` for any target whose
-  platform lacks a cell for either `derived_from` feature, whatever its state, so a toggle never
+  platform lacks an adapter for either `derived_from` feature, whatever its state, so a toggle never
   works in one direction only (today that leaves Shelly). It partitions the rest by `state.state`
-  and calls `run_cells("turn_off_for", ...)` for on, `run_cells("turn_on_for", ...)` for off,
-  `state_unknown` otherwise. No cells of its own; the matrix row is derived (`derived_from`) and
-  lists a platform only where both features have cells.
-- **Setting-class features** (future `set_turn_on_defaults`): same `Feature`/`Cell` contract
-  with `kind=SETTING`; ZHA/Matter cells locate the sibling `number` entities on `target.device`
+  and calls `run_adapters("turn_off_for", ...)` for on, `run_adapters("turn_on_for", ...)` for off,
+  `state_unknown` otherwise. No adapters of its own; the matrix row is derived (`derived_from`) and
+  lists a platform only where both features have adapters.
+- **Setting-class features** (future `set_turn_on_defaults`): same `Feature`/`Adapter` contract
+  with `kind=SETTING`; ZHA/Matter adapters locate the sibling `number` entities on `target.device`
   (Matter sets `translation_key="on_level"`; transition time likewise), call `number.set_value`
   blocking, read back -> `CONFIRMED`; Z2M publishes `level_config` -> `SENT`. `kind` only
   drives docs grouping.
@@ -432,9 +432,9 @@ class Cell[RequestT](ABC):
   unique_id `{mac}-{light|rgb|rgbw|cct|switch}:{n}`; one `call_rpc("<Component>.Set",
   {id, on: True, toggle_after: s, **fields})` with field translation copied from `shelly/light.py`;
   `GetStatus` read-back -> `CONFIRMED`. `turn_off_for` is the same with `on: False`.
-- **Hue port** (hue_dimmer module -> cell): `bridge.py` resolve/controllers/writes ->
+- **Hue port** (hue_dimmer module -> adapter): `bridge.py` resolve/controllers/writes ->
   `platforms/hue/bridge.py` taking a `Target` (drop `_iter_targets`; `_write_light` raises so the
-  cell emits SENT/REJECTED); `transitions.py` `_brightness_cache` -> `TransitionCache` instance in
+  adapter emits SENT/REJECTED); `transitions.py` `_brightness_cache` -> `TransitionCache` instance in
   `runtime.platform_state["hue"]`, keyed by (resource_id, attribute) so brightness, color_temp,
   and saturation moves are tracked alike (start value, target, duration, started_at;
   interpolate on read); `_start_transition` -> `move.py` (per-attribute direction + sweep_time
@@ -450,9 +450,9 @@ class Cell[RequestT](ABC):
 ### Concurrency
 
 Platform semaphore from `PlatformInfo.max_concurrency` (Hue 2 because aiohue's cap of 3 is shared
-with core; ZHA 2; Matter 2; Shelly 4; Z2M 4) plus a per-cell semaphore from
-`CellCapabilities.max_concurrency`, both applied inside `Cell.gather()`. `execute` receives all
-of a cell's targets at once so native group commands stay possible. Hue `move`/`stop` keep the
+with core; ZHA 2; Matter 2; Shelly 4; Z2M 4) plus a per-adapter semaphore from
+`AdapterCapabilities.max_concurrency`, both applied inside `Adapter.gather()`. `execute` receives all
+of an adapter's targets at once so native group commands stay possible. Hue `move`/`stop` keep the
 "cache only after accept" rule.
 
 ### services.yaml, strings, icons
@@ -460,7 +460,7 @@ of a cell's targets at once so native group commands stay possible. Hue `move`/`
 - `services.yaml` holds only `target` and `fields` with selectors. One filter dict per platform
   (`integration` is a single string): `{domain: [light, switch], integration: mqtt}` and so on for
   zha, matter, shelly; Hue-only features `{domain: light, integration: hue}`; `set_scene`
-  `{domain: scene, integration: hue}`. Filters are UI-only; cells enforce via `supports()`.
+  `{domain: scene, integration: hue}`. Filters are UI-only; adapters enforce via `supports()`.
 - `strings.json`: `services.<feature>.{name, description, fields.<field>.{name, description}}`
   plus `exceptions.{not_loaded, no_targets, all_targets_failed, invalid_duration, nothing_to_set}`.
 - Adding a feature = one block each in `services.yaml`, `strings.json`, `icons.json`.
@@ -473,16 +473,16 @@ of a cell's targets at once so native group commands stay possible. Hue `move`/`
 readable: per-class tier, fingerprint, mode, domains, duration, supports_fields, confirmable, native_groups, notes,
 bench) and `docs/matrix.md`, and rewrites the generated block in README, in each
 `docs/features/*.md`, and in each platform section of `docs/platforms.md` (one marker pair per
-section, `<!-- generated:<platform>:start/end -->`). Matrix cell text: `tier · best status · duration
+section, `<!-- generated:<platform>:start/end -->`). Matrix adapter text: `tier · best status · duration
 range` with footnotes from `docs/_notes.yaml`. The generator fails on a missing or unused note
-key, a `bench` path that does not exist, or a non-experimental cell under 95% coverage
-(`coverage.json`). CI runs `--check`. Fingerprint: AST hash of the cell module, excluding
-docstrings and the `CellCapabilities` declaration; bench records carry the fingerprint they
+key, a `bench` path that does not exist, or a non-experimental adapter under 95% coverage
+(`coverage.json`). CI runs `--check`. Fingerprint: AST hash of the adapter module, excluding
+docstrings and the `AdapterCapabilities` declaration; bench records carry the fingerprint they
 tested. Proof follows the call: a record covers another class only when that class gets the
-identical call to the same device-side backing. A cell that sends one call for a switch and an
+identical call to the same device-side backing. An adapter that sends one call for a switch and an
 on/off light declares `onoff_shared=True`, and a record for its `switch` or field-less `light`
 class promotes both, so a relay reclassed as a light keeps its tier. Untested backings in the same
-domain are left out of `CellCapabilities.components` and refused, not claimed on a sibling's proof. Tier ladder: see `CLAUDE.md`. A release-workflow check rejects tags not matching
+domain are left out of `AdapterCapabilities.components` and refused, not claimed on a sibling's proof. Tier ladder: see `CLAUDE.md`. A release-workflow check rejects tags not matching
 `^v\d+\.\d+\.\d+(rc\d+)?$`.
 
 Tester reports: RC builds raise one fixable Repairs issue ("vX.Y.ZrcN: help test on your
@@ -518,7 +518,7 @@ to hass (state patched LOADED), `device_registry.async_get_or_create(identifiers
   for grouped_light; scene entity.
 - Groups: `make_light_group(hass, "light.kitchen", members)` on platform `group`.
 
-One test module per cell under `tests/platforms/<p>/test_<feature>.py` asserting the exact
+One test module per adapter under `tests/platforms/<p>/test_<feature>.py` asserting the exact
 response dict and boundary call arguments; `tests/core/` (registry, resolver, groups, dispatcher,
 services_setup) use only `tests/fakes/fake_platform`; `tests/docs/test_matrix_generated.py`
 regenerates into the scratch dir and diffs against committed output.
@@ -526,13 +526,13 @@ regenerates into the scratch dir and diffs against committed output.
 ### Rig (approval-gated, real HA)
 
 `scripts/rig.py` loads `tests/rig/inventory.yaml` (gitignored; `inventory.example.yaml` committed)
-mapping each platform to household entities, prints inventory, the cells about to run, estimated
+mapping each platform to household entities, prints inventory, the adapters about to run, estimated
 duration and whether a restart is needed, then requires interactive y/N (or
 `DEVICE_SIDE_RIG_APPROVED=1`). `scripts/rig.py` flow:
 
 1. Read-only preflight: load inventory and `.env.rig` (`HA_URL`, `HA_TOKEN` for a non-admin user,
-   `RIG_SSH` default `ha`); `CellRegistry.discover()` (no hass) intersected with inventory
-   platforms -> one line per cell (`shelly / turn_on_for -> light.office_strip (beta)`); sum each
+   `RIG_SSH` default `ha`); `AdapterRegistry.discover()` (no hass) intersected with inventory
+   platforms -> one line per adapter (`shelly / turn_on_for -> light.office_strip (beta)`); sum each
    test's `RIG_SECONDS` for the estimate; compare `HEAD:custom_components/device_side` with
    `ssh ha ds-status` to decide whether a deploy+restart is needed, and refuse a deploy unless
    `origin/<branch>` carries that tree. Nothing mutates before the gate.
@@ -551,10 +551,10 @@ with `return_response`, REST state reads, `wait_for(entity_id, predicate, timeou
 `state_changed`; restart and readiness live in the runner), `snapshot` (captures state + brightness/CT/color, tracks touched entities,
 restores on teardown via `light.turn_on/off`, logs rather than fails on mismatch; Hue tests capture
 via `device_side.get_attributes` so off-light attributes restore), `timing` (per-platform
-tolerance: Zigbee/Matter 3 s, Shelly/Hue 2 s), `require_cell(platform, feature, role)` (skip when
-inventory lacks the role or the registry lacks the cell). Timing assertions are windows: still on
+tolerance: Zigbee/Matter 3 s, Shelly/Hue 2 s), `require_adapter(platform, feature, role)` (skip when
+inventory lacks the role or the registry lacks the adapter). Timing assertions are windows: still on
 at `duration - tol`, off by `duration + tol`. Rig durations are 5 to 8 s; `clamped_to` is checked
-via the response only. Rig tests cover one happy path and one `unsupported` path per cell;
+via the response only. Rig tests cover one happy path and one `unsupported` path per adapter;
 branches stay in unit tests. Unit runs never import rig fixtures (`DEVICE_SIDE_RIG=1` gates
 collection; the fixtures skip everything without `DEVICE_SIDE_RIG_APPROVED=1`; `rig` marker
 registered in pyproject).
@@ -572,14 +572,14 @@ are in-use household lights.** Rig passes are recorded in `docs/bench/<platform>
 |---|---|---|
 | 0 | Scaffold + CI | Plan saved to `docs/plans/`; `git init`, private GitHub repo `jasonmx/device-side`; manifest, config_flow, const, strings, icons, empty services.yaml; pyproject, pre-commit, workflows from hue_dimmer; `test_services_setup.py` green with zero features; hassfest + HACS validate green; README skeleton with matrix markers. |
 | 1 | Core + fake platform | `core/*`; `features/turn_on_for.py`, `turn_off_for.py`; fake platform (with a fake native group and `expand_group` hook); dispatcher/resolver/groups tests green (HA-group expansion for light and switch, native-group pass-through vs expansion, clamp, total-failure raise, response shape, semaphore bound, guarded-import skip). No live load yet: there is no dev HA. |
-| 2 | Shelly `turn_on_for` + `turn_off_for` | one RPC with fields; Gen1 -> unsupported; read-back -> confirmed under mock; Shelly section of `docs/platforms.md` on the template; cell `experimental=True`. |
+| 2 | Shelly `turn_on_for` + `turn_off_for` | one RPC with fields; Gen1 -> unsupported; read-back -> confirmed under mock; Shelly section of `docs/platforms.md` on the template; adapter `experimental=True`. |
 | 3 | Rig harness | `scripts/rig.py`, `deploy.sh`, `tests/rig/conftest.py`, inventory example, `docs/contributing/rig.md`; **first approved deploy is the integration's first load in any HA**: confirm entry adds, actions appear with translated names, the brightness fields hide for a switch-only selection; then Shelly `turn_on_for` passes against the house; bench record written; Shelly `switch` and on/off `light` -> beta (shared on/off: a relay shown as a light sends the same `Switch.Set`); Shelly light fields and the `Light`/`CCT`/`RGB*` components unclaimed until a tester reports. |
 | 4 | `toggle_for` (Shelly only) + `turn_off_for` rig pass | composite `run()` (HA state decides, one `Switch.Set` with `toggle_after`); state-split tests with fake + Shelly; a non-Shelly target returns `unsupported` from both states; rig tests for `toggle_for` and `turn_off_for`; bench records written, so all three Shelly features reach beta. |
 | 5 | First release (`v0.0.1`) + HACS submission | Detail in `2026-10-23-hacs-early-release.md`. Claims Shelly `switch` and on/off `light` (shared on/off) for `turn_on_for`, `turn_off_for`, `toggle_for`. MIT `LICENSE`; `custom_components/device_side/brand/icon.png` (+ `@2x`); hand-written bench records and README matrix (inside the matrix markers, taken over by `gen_docs.py` later); README install via HACS custom repository; short `CONTRIBUTING.md`; full-history `gitleaks detect` clean; topics added; repo flipped public; `gh workflow enable validate.yml`, nightly schedule restored and private-repo guard removed; PR `release/v0.0.1` -> `main`, `ci-green` on `main` with hassfest + HACS validate green; tag `v0.0.1` and a full (not pre-) GitHub release; PR to `hacs/default` adding `jasonmx/device-side` to `integration`, from a personal fork; issue filed to switch the README install section to a plain HACS search once that PR merges (review takes months); `release/v0.0.2` cut from `main`. **v0.0.1 ships without an RC soak to start the HACS review clock; from v0.0.2 the Releases rules apply in full.** |
 | 6 | Z2M `turn_on_for` | detect, addressing, publish; `light.turn_on` precedes when fields present; group topic when `native_groups`; rig test. |
-| 7 | Hue port | five cells + bridge/transition_cache/colors; `move` across brightness, color_temp, hue, saturation; `grouped_light` native for move/stop, expanded for set/get_attributes; hue_dimmer tests ported to real-hass fixtures; rig parity with hue_dimmer `tests/RELEASE_CHECKLIST.md`. |
+| 7 | Hue port | five adapters + bridge/transition_cache/colors; `move` across brightness, color_temp, hue, saturation; `grouped_light` native for move/stop, expanded for set/get_attributes; hue_dimmer tests ported to real-hass fixtures; rig parity with hue_dimmer `tests/RELEASE_CHECKLIST.md`. |
 | 8 | Docs generator + templates | `gen_docs.py --check` in CI; matrix, README block, feature pages, `platforms.md` sections; `_notes.yaml`; contributing guides. Lands before the first v0.0.2 RC. |
-| 9 | Bench + tiers + tester flow | fingerprinting and computed tiers in `gen_docs.py`, including `onoff_shared`; per-cell coverage check; tag-format check; RC audit gate (`2026-10-23-rc-audit-gate.md`: `cut-rc` workflow, `check_audit.py`, `/rc-audit`); `test-report.yml` issue form; RC-only umbrella Repairs issue with multi-select flow and prefilled per-unit links; bench files filled from rig runs and tester reports. Lands before the first v0.0.2 RC, which is the project's first RC. |
+| 9 | Bench + tiers + tester flow | fingerprinting and computed tiers in `gen_docs.py`, including `onoff_shared`; per-adapter coverage check; tag-format check; RC audit gate (`2026-10-23-rc-audit-gate.md`: `cut-rc` workflow, `check_audit.py`, `/rc-audit`); `test-report.yml` issue form; RC-only umbrella Repairs issue with multi-select flow and prefilled per-unit links; bench files filled from rig runs and tester reports. Lands before the first v0.0.2 RC, which is the project's first RC. |
 | 10 | ZHA `turn_on_for` | after Jason has ZHA running on the rig; addressing; admin context passthrough; ValueError -> rejected; rig test. |
 | 11 | Matter `turn_on_for` | after Jason has Matter running on the rig; LT check; `OnWithTimedOff`; optional read-back; rig test on bulb and plug. |
 | 12 | `v0.1.0` ("v1" names the scope, not the version) | feature complete for this plan; third-party tester reports for the hardware the rig lacks; matrix current; release checklist adapted from hue_dimmer. |
@@ -609,7 +609,7 @@ the first action of that session is slice 0.
 5. Groups: switch groups expose `entity_id` like light groups (`group/switch.py`); how ZHA
    and Z2M group entities are identifiable in the registry (ZHA: `zha_group_0x...` unique_id
    [M]; Z2M: device identifier for the group [M]) and whether Z2M group membership is reachable
-   from HA at all (if not, Z2M `expand_group` is `None` and non-native cells return
+   from HA at all (if not, Z2M `expand_group` is `None` and non-native adapters return
    `group_not_supported`).
 12. Hue `move` beyond brightness: whether `grouped_light` accepts `color_temperature`/`color`
     with `dynamics` (hue_dimmer only moved brightness on groups); whether a dimming dynamic and
@@ -636,6 +636,6 @@ the first action of that session is slice 0.
 - On the rig, with approval (there is no dev HA): first deploy adds the single entry, every
   action appears with translated names, light fields hide for switch-only selections; call
   `turn_on_for` on a mixed selection and inspect the response dict.
-- Rig (with approval): one `turn_on_for` per platform cell, `toggle_for` from both states
+- Rig (with approval): one `turn_on_for` per platform adapter, `toggle_for` from both states
   and `turn_off_for` on Shelly, the Hue port's five actions including a color_temp `move`/`stop` on
   a bulb and a brightness `move` on a `grouped_light`; lights return to snapshot state.

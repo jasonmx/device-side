@@ -1,9 +1,9 @@
 """Platform "fake": a generic platform with native groups whose members it can list."""
 
-from custom_components.device_side.core.capabilities import CellCapabilities, DurationLimits, PlatformInfo
+from custom_components.device_side.core.capabilities import AdapterCapabilities, DurationLimits, PlatformInfo
 from custom_components.device_side.core.resolver import resolve
 
-from ..scripted import ScriptedCell
+from ..scripted import ScriptedAdapter
 
 LIMITS = DurationLimits(min_s=1, max_s=100, resolution_s=0.1)
 
@@ -28,20 +28,20 @@ PLATFORM = PlatformInfo(
 )
 
 
-class FakeTurnOnFor(ScriptedCell):
+class FakeTurnOnFor(ScriptedAdapter):
     feature = "turn_on_for"
     platform = "fake"
-    capabilities = CellCapabilities(
+    capabilities = AdapterCapabilities(
         domains=frozenset({"light", "switch"}),
         duration=LIMITS,
         supports_fields=frozenset({"brightness", "transition"}),
     )
 
 
-class FakeTurnOffFor(ScriptedCell):
+class FakeTurnOffFor(ScriptedAdapter):
     feature = "turn_off_for"
     platform = "fake"
-    capabilities = CellCapabilities(domains=frozenset({"switch"}), duration=LIMITS, native_groups=True)
+    capabilities = AdapterCapabilities(domains=frozenset({"switch"}), duration=LIMITS, native_groups=True)
 
 
-CELLS = [FakeTurnOnFor, FakeTurnOffFor]
+ADAPTERS = [FakeTurnOnFor, FakeTurnOffFor]

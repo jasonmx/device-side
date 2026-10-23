@@ -1,5 +1,5 @@
 # One block per feature: target filters and field selectors only. Names and descriptions live in strings.json.
-# Target filters are a UI convenience; cells enforce support through supports(). Field filters are copied from
+# Target filters are a UI convenience; adapters enforce support through supports(). Field filters are copied from
 # light/services.yaml so the light fields hide when no selected target is a light that can use them. They are
 # written out, not shared through top-level .anchor keys as core does: hassfest rejects those in a custom component.
 

@@ -36,7 +36,7 @@ scripts/rig.py --no-deploy        # test whatever HA already runs
 scripts/rig.py --platform shelly -k switch
 ```
 
-Preflight is read-only. It prints the inventory, one line per cell (`shelly / turn_on_for -> switch.plug
+Preflight is read-only. It prints the inventory, one line per adapter (`shelly / turn_on_for -> switch.plug
 (experimental)`), whether HA's installed tree matches `HEAD`, whether a restart will happen, and an
 estimated duration. Then it asks `Proceed? [y/N]`. `DEVICE_SIDE_RIG_APPROVED=1` answers the gate for a
 caller without a terminal (an agent that already has the human's yes in the conversation).
@@ -64,11 +64,11 @@ The first approved deploy is the integration's first load in any HA. After it, c
 
 ## Writing a rig test
 
-One module per cell, `tests/rig/test_<platform>_<feature>.py`, with two literal constants the runner reads
+One module per adapter, `tests/rig/test_<platform>_<feature>.py`, with two literal constants the runner reads
 without importing the module: `ROLES` (the inventory roles it uses) and `RIG_SECONDS` (its estimated run
 time). Cover one happy path and one `unsupported` path; branches belong in unit tests.
 
-- `require_cell(platform, feature, role)` returns the inventory entity, or skips.
+- `require_adapter(platform, feature, role)` returns the inventory entity, or skips.
 - `snapshot.take(entity_id)` before touching an entity. Teardown restores its state, brightness and color
   temperature or color, and logs rather than fails if a restore doesn't take.
 - `timing(platform)` is the tolerance: Shelly and Hue 2 s, Zigbee and Matter 3 s. Assert windows, not
@@ -78,6 +78,6 @@ time). Cover one happy path and one `unsupported` path; branches belong in unit 
 
 ## Recording a pass
 
-A rig pass that promotes a cell becomes `docs/bench/<platform>/<feature>.md`: date, HA version, device model
-and firmware (from the device page), the cell's fingerprint, and the source (`rig run` or the test-report
+A rig pass that promotes an adapter becomes `docs/bench/<platform>/<feature>.md`: date, HA version, device model
+and firmware (from the device page), the adapter's fingerprint, and the source (`rig run` or the test-report
 issue).

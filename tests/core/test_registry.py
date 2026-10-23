@@ -1,27 +1,27 @@
-"""Registry building: guarded platform import, cell validation, matrix iteration."""
+"""Registry building: guarded platform import, adapter validation, matrix iteration."""
 
 import pytest
 
 from custom_components.device_side import features
-from custom_components.device_side.core.registry import CellRegistry
+from custom_components.device_side.core.registry import AdapterRegistry
 
 from ..conftest import FAKE_PLATFORMS
 
 
 def test_broken_platform_is_recorded_unavailable_and_others_load():
-    registry = CellRegistry(features.discover(), FAKE_PLATFORMS)
+    registry = AdapterRegistry(features.discover(), FAKE_PLATFORMS)
 
     broken = registry.platforms["broken_platform"]
     assert not broken.available
     assert "fakelib" in broken.unavailable_reason
     assert [info.key for info in registry.available_platforms()] == ["fake", "fake_special"]
-    assert registry.cell("turn_on_for", "fake").platform == "fake"
+    assert registry.adapter("turn_on_for", "fake").platform == "fake"
 
 
 def test_matrix_lists_every_pair_sorted():
-    registry = CellRegistry(features.discover(), FAKE_PLATFORMS)
+    registry = AdapterRegistry(features.discover(), FAKE_PLATFORMS)
 
-    assert [(feature, platform, cell is not None) for feature, platform, cell in registry.matrix()] == [
+    assert [(feature, platform, adapter is not None) for feature, platform, adapter in registry.matrix()] == [
         ("turn_off_for", "broken_platform", False),
         ("turn_off_for", "fake", True),
         ("turn_off_for", "fake_special", False),
@@ -31,7 +31,7 @@ def test_matrix_lists_every_pair_sorted():
     ]
 
 
-def test_cell_for_unknown_feature_is_refused():
+def test_adapter_for_unknown_feature_is_refused():
     from types import SimpleNamespace
 
     from ..fakes.fake_platform import PLATFORM, FakeTurnOnFor
@@ -40,12 +40,12 @@ def test_cell_for_unknown_feature_is_refused():
         feature = "no_such_feature"
 
     with pytest.raises(ValueError, match="unknown feature"):
-        CellRegistry(features.discover(), [SimpleNamespace(PLATFORM=PLATFORM, CELLS=[Stray])])
+        AdapterRegistry(features.discover(), [SimpleNamespace(PLATFORM=PLATFORM, ADAPTERS=[Stray])])
 
 
 def test_production_discovery_imports_cleanly():
-    registry = CellRegistry.discover()
+    registry = AdapterRegistry.discover()
     assert set(registry.features) == {"turn_off_for", "turn_on_for"}
     assert registry.platforms["shelly"].available
-    assert registry.cell("turn_on_for", "shelly") is not None
-    assert registry.cell("turn_off_for", "shelly") is not None
+    assert registry.adapter("turn_on_for", "shelly") is not None
+    assert registry.adapter("turn_off_for", "shelly") is not None

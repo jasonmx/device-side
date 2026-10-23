@@ -29,7 +29,7 @@ class Mode(StrEnum):
 
 
 class Tier(StrEnum):
-    """Computed by gen_docs.py from coverage and bench records; never stored on a cell."""
+    """Computed by gen_docs.py from coverage and bench records; never stored on an adapter."""
 
     STABLE = "stable"
     BETA = "beta"
@@ -77,13 +77,13 @@ class Request:
     """Base for a feature's parsed call. Subclasses add their fields."""
 
     def fields_present(self) -> frozenset[str]:
-        """light.turn_on fields this request carries; cells must claim them in supports_fields."""
+        """light.turn_on fields this request carries; adapters must claim them in supports_fields."""
         return frozenset()
 
 
 @dataclass(frozen=True, slots=True)
 class TimedRequest(Request):
-    """A request with a duration the dispatcher clamps to each cell's DurationLimits."""
+    """A request with a duration the dispatcher clamps to each adapter's DurationLimits."""
 
     duration_s: float
 
