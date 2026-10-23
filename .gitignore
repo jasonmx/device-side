@@ -27,3 +27,7 @@ env/
 # Claude Code
 CLAUDE.md
 .claude/
+
+# pytest-cov data
+.coverage
+.coverage.*
