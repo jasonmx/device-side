@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from custom_components.device_side.core.registry import AdapterRegistry
 from custom_components.device_side.features import discover
 
 PACKAGE = Path(__file__).parents[2] / "custom_components" / "device_side"
@@ -35,6 +36,18 @@ def test_icons_match_features():
 
 def test_translation_is_a_copy_of_strings():
     assert _load_json("translations/en.json") == STRINGS
+
+
+@pytest.mark.parametrize("feature", FEATURES, ids=lambda feature: feature.key)
+def test_target_filter_lists_exactly_the_integrations_with_an_adapter(feature):
+    registry = AdapterRegistry.discover()
+    with_adapter = {
+        registry.platforms[platform].ha_integration
+        for key, platform, adapter in registry.matrix()
+        if key == feature.key and adapter is not None
+    }
+    listed = {entry["integration"] for entry in SERVICES_YAML[feature.key]["target"]["entity"]}
+    assert listed == with_adapter
 
 
 @pytest.mark.parametrize("feature", FEATURES, ids=lambda feature: feature.key)
