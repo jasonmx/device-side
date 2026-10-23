@@ -556,9 +556,9 @@ are in-use household lights.** Rig passes are recorded in `docs/bench/<platform>
 | 8 | Matter `turn_on_for` | after Jason has Matter running on the rig; LT check; `OnWithTimedOff`; optional read-back; rig test on bulb and plug. |
 | 9 | Docs generator + templates | `gen_docs.py --check` in CI; matrix, README block, feature pages, `platforms.md` sections; `_notes.yaml`; contributing guides. |
 | 10 | Bench + tiers + tester flow | fingerprinting and computed tiers in `gen_docs.py`; per-cell coverage check; tag-format check; `test-report.yml` issue form; RC-only umbrella Repairs issue with multi-select flow and prefilled per-unit links; bench files filled from rig runs and tester reports. |
-| 11 | v1 tag | manifest version, HACS release, matrix current, release checklist adapted from hue_dimmer; repo flipped public with contributor docs; nightly schedule restored in `validate.yml` and HACS validate green. |
+| 11 | First release tag (`v0.0.1`; "v1" names the scope, not the version) | manifest version, HACS release, matrix current, release checklist adapted from hue_dimmer; repo flipped public with contributor docs; nightly schedule restored in `validate.yml` and HACS validate green. |
 
-Each slice is a commit (or a few) pushed to `release/v1.0.0`, CI green (`ci-green`) before the next slice starts; no per-slice PRs before v1, and the v1 merge to `main` is the only PR. Rule evidence that would have gone in a PR body points at a commit sha or this plan instead. Implementation starts in a **fresh session** per the planning rule;
+Each slice is a commit (or a few) pushed to `release/v0.0.1`, CI green (`ci-green`) before the next slice starts; no per-slice PRs before the first release, and the v0.0.1 merge to `main` is the only PR. Rule evidence that would have gone in a PR body points at a commit sha or this plan instead. Implementation starts in a **fresh session** per the planning rule;
 the first action of that session is slice 0.
 
 ## Open items to verify during implementation (not before)
