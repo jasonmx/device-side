@@ -17,7 +17,7 @@ test. The gate exists so occupants aren't startled by devices switching on and o
    - `ssh ha restart homeassistant` restarts HA.
 
    `ssh ha ds-status` prints the tree hash last installed, so the runner can skip a deploy and its restart.
-   The clone is made once, by hand, with a read-only deploy key (the repo is private).
+   The clone is made once, by hand: `git clone https://github.com/jasonmx/device-side.git /home/pi/device-side`.
 2. **Token.** Create a long-lived token for a **non-admin** HA user (Profile > Security). The rig only calls
    services and reads states; restarts go through the shim, not the API.
 3. **`.env.rig`** at the repo root (gitignored), from `tests/rig/env.example`: `HA_URL`, `HA_TOKEN`, and
