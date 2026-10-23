@@ -33,7 +33,10 @@ tuya 29.5%, esphome 27.3%, tplink 13.8%, zwave_js 8.3%, tasmota 7.6%.)
 - **Inclusion test** (all must hold) for a feature:
   1. Once the command is sent, the behavior completes (or degrades to plain device behavior)
      with HA offline. No HA-side timers, polling or emulation.
-  2. Native on at least two target platforms.
+  2. Native on platforms covering at least 20% of HA installs (the analytics shares above).
+     Overlap between integrations is not published, so count the largest single-platform share
+     as the lower bound. Shelly alone (25.3%) passes; a Hue-only (15.9%) or Z-Wave-only (8.3%)
+     feature does not.
   3. Not already exposed by core *in a user-friendly way*. Primitives that exist but demand
      protocol knowledge (brightness_step 0 = stop, computing per-call transition times) count as
      unexposed.
@@ -54,10 +57,12 @@ tuya 29.5%, esphome 27.3%, tplink 13.8%, zwave_js 8.3%, tasmota 7.6%.)
   hue_dimmer port only; Hue timed turn-on (bridge `behavior_instance`) and its assisted cancel
   hook are deferred.
 - **Features (v1):**
-  - `turn_on_for`, `turn_off_for`, `toggle_for` on Z2M, ZHA, Matter, Shelly. `turn_off_for` is
-    Shelly-only natively (Zigbee/Matter `OnWithTimedOff` is on-then-off only; `off_wait_time` is a
-    re-on guard); other cells return `unsupported`. `toggle_for` reads HA state at call time and
-    dispatches to on_for or off_for (decision in HA, execution on device).
+  - `turn_on_for` on Z2M, ZHA, Matter, Shelly.
+  - `turn_off_for` and `toggle_for` on Shelly only. `turn_off_for` is Shelly-only natively
+    (Zigbee/Matter `OnWithTimedOff` is on-then-off only; `off_wait_time` is a re-on guard).
+    `toggle_for` reads HA state at call time and dispatches to on_for or off_for (decision in HA,
+    execution on device); a toggle that works from one state only is broken, so it is claimed
+    only where both directions are native. Other platforms return `unsupported` for both.
   - `turn_on_for` accepts `light.turn_on` fields (`brightness`, `color_temp_kelvin`, `hs_color`,
     `rgb_color`, `xy_color`, `transition`). Shelly sends one RPC; Zigbee/Matter send a normal
     turn_on then the timed command, and the result records the two-command path. **UI:** the
@@ -387,9 +392,12 @@ class Cell[RequestT](ABC):
   failure (every result unsupported/rejected) raises
   `HomeAssistantError(translation_key="all_targets_failed")` with a per-entity summary; no
   targets raises `ServiceValidationError("no_targets")`.
-- **Composite feature:** `toggle_for.run` partitions targets by `state.state` and calls
-  `run_cells("turn_off_for", ...)` for on, `run_cells("turn_on_for", ...)` for off, `state_unknown`
-  otherwise. No cells of its own; the matrix row is derived (`derived_from`).
+- **Composite feature:** `toggle_for.run` first returns `unsupported` for any target whose
+  platform lacks a cell for either `derived_from` feature, whatever its state, so a toggle never
+  works in one direction only (today that leaves Shelly). It partitions the rest by `state.state`
+  and calls `run_cells("turn_off_for", ...)` for on, `run_cells("turn_on_for", ...)` for off,
+  `state_unknown` otherwise. No cells of its own; the matrix row is derived (`derived_from`) and
+  lists a platform only where both features have cells.
 - **Setting-class features** (future `set_turn_on_defaults`): same `Feature`/`Cell` contract
   with `kind=SETTING`; ZHA/Matter cells locate the sibling `number` entities on `target.device`
   (Matter sets `translation_key="on_level"`; transition time likewise), call `number.set_value`
@@ -555,7 +563,7 @@ are in-use household lights.** Rig passes are recorded in `docs/bench/<platform>
 | 2 | Shelly `turn_on_for` + `turn_off_for` | one RPC with fields; Gen1 -> unsupported; read-back -> confirmed under mock; Shelly section of `docs/platforms.md` on the template; cell `experimental=True`. |
 | 3 | Rig harness | `scripts/rig.py`, `deploy.sh`, `tests/rig/conftest.py`, inventory example, `docs/contributing/rig.md`; **first approved deploy is the integration's first load in any HA**: confirm entry adds, actions appear with translated names, the brightness fields hide for a switch-only selection; then Shelly `turn_on_for` passes against the house; bench record written; Shelly `switch` -> beta (Shelly `light` unclaimed until a tester reports). |
 | 4 | Z2M `turn_on_for` | detect, addressing, publish; `light.turn_on` precedes when fields present; group topic when `native_groups`; rig test. |
-| 5 | `toggle_for` | composite `run()`; state-split tests with fake + Shelly; rig test; derived matrix row. |
+| 5 | `toggle_for` (Shelly only) | composite `run()`; state-split tests with fake + Shelly; a Z2M target returns `unsupported` from both states; rig test; derived matrix row. |
 | 6 | Hue port | five cells + bridge/transition_cache/colors; `move` across brightness, color_temp, hue, saturation; `grouped_light` native for move/stop, expanded for set/get_attributes; hue_dimmer tests ported to real-hass fixtures; rig parity with hue_dimmer `tests/RELEASE_CHECKLIST.md`. |
 | 7 | ZHA `turn_on_for` | after Jason has ZHA running on the rig; addressing; admin context passthrough; ValueError -> rejected; rig test. |
 | 8 | Matter `turn_on_for` | after Jason has Matter running on the rig; LT check; `OnWithTimedOff`; optional read-back; rig test on bulb and plug. |
@@ -608,6 +616,6 @@ the first action of that session is slice 0.
 - On the rig, with approval (there is no dev HA): first deploy adds the single entry, every
   action appears with translated names, light fields hide for switch-only selections; call
   `turn_on_for` on a mixed selection and inspect the response dict.
-- Rig (with approval): one `turn_on_for` per platform cell, `toggle_for` from both states,
-  `turn_off_for` on Shelly, the Hue port's five actions including a color_temp `move`/`stop` on
+- Rig (with approval): one `turn_on_for` per platform cell, `toggle_for` from both states
+  and `turn_off_for` on Shelly, the Hue port's five actions including a color_temp `move`/`stop` on
   a bulb and a brightness `move` on a `grouped_light`; lights return to snapshot state.
