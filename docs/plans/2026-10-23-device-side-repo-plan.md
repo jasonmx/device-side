@@ -58,11 +58,10 @@ tuya 29.5%, esphome 27.3%, tplink 13.8%, zwave_js 8.3%, tasmota 7.6%.)
   hook are deferred.
 - **Features (v1):**
   - `turn_on_for` on Z2M, ZHA, Matter, Shelly.
-  - `turn_off_for` and `toggle_for` on Shelly only. `turn_off_for` is Shelly-only natively
-    (Zigbee/Matter `OnWithTimedOff` is on-then-off only; `off_wait_time` is a re-on guard).
-    `toggle_for` reads HA state at call time and dispatches to on_for or off_for (decision in HA,
-    execution on device); a toggle that works from one state only is broken, so it is claimed
-    only where both directions are native. Other platforms return `unsupported` for both.
+  - `turn_off_for` on Shelly only: it is Shelly-only natively (Zigbee/Matter `OnWithTimedOff` is
+    on-then-off only; `off_wait_time` is a re-on guard). Other platforms return `unsupported`.
+  - `toggle_for` dropped (2026-10-23): no use case. HA's `flash` covers a short toggle, and nobody
+    needs a long one.
   - `turn_on_for` accepts `light.turn_on` fields (`brightness`, `color_temp_kelvin`, `hs_color`,
     `rgb_color`, `xy_color`, `transition`). Shelly sends one RPC; Zigbee/Matter send a normal
     turn_on then the timed command, and the result records the two-command path. **UI:** the
@@ -126,7 +125,7 @@ tuya 29.5%, esphome 27.3%, tplink 13.8%, zwave_js 8.3%, tasmota 7.6%.)
      attributes use (`brightness`, `color_temp`, `attributes`, `scene`); protocol vocabulary
      (`level`, `OnLevel`, `PulseTime`, `toggle_after`) never appears in an action or field name.
   2. Commands (do something now) use HA's command verbs: `turn_on_for`, `turn_off_for`,
-     `toggle_for`, `move`, `stop`, `set_attributes` (write HA light attributes to the device
+     `move`, `stop`, `set_attributes` (write HA light attributes to the device
      without turning it on), `get_attributes`, `set_scene`.
   3. Persistent settings (change how the device behaves from now on) use `set_<behavior>` with
      the trigger named in plain English. The former `set_on_level` becomes
@@ -277,7 +276,7 @@ custom_components/device_side/
     runtime.py           DeviceSideData in hass.data[DOMAIN]: registry, dispatcher, semaphores, platform_state
   features/
     __init__.py          discover() -> features sorted by module name
-    turn_on_for.py  turn_off_for.py  toggle_for.py          (COMMAND)
+    turn_on_for.py  turn_off_for.py                         (COMMAND)
     set_attributes.py  set_scene.py  move.py  stop.py        (COMMAND, Hue port)
     get_attributes.py                                         (QUERY, SupportsResponse.ONLY)
   platforms/
@@ -352,11 +351,10 @@ class Feature[RequestT](ABC):
     key: ClassVar[str]; kind: ClassVar[FeatureKind]; domains: ClassVar[frozenset[str]]
     supports_response: ClassVar[SupportsResponse] = OPTIONAL
     fields: ClassVar[dict[vol.Marker, Any]]            # merged into cv.make_entity_service_schema
-    derived_from: ClassVar[tuple[str, ...]] = ()      # composites (toggle_for) for the docs matrix
     @classmethod def schema(cls) -> vol.Schema
     @classmethod @abstractmethod def parse(cls, hass, call) -> RequestT   # ServiceValidationError on bad input
     @classmethod async def run(cls, hass, request, targets, dispatcher) -> list[EntityResult]:
-        return await dispatcher.run_adapters(cls.key, request, targets)      # composites override
+        return await dispatcher.run_adapters(cls.key, request, targets)      # overridable
 
 # core/adapter.py
 class Adapter[RequestT](ABC):
@@ -395,12 +393,6 @@ class Adapter[RequestT](ABC):
   failure (every result unsupported/rejected) raises
   `HomeAssistantError(translation_key="all_targets_failed")` with a per-entity summary; no
   targets raises `ServiceValidationError("no_targets")`.
-- **Composite feature:** `toggle_for.run` first returns `unsupported` for any target whose
-  platform lacks an adapter for either `derived_from` feature, whatever its state, so a toggle never
-  works in one direction only (today that leaves Shelly). It partitions the rest by `state.state`
-  and calls `run_adapters("turn_off_for", ...)` for on, `run_adapters("turn_on_for", ...)` for off,
-  `state_unknown` otherwise. No adapters of its own; the matrix row is derived (`derived_from`) and
-  lists a platform only where both features have adapters.
 - **Setting-class features** (future `set_turn_on_defaults`): same `Feature`/`Adapter` contract
   with `kind=SETTING`; ZHA/Matter adapters locate the sibling `number` entities on `target.device`
   (Matter sets `translation_key="on_level"`; transition time likewise), call `number.set_value`
@@ -574,8 +566,8 @@ are in-use household lights.** Rig passes are recorded in `docs/bench/<platform>
 | 1 | Core + fake platform | `core/*`; `features/turn_on_for.py`, `turn_off_for.py`; fake platform (with a fake native group and `expand_group` hook); dispatcher/resolver/groups tests green (HA-group expansion for light and switch, native-group pass-through vs expansion, clamp, total-failure raise, response shape, semaphore bound, guarded-import skip). No live load yet: there is no dev HA. |
 | 2 | Shelly `turn_on_for` + `turn_off_for` | one RPC with fields; Gen1 -> unsupported; read-back -> confirmed under mock; Shelly section of `docs/platforms.md` on the template; adapter `experimental=True`. |
 | 3 | Rig harness | `scripts/rig.py`, `deploy.sh`, `tests/rig/conftest.py`, inventory example, `docs/contributing/rig.md`; **first approved deploy is the integration's first load in any HA**: confirm entry adds, actions appear with translated names, the brightness fields hide for a switch-only selection; then Shelly `turn_on_for` passes against the house; bench record written; Shelly `switch` and on/off `light` -> beta (shared on/off: a relay shown as a light sends the same `Switch.Set`); Shelly light fields and the `Light`/`CCT`/`RGB*` components unclaimed until a tester reports. |
-| 4 | `toggle_for` (Shelly only) + `turn_off_for` rig pass | composite `run()` (HA state decides, one `Switch.Set` with `toggle_after`); state-split tests with fake + Shelly; a non-Shelly target returns `unsupported` from both states; rig tests for `toggle_for` and `turn_off_for`; bench records written, so all three Shelly features reach beta. |
-| 5 | First release (`v0.0.1`) + HACS submission | Detail in `2026-10-23-hacs-early-release.md`. Claims Shelly `switch` and on/off `light` (shared on/off) for `turn_on_for`, `turn_off_for`, `toggle_for`. MIT `LICENSE`; `custom_components/device_side/brand/icon.png` (+ `@2x`); hand-written bench records and README matrix (inside the matrix markers, taken over by `gen_docs.py` later); README install via HACS custom repository; short `CONTRIBUTING.md`; full-history `gitleaks detect` clean; topics added; repo flipped public; `gh workflow enable validate.yml`, nightly schedule restored and private-repo guard removed; PR `release/v0.0.1` -> `main`, `ci-green` on `main` with hassfest + HACS validate green; tag `v0.0.1` and a full (not pre-) GitHub release; PR to `hacs/default` adding `jasonmx/device-side` to `integration`, from a personal fork; issue filed to switch the README install section to a plain HACS search once that PR merges (review takes months); `release/v0.0.2` cut from `main`. **v0.0.1 ships without an RC soak to start the HACS review clock; from v0.0.2 the Releases rules apply in full.** |
+| 4 | `turn_off_for` rig pass | rig test for `turn_off_for`; bench records written, so both Shelly features reach beta. (`toggle_for` was dropped.) |
+| 5 | First release (`v0.0.1`) + HACS submission | Detail in `2026-10-23-hacs-early-release.md`. Claims Shelly `switch` and on/off `light` (shared on/off) for `turn_on_for` and `turn_off_for`. MIT `LICENSE`; `custom_components/device_side/brand/icon.png` (+ `@2x`); hand-written bench records and README matrix (inside the matrix markers, taken over by `gen_docs.py` later); README install via HACS custom repository; short `CONTRIBUTING.md`; full-history `gitleaks detect` clean; topics added; repo flipped public; `gh workflow enable validate.yml`, nightly schedule restored and private-repo guard removed; PR `release/v0.0.1` -> `main`, `ci-green` on `main` with hassfest + HACS validate green; tag `v0.0.1` and a full (not pre-) GitHub release; PR to `hacs/default` adding `jasonmx/device-side` to `integration`, from a personal fork; issue filed to switch the README install section to a plain HACS search once that PR merges (review takes months); `release/v0.0.2` cut from `main`. **v0.0.1 ships without an RC soak to start the HACS review clock; from v0.0.2 the Releases rules apply in full.** |
 | 6 | Z2M `turn_on_for` | detect, addressing, publish; `light.turn_on` precedes when fields present; group topic when `native_groups`; rig test. |
 | 7 | Hue port | five adapters + bridge/transition_cache/colors; `move` across brightness, color_temp, hue, saturation; `grouped_light` native for move/stop, expanded for set/get_attributes; hue_dimmer tests ported to real-hass fixtures; rig parity with hue_dimmer `tests/RELEASE_CHECKLIST.md`. |
 | 8 | Docs generator + templates | `gen_docs.py --check` in CI; matrix, README block, feature pages, `platforms.md` sections; `_notes.yaml`; contributing guides. Lands before the first v0.0.2 RC. |
@@ -636,6 +628,6 @@ the first action of that session is slice 0.
 - On the rig, with approval (there is no dev HA): first deploy adds the single entry, every
   action appears with translated names, light fields hide for switch-only selections; call
   `turn_on_for` on a mixed selection and inspect the response dict.
-- Rig (with approval): one `turn_on_for` per platform adapter, `toggle_for` from both states
-  and `turn_off_for` on Shelly, the Hue port's five actions including a color_temp `move`/`stop` on
+- Rig (with approval): one `turn_on_for` per platform adapter,
+  `turn_off_for` on Shelly, the Hue port's five actions including a color_temp `move`/`stop` on
   a bulb and a brightness `move` on a `grouped_light`; lights return to snapshot state.

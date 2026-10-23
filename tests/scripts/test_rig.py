@@ -99,8 +99,8 @@ def test_gate_env_approval_skips_the_prompt(monkeypatch):
 
 
 def test_rig_modules_name_a_missing_constant(tmp_path):
-    write(tmp_path, "test_shelly_toggle_for.py", "ROLES = ['switch_plug']\n")
-    with pytest.raises(ValueError, match=r"test_shelly_toggle_for.py: .*RIG_SECONDS"):
+    write(tmp_path, "test_shelly_turn_off_for.py", "ROLES = ['switch_plug']\n")
+    with pytest.raises(ValueError, match=r"test_shelly_turn_off_for.py: .*RIG_SECONDS"):
         rig_modules(tmp_path)
 
 
