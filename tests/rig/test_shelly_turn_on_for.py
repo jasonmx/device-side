@@ -1,7 +1,7 @@
 """Shelly turn_on_for against the house: the device's own toggle_after turns it back off.
 
-A relay sends the same Switch.Set whether HA shows it as a switch or a light, so the happy path runs on
-whichever the inventory has; a pass on either proves on/off for both.
+A relay sends the same Switch.Set whether HA shows it as a switch, a light, or a switch_as_x light over the
+switch, so the happy path runs on whichever the inventory has; a pass on any proves on/off for all.
 """
 
 import asyncio
@@ -10,7 +10,7 @@ import pytest
 
 from .client import HAClient, HAError
 
-ROLES = ["switch_plug", "light_onoff"]
+ROLES = ["switch_plug", "light_onoff", "light_wrapped"]
 RIG_SECONDS = 25
 
 DURATION_S = 6
@@ -45,8 +45,9 @@ async def test_on_then_off_after_duration(ha: HAClient, snapshot, require_adapte
     await ha.wait_for(entity_id, is_off, 2 * tolerance)
 
 
-async def test_unclaimed_brightness_on_a_light_raises(ha: HAClient, snapshot, require_adapter):
-    entity_id = require_adapter("shelly", "turn_on_for", "light_onoff")
+@pytest.mark.parametrize("role", ["light_onoff", "light_wrapped"])
+async def test_unclaimed_brightness_on_a_light_raises(ha: HAClient, snapshot, require_adapter, role):
+    entity_id = require_adapter("shelly", "turn_on_for", role)
     before = await snapshot.take(entity_id)
 
     with pytest.raises(HAError) as err:
@@ -58,4 +59,5 @@ async def test_unclaimed_brightness_on_a_light_raises(ha: HAClient, snapshot, re
         )
 
     assert err.value.translation_key == "all_targets_failed", err.value
+    assert err.value.translation_placeholders["summary"] == f"{entity_id}: fields_not_supported", err.value
     assert (await ha.get_state(entity_id))["state"] == before["state"]

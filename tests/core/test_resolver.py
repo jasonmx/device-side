@@ -8,7 +8,7 @@ from custom_components.device_side.core.registry import AdapterRegistry
 from custom_components.device_side.core.resolver import resolve
 
 from ..conftest import FAKE_PLATFORMS
-from ..fixtures.fake import add_fake_entity, add_fake_native_group, fake_config_entry
+from ..fixtures.fake import add_fake_entity, add_fake_native_group, add_switch_as_x, fake_config_entry
 
 REGISTRY = AdapterRegistry(features.discover(), FAKE_PLATFORMS)
 
@@ -50,3 +50,35 @@ async def test_unresolved_reasons(hass):
     entry = fake_config_entry(hass, ConfigEntryState.SETUP_ERROR)
     add_fake_entity(hass, entry, "light.broken")
     assert resolve(hass, REGISTRY, "light.broken") == "integration_not_loaded"
+
+
+async def test_wrapper_resolves_to_the_wrapped_switch(hass):
+    entry = fake_config_entry(hass)
+    add_fake_entity(hass, entry, "switch.relay", "on")
+    add_switch_as_x(hass, "light.relay", "switch.relay")
+
+    target = resolve(hass, REGISTRY, "light.relay", via_group="light.room")
+
+    assert (target.entity_id, target.domain, target.platform) == ("switch.relay", "switch", "fake")
+    assert target.state.state == "on"
+    assert target.via_wrapper == "light.relay"
+    assert target.reported_id == "light.relay"
+    assert target.via_group == "light.room"
+
+
+async def test_unresolved_wrapper_reasons(hass):
+    entry = fake_config_entry(hass)
+    add_fake_entity(hass, entry, "switch.relay")
+
+    add_switch_as_x(hass, "light.inverted", "switch.relay", invert=True)
+    assert resolve(hass, REGISTRY, "light.inverted") == "inverted_wrapper"
+
+    add_switch_as_x(hass, "light.outer", "light.inner")
+    add_switch_as_x(hass, "light.inner", "switch.relay")
+    assert resolve(hass, REGISTRY, "light.outer") == "not_addressable"
+
+    add_switch_as_x(hass, "light.no_options", None)
+    assert resolve(hass, REGISTRY, "light.no_options") == "not_in_registry"
+
+    add_switch_as_x(hass, "light.dangling", "switch.ghost")
+    assert resolve(hass, REGISTRY, "light.dangling") == "not_in_registry"

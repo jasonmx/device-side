@@ -15,6 +15,10 @@ offline.
 Zigbee2MQTT, ZHA, Matter, Shelly Gen2+ and Philips Hue (bridge v2). What each feature does on
 each platform, and how mature that support is, is listed in the matrix below.
 
+A switch shown as a light with the "Change device type of a switch" helper (`switch_as_x`) is
+served as the switch it wraps, and results are reported under the light's name. Inverted wrappers
+are not supported.
+
 ## Support matrix
 
 <!-- matrix:start -->
