@@ -57,7 +57,7 @@ def test_load_env_reads_file_and_defaults_ssh(tmp_path, monkeypatch):
 def test_rig_modules_read_constants_without_importing():
     shelly = next(module for module in rig_modules() if module.path.name == "test_shelly_turn_on_for.py")
     assert (shelly.platform, shelly.feature) == ("shelly", "turn_on_for")
-    assert shelly.roles == ("switch_plug", "light_dimmable")
+    assert shelly.roles == ("switch_plug", "light_onoff")
     assert shelly.seconds > 0
 
 
