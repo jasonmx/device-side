@@ -1,14 +1,25 @@
 """Shelly turn_on_for: one <Component>.Set with toggle_after, GetStatus read-back."""
 
+import dataclasses
 from unittest.mock import call as rpc_call
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 
+from custom_components.device_side.platforms.shelly.turn_on_for import ShellyTurnOnFor
+
 from ...conftest import call
 from ...fixtures.shelly import add_shelly_entity, shelly_device
 
 CONFIRMED = {"status": "confirmed", "mode": "native", "platform": "shelly"}
+
+
+@pytest.fixture
+def claim_light_fields(monkeypatch):
+    """The light fields as a tester's report would re-claim them; until then the core refuses them first."""
+    fields = frozenset({"brightness", "transition", "color_temp_kelvin", "rgb_color"})
+    claimed = dataclasses.replace(ShellyTurnOnFor.capabilities, supports_fields=fields)
+    monkeypatch.setattr(ShellyTurnOnFor, "capabilities", claimed)
 
 
 async def test_switch_one_set_then_read_back(hass, setup_production):
@@ -24,7 +35,7 @@ async def test_switch_one_set_then_read_back(hass, setup_production):
     ]
 
 
-async def test_light_fields_ride_in_the_same_set(hass, setup_production):
+async def test_light_fields_ride_in_the_same_set(hass, setup_production, claim_light_fields):
     entry, call_rpc = shelly_device(hass)
     add_shelly_entity(hass, entry, "light.desk", "light:0")
 
@@ -47,7 +58,9 @@ async def test_light_fields_ride_in_the_same_set(hass, setup_production):
         ({"rgb_color": [255, 0, 10]}, {"rgb": [255, 0, 10], "mode": "rgb"}),
     ],
 )
-async def test_rgbcct_sets_mode_and_clamps_kelvin_to_the_entity_range(hass, setup_production, data, expected):
+async def test_rgbcct_sets_mode_and_clamps_kelvin_to_the_entity_range(
+    hass, setup_production, claim_light_fields, data, expected
+):
     entry, call_rpc = shelly_device(hass)
     kelvin_range = {"min_color_temp_kelvin": 2700, "max_color_temp_kelvin": 6500}
     add_shelly_entity(hass, entry, "light.strip", "rgbcct:0", attributes=kelvin_range)
@@ -76,7 +89,9 @@ async def test_switch_ignores_light_fields(hass, setup_production):
         ("light.rgb", "rgb:0", {"hs_color": [30, 50]}),  # not claimed on any component
     ],
 )
-async def test_fields_the_component_cannot_take_are_refused(hass, setup_production, entity_id, key, data):
+async def test_fields_the_component_cannot_take_are_refused(
+    hass, setup_production, claim_light_fields, entity_id, key, data
+):
     entry, call_rpc = shelly_device(hass)
     add_shelly_entity(hass, entry, entity_id, key)
     add_shelly_entity(hass, entry, "switch.porch", "switch:1")
@@ -90,6 +105,20 @@ async def test_fields_the_component_cannot_take_are_refused(hass, setup_producti
         "detail": "fields_not_supported",
     }
     assert [args.args[0] for args in call_rpc.await_args_list] == ["Switch.Set", "Switch.GetStatus"]
+
+
+async def test_unclaimed_light_fields_are_refused_but_on_off_lights_run(hass, setup_production):
+    entry, call_rpc = shelly_device(hass)
+    add_shelly_entity(hass, entry, "light.dimmer", "light:0")
+    add_shelly_entity(hass, entry, "light.relay", "switch:0")
+
+    with pytest.raises(HomeAssistantError, match="light.relay: fields_not_supported"):
+        await call(hass, "turn_on_for", {"entity_id": "light.relay", "duration": 5, "brightness": 10})
+    response = await call(hass, "turn_on_for", {"entity_id": ["light.dimmer", "light.relay"], "duration": 5})
+
+    assert response["light.relay"] == response["light.dimmer"] == CONFIRMED
+    assert rpc_call("Light.Set", {"id": 0, "on": True, "toggle_after": 5.0}) in call_rpc.await_args_list
+    assert rpc_call("Switch.Set", {"id": 0, "on": True, "toggle_after": 5.0}) in call_rpc.await_args_list
 
 
 async def test_gen1_and_non_timer_entities_are_unsupported(hass, setup_production):
