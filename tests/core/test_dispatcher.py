@@ -9,7 +9,7 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from custom_components.device_side.core.models import Status, TimedRequest
 
 from ..conftest import call
-from ..fixtures.fake import add_fake_entity, add_fake_native_group, add_ha_group, fake_config_entry
+from ..fixtures.fake import add_fake_entity, add_fake_native_group, add_ha_group, add_switch_as_x, fake_config_entry
 
 pytestmark = pytest.mark.usefixtures("setup_integration")
 
@@ -155,6 +155,36 @@ async def test_unsupported_reasons_from_adapters(hass, fake):
     off = await call(hass, "turn_off_for", {"entity_id": ["light.a", "light.lamp", "switch.s"], "duration": 5})
     assert off["light.a"]["detail"] == "domain_not_supported"  # the fake adapter claims switches only
     assert off["light.lamp"]["detail"] == "no_adapter"
+
+
+async def test_wrapper_reports_under_the_light_and_refuses_light_fields(hass, fake, reset_script):
+    add_fake_entity(hass, fake, "switch.relay")
+    add_switch_as_x(hass, "light.relay", "switch.relay")
+    reset_script.outcomes["switch.relay"] = Status.CONFIRMED
+
+    response = await call(hass, "turn_on_for", {"entity_id": "light.relay", "duration": 5})
+
+    assert response == {"light.relay": {"status": "confirmed", "mode": "native", "platform": "fake"}}
+    assert reset_script.calls[0][3] == ["switch.relay"]
+
+    reset_script.calls.clear()
+    with pytest.raises(HomeAssistantError) as err:
+        await call(hass, "turn_on_for", {"entity_id": "light.relay", "duration": 5, "brightness": 128})
+    assert err.value.translation_placeholders["summary"] == "light.relay: fields_not_supported"
+    assert reset_script.calls == []
+
+
+async def test_wrapper_and_its_switch_each_get_a_result(hass, fake, reset_script):
+    add_fake_entity(hass, fake, "switch.relay")
+    add_switch_as_x(hass, "light.relay", "switch.relay")
+
+    response = await call(hass, "turn_on_for", {"entity_id": ["light.relay", "switch.relay"], "duration": 5})
+
+    assert response == {
+        "light.relay": {"status": "sent", "mode": "native", "platform": "fake"},
+        "switch.relay": {"status": "sent", "mode": "native", "platform": "fake"},
+    }
+    assert reset_script.calls[0][3] == ["switch.relay", "switch.relay"]  # the same Set twice: idempotent
 
 
 async def test_domain_outside_the_feature_is_unsupported(hass, fake):

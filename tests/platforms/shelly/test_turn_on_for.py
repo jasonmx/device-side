@@ -9,6 +9,7 @@ from homeassistant.exceptions import HomeAssistantError
 from custom_components.device_side.platforms.shelly.turn_on_for import ShellyTurnOnFor
 
 from ...conftest import call
+from ...fixtures.fake import add_switch_as_x
 from ...fixtures.shelly import add_shelly_entity, shelly_device
 
 CONFIRMED = {"status": "confirmed", "mode": "native", "platform": "shelly"}
@@ -77,6 +78,17 @@ async def test_switch_ignores_light_fields(hass, setup_production):
     response = await call(hass, "turn_on_for", {"entity_id": "switch.porch", "duration": 5, "brightness": 10})
 
     assert response == {"switch.porch": {**CONFIRMED, "detail": "light_fields_ignored"}}
+    assert call_rpc.await_args_list[0] == rpc_call("Switch.Set", {"id": 0, "on": True, "toggle_after": 5.0})
+
+
+async def test_switch_as_x_light_sends_the_switch_call(hass, setup_production):
+    entry, call_rpc = shelly_device(hass)
+    add_shelly_entity(hass, entry, "switch.porch", "switch:0")
+    add_switch_as_x(hass, "light.porch", "switch.porch")
+
+    response = await call(hass, "turn_on_for", {"entity_id": "light.porch", "duration": 5})
+
+    assert response == {"light.porch": CONFIRMED}
     assert call_rpc.await_args_list[0] == rpc_call("Switch.Set", {"id": 0, "on": True, "toggle_after": 5.0})
 
 
