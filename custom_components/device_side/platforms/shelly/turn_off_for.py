@@ -19,10 +19,13 @@ class ShellyTurnOffFor(Cell[TimedRequest]):
         domains=frozenset({"light", "switch"}),
         duration=TIMER_LIMITS,
         confirmable=True,
+        # A relay shown as a light sends the same Switch.Set; Light, CCT and RGB* wait for a tester's report.
+        components=frozenset({"Switch"}),
     )
 
     def supports(self, hass: HomeAssistant, request: TimedRequest, target: Target) -> str | None:
-        return super().supports(hass, request, target) or unsupported_reason(target)
+        components = self.capabilities.components
+        return super().supports(hass, request, target) or unsupported_reason(target, components=components)
 
     async def execute(self, hass: HomeAssistant, request: TimedRequest, targets: list[Target]) -> list[EntityResult]:
         async def send(target: Target) -> EntityResult:

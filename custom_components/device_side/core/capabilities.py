@@ -24,6 +24,9 @@ class CellCapabilities:
     domains: frozenset[str] = frozenset({"light"})
     duration: DurationLimits | None = None
     supports_fields: frozenset[str] = frozenset()
+    # Device-side backings the cell has proven (Shelly: RPC component names); None claims all it can address.
+    # Proof covers only the backing the call reaches, so a sibling's untested backing is left out here.
+    components: frozenset[str] | None = None
     confirmable: bool = False
     native_groups: bool = False
     max_concurrency: int = 4
