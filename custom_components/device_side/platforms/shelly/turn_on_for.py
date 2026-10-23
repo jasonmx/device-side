@@ -21,11 +21,15 @@ class ShellyTurnOnFor(Cell[TurnOnForRequest]):
         duration=TIMER_LIMITS,
         # Light fields stay unclaimed until a tester with a Shelly dimmer or RGB light reports.
         supports_fields=frozenset(),
+        # A relay shown as a light sends the same Switch.Set; Light, CCT and RGB* wait for a tester's report.
+        components=frozenset({"Switch"}),
         confirmable=True,
     )
 
     def supports(self, hass: HomeAssistant, request: TurnOnForRequest, target: Target) -> str | None:
-        return super().supports(hass, request, target) or unsupported_reason(target, request.fields_present())
+        return super().supports(hass, request, target) or unsupported_reason(
+            target, request.fields_present(), self.capabilities.components
+        )
 
     async def execute(
         self, hass: HomeAssistant, request: TurnOnForRequest, targets: list[Target]

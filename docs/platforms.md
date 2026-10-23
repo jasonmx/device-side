@@ -21,14 +21,14 @@ An entity belongs to this platform when its registry platform is `shelly`. The R
 instance come from the entity's unique ID, which the Shelly integration writes as
 `<mac>-<key>`:
 
-| Key | RPC component | Entity domains | `light.turn_on` fields accepted |
-|---|---|---|---|
-| `switch:N` | `Switch` | `switch`, or `light` for a relay set to "light" | none |
-| `light:N` | `Light` | `light` | `brightness`, `transition` |
-| `cct:N` | `CCT` | `light` | `brightness`, `transition`, `color_temp_kelvin` |
-| `rgb:N` | `RGB` | `light` | `brightness`, `transition`, `rgb_color` |
-| `rgbw:N` | `RGBW` | `light` | `brightness`, `transition`, `rgb_color` |
-| `rgbcct:N` | `RGBCCT` | `light` | `brightness`, `transition`, `color_temp_kelvin`, `rgb_color` |
+| Key | RPC component | Entity domains | Claimed | `light.turn_on` fields it can take |
+|---|---|---|---|---|
+| `switch:N` | `Switch` | `switch`, or `light` for a relay set to "light" | yes | none |
+| `light:N` | `Light` | `light` | not yet | `brightness`, `transition` |
+| `cct:N` | `CCT` | `light` | not yet | `brightness`, `transition`, `color_temp_kelvin` |
+| `rgb:N` | `RGB` | `light` | not yet | `brightness`, `transition`, `rgb_color` |
+| `rgbw:N` | `RGBW` | `light` | not yet | `brightness`, `transition`, `rgb_color` |
+| `rgbcct:N` | `RGBCCT` | `light` | not yet | `brightness`, `transition`, `color_temp_kelvin`, `rgb_color` |
 
 Any other Shelly entity (virtual booleans, scripts, circuit breakers) has no flip-back timer and
 returns `unsupported` with detail `not_addressable`. Shelly has no device-side groups, so a light
@@ -48,8 +48,9 @@ reports a running timer (`timer_duration`), the result is `confirmed`. Otherwise
 detail `timer_not_reported` (the device answered without a timer) or `readback_failed` (the
 read-back call itself failed). Either way the `Set` was accepted.
 
-A field the component cannot take (`color_temp_kelvin` on a plain dimmer, any field on a relay
-shown as a light, `hs_color` or `xy_color` anywhere) returns `unsupported` with detail
+Only relays are claimed so far, whether HA shows them as a switch or a light. A dimmer, CCT or RGB
+light returns `unsupported` with detail `component_not_supported` until someone tests one. A light
+field (brightness, color, transition) on a light returns `unsupported` with detail
 `fields_not_supported` rather than being dropped silently. Fields sent to a `switch` entity are
 ignored and the result says so with detail `light_fields_ignored`.
 
@@ -69,8 +70,9 @@ duration. Light fields are not accepted.
   flip-back timer, according to the device's own rules.
 - **Colors other than RGB.** `hs_color` and `xy_color` are refused rather than converted, because
   the conversion depends on the component's color mode. Send `rgb_color` or `color_temp_kelvin`.
-- **Color components are untested.** `CCT`, `RGB`, `RGBW` and `RGBCCT` document `toggle_after`
-  the same way as `Light`, but no hardware run has covered them yet.
+- **Only relays are claimed.** `Light`, `CCT`, `RGB`, `RGBW` and `RGBCCT` document `toggle_after`
+  the same way as `Switch`, but they are different firmware and no hardware run has covered them,
+  so they are refused until a tester reports one.
 
 <!-- generated:shelly:start -->
 _Generated from the code by `scripts/gen_docs.py` (slice 8)._
