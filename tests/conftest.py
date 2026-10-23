@@ -40,6 +40,16 @@ async def setup_integration(hass: HomeAssistant, fake_registry) -> MockConfigEnt
     return entry
 
 
+@pytest.fixture
+async def setup_production(hass: HomeAssistant) -> MockConfigEntry:
+    """The integration over the real discovered platforms, for platform cell tests."""
+    entry = MockConfigEntry(domain=DOMAIN)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    return entry
+
+
 async def call(hass: HomeAssistant, service: str, data: dict, return_response: bool = True):
     return await hass.services.async_call(
         DOMAIN, service, data, blocking=True, return_response=return_response

@@ -46,3 +46,6 @@ def test_cell_for_unknown_feature_is_refused():
 def test_production_discovery_imports_cleanly():
     registry = CellRegistry.discover()
     assert set(registry.features) == {"turn_off_for", "turn_on_for"}
+    assert registry.platforms["shelly"].available
+    assert registry.cell("turn_on_for", "shelly") is not None
+    assert registry.cell("turn_off_for", "shelly") is not None
