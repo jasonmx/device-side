@@ -1,3 +1,10 @@
 {
-  "services": {}
+  "services": {
+    "turn_off_for": {
+      "service": "mdi:timer-off-outline"
+    },
+    "turn_on_for": {
+      "service": "mdi:timer-outline"
+    }
+  }
 }
