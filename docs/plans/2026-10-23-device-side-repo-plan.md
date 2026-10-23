@@ -229,6 +229,10 @@ Load-bearing facts read from HA core 2026.2.1 (hue_dimmer venv) during planning:
   `components/matter/`. `get_matter(hass)` reads `hass.data[matter.DOMAIN]` (one entry).
   `ShellyEntryData.rpc` on `entry.runtime_data` (`shelly/coordinator.py`). `HueBridge` is
   `entry.runtime_data`; `bridge.api` is `HueBridgeV2`.
+- Re-read against 2026.10.2 in slice 1: validators are `probatio` (voluptuous fork), so schemas import
+  `probatio` and reuse `light.const.LIGHT_TURN_ON_SCHEMA` entries verbatim (`brightness` is 0-255 as in
+  `light.turn_on`); `async_extract_entity_ids(call, expand_group)` is a coroutine; `helpers/group.py` gained a
+  group-entity registry (`GenericGroup`) that no component uses yet, so group helpers still need our expansion.
 
 ### Directory layout
 
@@ -331,6 +335,7 @@ class EntityResult: entity_id, status, platform, mode, clamped_to, detail, data
     max_concurrency: int = 4; notes: tuple[str, ...] = (); bench: str | None = None
 @dataclass class PlatformInfo:
     key, title, ha_integration, detect: Callable[[hass, entry, device], bool] | None
+    is_group: Callable[[hass, Target], bool] | None             # flags a native group (resolver sets Target.is_group)
     expand_group: Callable[[hass, Target], list[Target]] | None   # native-group members; None = cannot
     max_concurrency: int; available: bool = True; unavailable_reason: str | None
 
@@ -348,10 +353,10 @@ class Feature[RequestT](ABC):
 # core/cell.py
 class Cell[RequestT](ABC):
     feature: ClassVar[str]; platform: ClassVar[str]; capabilities: ClassVar[CellCapabilities]
-    def supports(self, hass, target) -> str | None          # None = ok, else reason key; sync, cheap
+    def supports(self, hass, request, target) -> str | None  # None = ok, else reason key; sync, cheap; request so unclaimed fields refuse
     @abstractmethod async def execute(self, hass, request, targets) -> list[EntityResult]
     def result(self, target, status, **kw) -> EntityResult  # stamps platform/mode
-    async def gather(self, hass, coros) -> list[EntityResult]  # platform + per-cell semaphores; exc -> REJECTED
+    async def gather(self, hass, targets, send) -> list[EntityResult]  # platform + per-cell semaphores; exc -> that target REJECTED
 ```
 
 - **Registry:** `pkgutil.iter_modules` over `platforms/` and `features/`; each package exports

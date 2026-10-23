@@ -1,0 +1,47 @@
+from collections.abc import Callable
+from dataclasses import dataclass
+
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
+
+from .models import Mode, Target
+
+
+@dataclass(frozen=True, slots=True)
+class DurationLimits:
+    min_s: float
+    max_s: float
+    resolution_s: float
+
+
+@dataclass(frozen=True, slots=True)
+class CellCapabilities:
+    """What a cell claims. A class nobody has tested is left out of domains/supports_fields, not gated at runtime."""
+
+    experimental: bool = False
+    mode: Mode = Mode.NATIVE
+    domains: frozenset[str] = frozenset({"light"})
+    duration: DurationLimits | None = None
+    supports_fields: frozenset[str] = frozenset()
+    confirmable: bool = False
+    native_groups: bool = False
+    max_concurrency: int = 4
+    notes: tuple[str, ...] = ()
+    bench: str | None = None
+
+
+@dataclass(slots=True)
+class PlatformInfo:
+    key: str
+    title: str
+    ha_integration: str
+    # Picks this platform over a generic sibling on the same ha_integration (Z2M over plain mqtt).
+    detect: Callable[[HomeAssistant, er.RegistryEntry, dr.DeviceEntry | None], bool] | None = None
+    # True for an integration-native group (Hue grouped_light, a Z2M or ZHA group entity).
+    is_group: Callable[[HomeAssistant, Target], bool] | None = None
+    # Members of a native group, for cells without native_groups; None means membership is unknowable here.
+    expand_group: Callable[[HomeAssistant, Target], list[Target]] | None = None
+    max_concurrency: int = 4
+    available: bool = True
+    unavailable_reason: str | None = None

@@ -1,2 +1,99 @@
 # One block per feature: target filters and field selectors only. Names and descriptions live in strings.json.
-{}
+# Target filters are a UI convenience; cells enforce support through supports(). Field filters are copied from
+# light/services.yaml so the light fields hide when no selected target is a light that can use them.
+
+.brightness_support: &brightness_support
+  attribute:
+    supported_color_modes:
+      - light.ColorMode.BRIGHTNESS
+      - light.ColorMode.COLOR_TEMP
+      - light.ColorMode.HS
+      - light.ColorMode.XY
+      - light.ColorMode.RGB
+      - light.ColorMode.RGBW
+      - light.ColorMode.RGBWW
+
+.color_support: &color_support
+  attribute:
+    supported_color_modes:
+      - light.ColorMode.HS
+      - light.ColorMode.XY
+      - light.ColorMode.RGB
+      - light.ColorMode.RGBW
+      - light.ColorMode.RGBWW
+
+.color_temp_support: &color_temp_support
+  attribute:
+    supported_color_modes:
+      - light.ColorMode.COLOR_TEMP
+      - light.ColorMode.HS
+      - light.ColorMode.XY
+      - light.ColorMode.RGB
+      - light.ColorMode.RGBW
+      - light.ColorMode.RGBWW
+
+.duration: &duration
+  required: true
+  example: "00:05:00"
+  selector:
+    duration:
+      enable_millisecond: true
+
+turn_on_for:
+  target:
+    entity:
+      - domain: [light, switch]
+        integration: mqtt
+      - domain: [light, switch]
+        integration: zha
+      - domain: [light, switch]
+        integration: matter
+      - domain: [light, switch]
+        integration: shelly
+  fields:
+    duration: *duration
+    brightness:
+      filter: *brightness_support
+      selector:
+        number:
+          min: 1
+          max: 255
+    color_temp_kelvin:
+      filter: *color_temp_support
+      selector:
+        color_temp:
+          unit: "kelvin"
+          min: 2000
+          max: 6500
+    rgb_color:
+      filter: *color_support
+      example: "[255, 100, 100]"
+      selector:
+        color_rgb:
+    hs_color:
+      filter: *color_support
+      example: "[300, 70]"
+      selector:
+        object:
+    xy_color:
+      filter: *color_support
+      example: "[0.52, 0.43]"
+      selector:
+        object:
+    transition:
+      filter:
+        supported_features:
+          - light.LightEntityFeature.TRANSITION
+      selector:
+        number:
+          min: 0
+          max: 300
+          unit_of_measurement: seconds
+
+turn_off_for:
+  target:
+    entity:
+      - domain: [light, switch]
+        integration: shelly
+  fields:
+    duration: *duration

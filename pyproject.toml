@@ -4,6 +4,7 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 120
+target-version = "py314"
 
 lint.select = [
     "E",  # pycodestyle errors (settings from FastAPI, thanks, @tiangolo!)
