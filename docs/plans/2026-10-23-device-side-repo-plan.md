@@ -191,12 +191,13 @@ tuya 29.5%, esphome 27.3%, tplink 13.8%, zwave_js 8.3%, tasmota 7.6%.)
      long-lived token: call `device_side.*` actions, assert on service responses and on
      state changes (e.g. the light is off N seconds after `turn_on_for`). A rig inventory file
      (gitignored, `tests/rig/inventory.yaml`) maps each platform to the household entities to
-     use; tests restore prior state afterwards. A deploy script rsyncs
-     `custom_components/device_side` to the HA host and restarts HA before the run.
+     use; tests restore prior state afterwards. A deploy script installs the pushed branch's
+     `custom_components/device_side` through the maintainer's deploy tooling's `the maintainer's deploy tooling` (`the deploy sync command`; the agent key
+     cannot rsync) and restarts HA (`the deploy restart command`) before the run.
      **Human approval gate:** the rig runner (`scripts/rig.py`) prints the inventory, the
      cells to be exercised, the estimated duration and whether a restart is needed, then
      requires an interactive y/N (and a `DEVICE_SIDE_RIG_APPROVED=1` env var for CI-style
-     invocation). Both the rsync+restart and the test run sit behind that gate. The devices
+     invocation). Both the deploy+restart and the test run sit behind that gate. The devices
      are in-use household lights, so **Claude must ask before invoking the rig, every time**;
      the gate exists so occupants are not startled by devices changing state.
   3. Bench: a per-cell record (`docs/bench/<platform>/<feature>.md`) of the rig pass that
@@ -287,7 +288,7 @@ custom_components/device_side/
                   set_attributes.py get_attributes.py set_scene.py move.py stop.py
 scripts/
   gen_docs.py            matrix + per-page generated blocks from the registry; --check for CI
-  deploy.sh              rsync custom_components/device_side to the HA host, restart, wait (rig only)
+  deploy.sh              the deploy sync command <branch>, then the deploy restart command (rig only)
   rig.py                 approval gate (inventory, cells, duration, restart?) -> y/N -> deploy -> pytest -m rig
 docs/
   device_side_handoff-2026-10-23.md          existing
@@ -523,34 +524,39 @@ mapping each platform to household entities, prints inventory, the cells about t
 duration and whether a restart is needed, then requires interactive y/N (or
 `DEVICE_SIDE_RIG_APPROVED=1`). `scripts/rig.py` flow:
 
-1. Read-only preflight: load inventory and `.env.rig` (`HA_URL`, `HA_TOKEN`, `HA_HOST`,
-   `HA_CONFIG_DIR`, `HA_SSH_USER`); `CellRegistry.discover()` (no hass) intersected with inventory
+1. Read-only preflight: load inventory and `.env.rig` (`HA_URL`, `HA_TOKEN` for a non-admin user,
+   `RIG_SSH` default `ha`); `CellRegistry.discover()` (no hass) intersected with inventory
    platforms -> one line per cell (`shelly / turn_on_for -> light.office_strip (beta)`); sum each
-   test's `RIG_SECONDS` for the estimate; compare local vs remote tree hash over SSH to decide
-   whether a deploy+restart is needed. Nothing mutates before the gate.
+   test's `RIG_SECONDS` for the estimate; compare `HEAD:custom_components/device_side` with
+   `the deploy status command` to decide whether a deploy+restart is needed, and refuse a deploy unless
+   `origin/<branch>` carries that tree. Nothing mutates before the gate.
 2. Gate: print the plan, `Proceed? [y/N]`. `--dry-run` stops here.
-3. `scripts/deploy.sh` (rsync `--delete` of the integration dir only), `POST
-   /api/services/homeassistant/restart`, poll `/api/` and `/api/config` until `RUNNING`, then wait
-   for `device_side.turn_on_for` in `/api/services` (hard fail at 180 s).
-4. `pytest tests/rig --rig -p no:cacheprovider`. Flags: `--no-deploy`, `--no-restart`,
+3. `scripts/deploy.sh`: `the deploy sync command <branch>` (the maintainer's deploy tooling verb: fetch into a device-side clone on
+   the Pi, replace the integration dir inside the container), `the deploy restart command`; poll
+   `/api/config` until `RUNNING`, then wait for `device_side.turn_on_for` in `/api/services` (hard
+   fail at 180 s).
+4. `pytest <modules> --confcutdir tests/rig -p no:homeassistant -p no:cacheprovider` with
+   `DEVICE_SIDE_RIG=1 DEVICE_SIDE_RIG_APPROVED=1`. Flags: `--no-deploy`, `--no-restart`,
    `--platform <key>`, `-k`.
 
 Rig fixtures (`tests/rig/conftest.py`): session `inventory` (skips the session when
-`inventory.yaml` is absent), session `ha` (`HAClient`: WS `call_service` with `return_response`,
-REST fallback, `wait_for(entity_id, predicate, timeout)` on `state_changed`, `restart`,
-`wait_until_running`), `snapshot` (captures state + brightness/CT/color, tracks touched entities,
+`inventory.yaml` is absent), per-test `ha` (`HAClient` in `tests/rig/client.py`: WS `call_service`
+with `return_response`, REST state reads, `wait_for(entity_id, predicate, timeout)` on
+`state_changed`; restart and readiness live in the runner), `snapshot` (captures state + brightness/CT/color, tracks touched entities,
 restores on teardown via `light.turn_on/off`, logs rather than fails on mismatch; Hue tests capture
 via `device_side.get_attributes` so off-light attributes restore), `timing` (per-platform
 tolerance: Zigbee/Matter 3 s, Shelly/Hue 2 s), `require_cell(platform, feature, role)` (skip when
 inventory lacks the role or the registry lacks the cell). Timing assertions are windows: still on
 at `duration - tol`, off by `duration + tol`. Rig durations are 5 to 8 s; `clamped_to` is checked
 via the response only. Rig tests cover one happy path and one `unsupported` path per cell;
-branches stay in unit tests. Unit runs never import rig fixtures (`--rig` or `DEVICE_SIDE_RIG=1`
-gates collection; `rig` marker registered in pyproject).
+branches stay in unit tests. Unit runs never import rig fixtures (`DEVICE_SIDE_RIG=1` gates
+collection; the fixtures skip everything without `DEVICE_SIDE_RIG_APPROVED=1`; `rig` marker
+registered in pyproject).
 
-`.gitignore`: `tests/rig/inventory.yaml`, `.env.rig`. `tests/rig/README.md` covers token creation,
-inventory format (per platform -> entities with role tags `light_dimmable`, `light_ct`, `light_color`,
-`switch_plug`, `group`, `scene`) and safety notes. **Claude asks before every rig run; the devices
+`.gitignore`: `tests/rig/inventory.yaml`, `.env.rig` (example at `tests/rig/env.example`).
+`docs/contributing/rig.md` covers the shim deploy path, token creation, inventory format (per
+platform -> entities with role tags `light_dimmable`, `light_ct`, `light_color`, `switch_plug`,
+`group`, `scene`), the first-load checklist and safety notes. **Claude asks before every rig run; the devices
 are in-use household lights.** Rig passes are recorded in `docs/bench/<platform>/<feature>.md`
 (date, HA version, device model, firmware, fingerprint, source: rig run or test-report issue).
 
@@ -568,9 +574,14 @@ are in-use household lights.** Rig passes are recorded in `docs/bench/<platform>
 | 7 | ZHA `turn_on_for` | after Jason has ZHA running on the rig; addressing; admin context passthrough; ValueError -> rejected; rig test. |
 | 8 | Matter `turn_on_for` | after Jason has Matter running on the rig; LT check; `OnWithTimedOff`; optional read-back; rig test on bulb and plug. |
 | 9 | Docs generator + templates | `gen_docs.py --check` in CI; matrix, README block, feature pages, `platforms.md` sections; `_notes.yaml`; contributing guides. |
-| 10 | Bench + tiers + tester flow | fingerprinting and computed tiers in `gen_docs.py`; per-cell coverage check; tag-format check; RC audit gate (`2026-10-23-rc-audit-gate.md`: `cut-rc` workflow, `check_audit.py`, `/rc-audit`); `test-report.yml` issue form; RC-only umbrella Repairs issue with multi-select flow and prefilled per-unit links; bench files filled from rig runs and tester reports. |
+| 10 | Bench + tiers + tester flow | fingerprinting and computed tiers in `gen_docs.py`; per-cell coverage check; tag-format check; RC audit gate (`2026-10-23-rc-audit-gate.md`: `cut-rc` workflow, `check_audit.py`, `/rc-audit`); `test-report.yml` issue form; RC-only umbrella Repairs issue with multi-select flow and prefilled per-unit links; bench files filled from rig runs and tester reports; `validate.yml` re-enabled (`gh workflow enable validate.yml`; disabled on GitHub until the first RC to stop failure notifications) before the first RC is cut. |
 | 11 | First release tag (`v0.0.1`; "v1" names the scope, not the version) | manifest version, HACS release, matrix current, release checklist adapted from hue_dimmer; repo flipped public with contributor docs; nightly schedule restored in `validate.yml` and HACS validate green. |
+| 12 | HACS default-store listing | repo meets the HACS inclusion checks (public, description, topics, issues enabled, full GitHub release, brand icon in whatever form HACS requires at the time); hassfest + HACS validate green on `main`; PR to `hacs/default` adding `jasonmx/device-side` to `integration`; README install section switches from "custom repository" to a plain HACS search once merged. The review queue is slow, so this slice closes on the PR merging, not on its opening. |
 
+Each slice ends with `/audit-code` on its diff (everything since the previous slice's audit, plus any
+sibling-repo changes it needed), run by a fresh subagent that gets the code and no conclusions from the
+building session. P0/P1 findings are fixed before the slice's commit; the rest are fixed or filed as issues.
+The first audit, at the end of slice 3, covers the whole repo, since nothing before it was reviewed.
 Each slice is a commit (or a few) pushed to `release/v0.0.1`, CI green (`ci-green`) before the next slice starts; no per-slice PRs before the first release, and the v0.0.1 merge to `main` is the only PR. Rule evidence that would have gone in a PR body points at a commit sha or this plan instead. Implementation starts in a **fresh session** per the planning rule;
 the first action of that session is slice 0.
 
