@@ -19,7 +19,8 @@ class ShellyTurnOnFor(Cell[TurnOnForRequest]):
         experimental=True,
         domains=frozenset({"light", "switch"}),
         duration=TIMER_LIMITS,
-        supports_fields=frozenset({"brightness", "transition", "color_temp_kelvin", "rgb_color"}),
+        # Light fields stay unclaimed until a tester with a Shelly dimmer or RGB light reports.
+        supports_fields=frozenset(),
         confirmable=True,
     )
 
