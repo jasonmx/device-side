@@ -545,7 +545,7 @@ are in-use household lights.** Rig passes are recorded in `docs/bench/<platform>
 | 8 | Matter `turn_on_for` | after Jason has Matter running on the rig; LT check; `OnWithTimedOff`; optional read-back; rig test on bulb and plug. |
 | 9 | Docs generator + templates | `gen_docs.py --check` in CI; matrix, README block, feature pages, `platforms.md` sections; `_notes.yaml`; contributing guides. |
 | 10 | Bench + tiers | bench files filled from rig runs across the device matrix (handoff 7.11); tiers bumped; generator enforces bench-before-beta. |
-| 11 | v1 tag | manifest version, HACS release, matrix current, release checklist adapted from hue_dimmer; repo flipped public with contributor docs. |
+| 11 | v1 tag | manifest version, HACS release, matrix current, release checklist adapted from hue_dimmer; repo flipped public with contributor docs; nightly schedule restored in `validate.yml` and HACS validate green. |
 
 Each slice is a PR to `main`. Implementation starts in a **fresh session** per the planning rule;
 the first action of that session is slice 0.
