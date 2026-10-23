@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from custom_components.device_side.core.registry import CellRegistry
+from custom_components.device_side.core.registry import AdapterRegistry
 
 from .client import HAClient
 from .inventory import TOLERANCE_S, Inventory, load_env
@@ -36,8 +36,8 @@ def inventory() -> Inventory:
 
 
 @pytest.fixture(scope="session")
-def registry() -> CellRegistry:
-    return CellRegistry.discover()
+def registry() -> AdapterRegistry:
+    return AdapterRegistry.discover()
 
 
 @pytest.fixture
@@ -50,12 +50,12 @@ async def ha():
 
 
 @pytest.fixture
-def require_cell(inventory: Inventory, registry: CellRegistry):
-    """The inventory entity for a role, skipping when the rig has none or the registry lacks the cell."""
+def require_adapter(inventory: Inventory, registry: AdapterRegistry):
+    """The inventory entity for a role, skipping when the rig has none or the registry lacks the adapter."""
 
     def _require(platform: str, feature: str, role: str) -> str:
-        if registry.cell(feature, platform) is None:
-            pytest.skip(f"no {feature} cell on {platform}")
+        if registry.adapter(feature, platform) is None:
+            pytest.skip(f"no {feature} adapter on {platform}")
         if (entity_id := inventory.entity(platform, role)) is None:
             pytest.skip(f"inventory has no {platform} entity with role {role}")
         return entity_id

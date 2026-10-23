@@ -50,7 +50,7 @@ Fails (non-zero, one line per problem) when:
 
 Stdlib plus PyYAML (already pulled in by the HA test deps). Tests in `tests/scripts/` build a
 throwaway git repo in `tmp_path` and cover each failure plus the passing case. The script is not
-a cell module, so the 95% cell-coverage bar doesn't apply, but cover every branch anyway.
+an adapter module, so the 95% adapter-coverage bar doesn't apply, but cover every branch anyway.
 
 ## `.github/workflows/cut-rc.yml`
 

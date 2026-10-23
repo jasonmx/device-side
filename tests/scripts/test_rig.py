@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from custom_components.device_side.core.registry import CellRegistry
+from custom_components.device_side.core.registry import AdapterRegistry
 from tests.rig.inventory import Inventory, RigModule, load_env, rig_modules
 
 REPO = Path(__file__).parents[2]
@@ -71,10 +71,10 @@ def test_select_and_plan_lines(inventory):
     assert [module.platform for module in selected] == ["shelly", "hue"]
     assert rig.select(modules, inventory, ["hue"]) == [modules[1]]
 
-    lines = rig.plan_lines(selected, inventory, CellRegistry.discover())
+    lines = rig.plan_lines(selected, inventory, AdapterRegistry.discover())
     assert lines == [
         "shelly / turn_on_for -> switch.plug (experimental)",
-        "hue / move -> light.lamp (no cell, will skip)",
+        "hue / move -> light.lamp (no adapter, will skip)",
     ]
 
 

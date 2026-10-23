@@ -1,9 +1,9 @@
 """Platform "fake_special": claims "fake" entities whose device is special (like Z2M on mqtt); no group hook."""
 
-from custom_components.device_side.core.capabilities import CellCapabilities, PlatformInfo
+from custom_components.device_side.core.capabilities import AdapterCapabilities, PlatformInfo
 
 from ..fake_platform import LIMITS, is_group
-from ..scripted import ScriptedCell
+from ..scripted import ScriptedAdapter
 
 
 def detect(hass, entry, device) -> bool:
@@ -15,10 +15,10 @@ PLATFORM = PlatformInfo(
 )
 
 
-class SpecialTurnOnFor(ScriptedCell):
+class SpecialTurnOnFor(ScriptedAdapter):
     feature = "turn_on_for"
     platform = "fake_special"
-    capabilities = CellCapabilities(domains=frozenset({"light", "switch"}), duration=LIMITS)
+    capabilities = AdapterCapabilities(domains=frozenset({"light", "switch"}), duration=LIMITS)
 
 
-CELLS = [SpecialTurnOnFor]
+ADAPTERS = [SpecialTurnOnFor]

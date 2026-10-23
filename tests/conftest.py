@@ -8,7 +8,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.device_side import features
 from custom_components.device_side.const import DOMAIN
-from custom_components.device_side.core.registry import CellRegistry
+from custom_components.device_side.core.registry import AdapterRegistry
 
 from .fakes.scripted import SCRIPT
 
@@ -38,7 +38,7 @@ def reset_script():
 @pytest.fixture
 def fake_registry():
     """Production features over the fake platforms, in place of discovery."""
-    with patch.object(CellRegistry, "discover", lambda: CellRegistry(features.discover(), FAKE_PLATFORMS)):
+    with patch.object(AdapterRegistry, "discover", lambda: AdapterRegistry(features.discover(), FAKE_PLATFORMS)):
         yield
 
 
@@ -53,7 +53,7 @@ async def setup_integration(hass: HomeAssistant, fake_registry) -> MockConfigEnt
 
 @pytest.fixture
 async def setup_production(hass: HomeAssistant) -> MockConfigEntry:
-    """The integration over the real discovered platforms, for platform cell tests."""
+    """The integration over the real discovered platforms, for platform adapter tests."""
     entry = MockConfigEntry(domain=DOMAIN)
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)

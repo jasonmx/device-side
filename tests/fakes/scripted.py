@@ -1,9 +1,9 @@
-"""A scripted cell shared by the fake platforms: tests set outcomes per entity and read back what was sent."""
+"""A scripted adapter shared by the fake platforms: tests set outcomes per entity and read back what was sent."""
 
 import asyncio
 from dataclasses import dataclass, field
 
-from custom_components.device_side.core.cell import Cell
+from custom_components.device_side.core.adapter import Adapter
 from custom_components.device_side.core.models import EntityResult, Status, Target
 
 
@@ -23,7 +23,7 @@ class Script:
 SCRIPT = Script()
 
 
-class ScriptedCell(Cell):
+class ScriptedAdapter(Adapter):
     async def execute(self, hass, request, targets: list[Target]) -> list[EntityResult]:
         SCRIPT.calls.append((self.platform, self.feature, request, [target.entity_id for target in targets]))
         if SCRIPT.execute_error is not None:

@@ -2,7 +2,7 @@
 """Run the rig tests against the live HA, behind a human approval gate.
 
 The rig is the household's own Home Assistant and its in-use lights. Nothing changes state before the gate:
-preflight reads the inventory, the cell registry and the deployed tree hash, prints what will run, then asks.
+preflight reads the inventory, the adapter registry and the deployed tree hash, prints what will run, then asks.
 DEVICE_SIDE_RIG_APPROVED=1 answers the gate for a non-interactive caller that already has a human's yes.
 
 Usage: scripts/rig.py [--dry-run] [--no-deploy] [--no-restart] [--platform KEY ...] [-k EXPR]
@@ -24,7 +24,7 @@ from typing import Any
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
-from custom_components.device_side.core.registry import CellRegistry  # noqa: E402
+from custom_components.device_side.core.registry import AdapterRegistry  # noqa: E402
 from tests.rig.inventory import INVENTORY, Inventory, RigModule, load_env, rig_modules  # noqa: E402
 
 COMPONENT = "custom_components/device_side"
@@ -57,15 +57,15 @@ def select(modules: list[RigModule], inventory: Inventory, platforms: list[str] 
     ]
 
 
-def plan_lines(modules: list[RigModule], inventory: Inventory, registry: CellRegistry) -> list[str]:
-    """One line per cell about to run: which household entities it will move, and the cell's declared tier."""
+def plan_lines(modules: list[RigModule], inventory: Inventory, registry: AdapterRegistry) -> list[str]:
+    """One line per adapter about to run: which household entities it will move, and the adapter's declared tier."""
     lines = []
     for module in modules:
-        cell = registry.cell(module.feature, module.platform)
-        if cell is None:
-            tier = "no cell, will skip"
+        adapter = registry.adapter(module.feature, module.platform)
+        if adapter is None:
+            tier = "no adapter, will skip"
         else:
-            tier = "experimental" if cell.capabilities.experimental else "untested"
+            tier = "experimental" if adapter.capabilities.experimental else "untested"
         entities = [entity for role in module.roles if (entity := inventory.entity(module.platform, role))]
         targets = ", ".join(entities) or "no entity, will skip"
         lines.append(f"{module.platform} / {module.feature} -> {targets} ({tier})")
@@ -190,8 +190,8 @@ def print_plan(
     for platform, entities in inventory.platforms.items():
         for entity in entities:
             print(f"  {platform:8} {entity.entity_id:40} {', '.join(sorted(entity.roles))}")
-    print("Cells:")
-    for line in plan_lines(modules, inventory, CellRegistry.discover()):
+    print("Adapters:")
+    for line in plan_lines(modules, inventory, AdapterRegistry.discover()):
         print(f"  {line}")
     print(f"Integration: local {deploy.local_tree[:12]}, deployed {(deploy.deployed_tree or 'none')[:12]}")
     if deploying:

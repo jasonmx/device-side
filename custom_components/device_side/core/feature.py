@@ -35,5 +35,5 @@ class Feature[RequestT: Request](ABC):
     async def run(
         cls, hass: HomeAssistant, request: RequestT, targets: list[Target], dispatcher: Dispatcher
     ) -> list[EntityResult]:
-        """Composite features override this to route targets to other features' cells."""
-        return await dispatcher.run_cells(cls.key, request, targets)
+        """Composite features override this to route targets to other features' adapters."""
+        return await dispatcher.run_adapters(cls.key, request, targets)
