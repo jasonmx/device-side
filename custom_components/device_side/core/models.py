@@ -98,7 +98,14 @@ class Target:
     config_entry: ConfigEntry
     state: State | None
     via_group: str | None = None
+    # The switch_as_x light the caller named; the adapter sees the wrapped switch, results report the light.
+    via_wrapper: str | None = None
     is_group: bool = False
+
+    @property
+    def reported_id(self) -> str:
+        """The entity_id results are keyed on: the one the caller targeted."""
+        return self.via_wrapper or self.entity_id
 
 
 @dataclass(slots=True)

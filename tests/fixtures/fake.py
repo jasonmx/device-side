@@ -52,3 +52,14 @@ def add_ha_group(hass: HomeAssistant, entity_id: str, members: list[str]) -> str
         er.async_get(hass).async_get_or_create(domain, "group", object_id, suggested_object_id=object_id)
     hass.states.async_set(entity_id, "on", {"entity_id": members})
     return entity_id
+
+
+def add_switch_as_x(hass: HomeAssistant, entity_id: str, wrapped: str | None, invert: bool = False) -> str:
+    """A switch_as_x helper; the wrapped entity_id lives in its registry options, as on a live registry."""
+    domain, object_id = entity_id.split(".")
+    registry = er.async_get(hass)
+    registry.async_get_or_create(domain, "switch_as_x", object_id, suggested_object_id=object_id)
+    if wrapped is not None:
+        registry.async_update_entity_options(entity_id, "switch_as_x", {"entity_id": wrapped, "invert": invert})
+    hass.states.async_set(entity_id, "off")
+    return entity_id

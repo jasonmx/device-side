@@ -15,7 +15,9 @@ REPO = RIG_DIR.parents[1]
 INVENTORY = RIG_DIR / "inventory.yaml"
 ENV_FILE = REPO / ".env.rig"
 
-ROLES = frozenset({"light_onoff", "light_dimmable", "light_ct", "light_color", "switch_plug", "group", "scene"})
+ROLES = frozenset(
+    {"light_onoff", "light_wrapped", "light_dimmable", "light_ct", "light_color", "switch_plug", "group", "scene"}
+)
 
 # Seconds either side of a duration within which a device may flip. Zigbee and Matter hop through a mesh.
 TOLERANCE_S = {"shelly": 2.0, "hue": 2.0, "z2m": 3.0, "zha": 3.0, "matter": 3.0}

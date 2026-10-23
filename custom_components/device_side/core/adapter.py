@@ -37,8 +37,9 @@ class Adapter[RequestT: Request](ABC):
         """Send the command to every target at once, so an adapter can batch or address a native group."""
 
     def result(self, target: Target, status: Status, **kwargs) -> EntityResult:
+        """Build every result here: it keys on target.reported_id, which the dispatcher matches results by."""
         return EntityResult(
-            target.entity_id, status, platform=self.platform, mode=self.capabilities.mode, **kwargs
+            target.reported_id, status, platform=self.platform, mode=self.capabilities.mode, **kwargs
         )
 
     async def gather(
