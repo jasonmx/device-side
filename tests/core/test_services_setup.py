@@ -17,9 +17,7 @@ def _load_json(name: str) -> dict:
 
 FEATURES = discover()
 FEATURE_KEYS = {feature.key for feature in FEATURES}
-# Dot-prefixed keys are YAML anchors for shared filters (the light/services.yaml convention), not services.
-_RAW_SERVICES = yaml.safe_load((PACKAGE / "services.yaml").read_text()) or {}
-SERVICES_YAML = {key: block for key, block in _RAW_SERVICES.items() if not key.startswith(".")}
+SERVICES_YAML = yaml.safe_load((PACKAGE / "services.yaml").read_text()) or {}
 STRINGS = _load_json("strings.json")
 
 
