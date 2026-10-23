@@ -4,13 +4,13 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.helpers import entity_registry as er
 
 from custom_components.device_side import features
-from custom_components.device_side.core.registry import CellRegistry
+from custom_components.device_side.core.registry import AdapterRegistry
 from custom_components.device_side.core.resolver import resolve
 
 from ..conftest import FAKE_PLATFORMS
 from ..fixtures.fake import add_fake_entity, add_fake_native_group, fake_config_entry
 
-REGISTRY = CellRegistry(features.discover(), FAKE_PLATFORMS)
+REGISTRY = AdapterRegistry(features.discover(), FAKE_PLATFORMS)
 
 
 async def test_generic_platform_resolves(hass):

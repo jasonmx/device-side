@@ -73,7 +73,7 @@ Steps on `release/v0.0.1`:
 2. **Brand icon:** add `custom_components/device_side/brand/icon.png` (256×256 and `icon@2x.png`
    512×512, square, transparent background). Confirm the HACS action accepts that location; if
    not, file the domain with home-assistant/brands.
-3. **Claims:** confirm the Shelly cells claim `switch` and on/off `light` only. The light fields stay unclaimed
+3. **Claims:** confirm the Shelly adapters claim `switch` and on/off `light` only. The light fields stay unclaimed
    per the CLAUDE.md Releases rule until a tester reports.
 4. **Bench records:** write `docs/bench/shelly/{turn_on_for,turn_off_for,toggle_for}.md` by hand
    from the rig runs (date, HA version, device model, firmware, fingerprint). `gen_docs.py`
@@ -118,7 +118,7 @@ edited, because the waiver is one-off and CLAUDE.md holds standing rules only.
 - During slice 5: `LICENSE`, `custom_components/device_side/brand/icon.png` (+ `@2x`),
   `README.md`, `CONTRIBUTING.md`, `docs/bench/shelly/*.md`, `.github/workflows/validate.yml`
 - Slice 4: `tests/rig/test_shelly_turn_off_for.py`, `tests/rig/test_shelly_toggle_for.py`,
-  `custom_components/device_side/features/toggle_for.py` plus its Shelly cell
+  `custom_components/device_side/features/toggle_for.py` plus its Shelly adapter
 
 ## Verification
 

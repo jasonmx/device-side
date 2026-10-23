@@ -104,7 +104,7 @@ async def test_empty_ha_group_is_unsupported(hass, fake):
     assert response["light.nobody"] == {"status": "unsupported", "detail": "empty_group"}
 
 
-async def test_native_group_passes_through_when_cell_addresses_groups(hass, fake, reset_script):
+async def test_native_group_passes_through_when_adapter_addresses_groups(hass, fake, reset_script):
     add_fake_entity(hass, fake, "switch.a")
     add_fake_native_group(hass, fake, "switch.fake_group", ["switch.a"])
 
@@ -114,7 +114,7 @@ async def test_native_group_passes_through_when_cell_addresses_groups(hass, fake
     assert reset_script.calls[0][3] == ["switch.fake_group"]
 
 
-async def test_native_group_expands_when_cell_cannot_address_it(hass, fake, reset_script):
+async def test_native_group_expands_when_adapter_cannot_address_it(hass, fake, reset_script):
     add_fake_entity(hass, fake, "light.a")
     add_fake_entity(hass, fake, "light.b")
     add_fake_native_group(hass, fake, "light.fake_group", ["light.a", "light.b"])
@@ -140,7 +140,7 @@ async def test_native_group_without_expand_hook_is_unsupported(hass, fake, reset
     assert reset_script.calls == [("fake_special", "turn_on_for", reset_script.calls[0][2], ["light.lamp"])]
 
 
-async def test_unsupported_reasons_from_cells(hass, fake):
+async def test_unsupported_reasons_from_adapters(hass, fake):
     add_fake_entity(hass, fake, "light.a")
     add_fake_entity(hass, fake, "light.lamp", identifier="special_1")
     add_fake_entity(hass, fake, "switch.s")
@@ -153,8 +153,8 @@ async def test_unsupported_reasons_from_cells(hass, fake):
     assert colored["switch.s"]["status"] == "sent"
 
     off = await call(hass, "turn_off_for", {"entity_id": ["light.a", "light.lamp", "switch.s"], "duration": 5})
-    assert off["light.a"]["detail"] == "domain_not_supported"  # the fake cell claims switches only
-    assert off["light.lamp"]["detail"] == "no_cell"
+    assert off["light.a"]["detail"] == "domain_not_supported"  # the fake adapter claims switches only
+    assert off["light.lamp"]["detail"] == "no_adapter"
 
 
 async def test_domain_outside_the_feature_is_unsupported(hass, fake):
@@ -166,7 +166,7 @@ async def test_domain_outside_the_feature_is_unsupported(hass, fake):
     assert response["cover.blind"] == {"status": "unsupported", "platform": "fake", "detail": "domain_not_supported"}
 
 
-async def test_cell_exception_and_timeout_reject_every_target(hass, fake, reset_script):
+async def test_adapter_exception_and_timeout_reject_every_target(hass, fake, reset_script):
     add_fake_entity(hass, fake, "light.a")
     add_fake_entity(hass, fake, "switch.b")
     reset_script.execute_error = RuntimeError("bridge gone")
@@ -177,7 +177,7 @@ async def test_cell_exception_and_timeout_reject_every_target(hass, fake, reset_
     reset_script.execute_error = None
     reset_script.delay = 1
     with (
-        patch("custom_components.device_side.core.dispatcher.CELL_TIMEOUT_S", 0.01),
+        patch("custom_components.device_side.core.dispatcher.ADAPTER_TIMEOUT_S", 0.01),
         pytest.raises(HomeAssistantError) as err,
     ):
         await call(hass, "turn_on_for", {"entity_id": "light.a", "duration": 5})
@@ -208,10 +208,10 @@ async def test_platform_semaphore_bounds_concurrency(hass, fake, reset_script):
 
     await call(hass, "turn_on_for", {"entity_id": entity_ids, "duration": 5})
 
-    assert reset_script.max_active == 2  # PlatformInfo.max_concurrency, below the cell's 4
+    assert reset_script.max_active == 2  # PlatformInfo.max_concurrency, below the adapter's 4
 
 
-async def test_cells_on_different_platforms_run_concurrently(hass, fake, reset_script):
+async def test_adapters_on_different_platforms_run_concurrently(hass, fake, reset_script):
     add_fake_entity(hass, fake, "light.a")
     add_fake_entity(hass, fake, "light.lamp", identifier="special_1")
     reset_script.delay = 0.05
@@ -231,5 +231,5 @@ async def test_calls_refused_until_entry_loads(hass, setup_integration, fake):
     assert err.value.translation_key == "not_loaded"
 
 
-def test_timed_request_is_what_cells_see():
+def test_timed_request_is_what_adapters_see():
     assert TimedRequest(duration_s=1).fields_present() == frozenset()

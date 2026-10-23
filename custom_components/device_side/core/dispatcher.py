@@ -7,19 +7,19 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.service import async_extract_entity_ids
 
 from . import duration
-from .cell import Cell
+from .adapter import Adapter
 from .feature import Feature
 from .groups import expand_ha_groups
 from .models import FAILED, EntityResult, Request, Status, Target, TimedRequest
-from .registry import CellRegistry
+from .registry import AdapterRegistry
 from .resolver import resolve
-from ..const import CELL_TIMEOUT_S, DOMAIN
+from ..const import ADAPTER_TIMEOUT_S, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class Dispatcher:
-    def __init__(self, hass: HomeAssistant, registry: CellRegistry):
+    def __init__(self, hass: HomeAssistant, registry: AdapterRegistry):
         self.hass = hass
         self.registry = registry
 
@@ -59,68 +59,70 @@ class Dispatcher:
             return None
         return {result.entity_id: result.as_response() for result in results}
 
-    async def run_cells(self, feature_key: str, request: Request, targets: list[Target]) -> list[EntityResult]:
-        """Bucket targets by cell, expand native groups a cell can't address, run every cell concurrently.
+    async def run_adapters(self, feature_key: str, request: Request, targets: list[Target]) -> list[EntityResult]:
+        """Bucket targets by adapter, expand native groups an adapter can't address, run every adapter concurrently.
 
         Returns exactly one result per (expanded) target.
         """
         results: list[EntityResult] = []
-        buckets: dict[str, tuple[Cell, list[Target]]] = {}
+        buckets: dict[str, tuple[Adapter, list[Target]]] = {}
         for target in targets:
-            if (cell := self.registry.cell(feature_key, target.platform)) is None:
-                results.append(EntityResult(target.entity_id, Status.UNSUPPORTED, target.platform, detail="no_cell"))
+            if (adapter := self.registry.adapter(feature_key, target.platform)) is None:
+                results.append(EntityResult(target.entity_id, Status.UNSUPPORTED, target.platform, detail="no_adapter"))
                 continue
-            buckets.setdefault(target.platform, (cell, []))[1].append(target)
+            buckets.setdefault(target.platform, (adapter, []))[1].append(target)
 
         runs = []
-        for cell, bucket in buckets.values():
-            bucket = self._expand_native_groups(cell, bucket, results)
+        for adapter, bucket in buckets.values():
+            bucket = self._expand_native_groups(adapter, bucket, results)
             ready = []
             for target in bucket:
-                if reason := cell.supports(self.hass, request, target):
-                    results.append(cell.result(target, Status.UNSUPPORTED, detail=reason))
+                if reason := adapter.supports(self.hass, request, target):
+                    results.append(adapter.result(target, Status.UNSUPPORTED, detail=reason))
                 else:
                     ready.append(target)
             if ready:
-                runs.append(self._run_cell(cell, request, ready))
+                runs.append(self._run_adapter(adapter, request, ready))
 
-        for cell_results in await asyncio.gather(*runs):
-            results.extend(cell_results)
+        for adapter_results in await asyncio.gather(*runs):
+            results.extend(adapter_results)
         return results
 
-    def _expand_native_groups(self, cell: Cell, bucket: list[Target], results: list[EntityResult]) -> list[Target]:
-        if cell.capabilities.native_groups or not any(target.is_group for target in bucket):
+    def _expand_native_groups(
+        self, adapter: Adapter, bucket: list[Target], results: list[EntityResult]
+    ) -> list[Target]:
+        if adapter.capabilities.native_groups or not any(target.is_group for target in bucket):
             return bucket
-        expand = self.registry.platforms[cell.platform].expand_group
+        expand = self.registry.platforms[adapter.platform].expand_group
         expanded: list[Target] = []
         for target in bucket:
             if not target.is_group:
                 expanded.append(target)
             elif expand is None:
-                results.append(cell.result(target, Status.UNSUPPORTED, detail="group_not_supported"))
+                results.append(adapter.result(target, Status.UNSUPPORTED, detail="group_not_supported"))
             else:
                 expanded.extend(expand(self.hass, target))
         seen: set[str] = set()
         return [target for target in expanded if not (target.entity_id in seen or seen.add(target.entity_id))]
 
-    async def _run_cell(self, cell: Cell, request: Request, targets: list[Target]) -> list[EntityResult]:
+    async def _run_adapter(self, adapter: Adapter, request: Request, targets: list[Target]) -> list[EntityResult]:
         clamped_to = None
-        if isinstance(request, TimedRequest) and cell.capabilities.duration is not None:
-            request, clamped_to = duration.clamp(request, cell.capabilities.duration)
+        if isinstance(request, TimedRequest) and adapter.capabilities.duration is not None:
+            request, clamped_to = duration.clamp(request, adapter.capabilities.duration)
         try:
-            async with asyncio.timeout(CELL_TIMEOUT_S):
-                raw = await cell.execute(self.hass, request, targets)
+            async with asyncio.timeout(ADAPTER_TIMEOUT_S):
+                raw = await adapter.execute(self.hass, request, targets)
         except TimeoutError:
-            _LOGGER.warning("%s on %s timed out after %ss", cell.feature, cell.platform, CELL_TIMEOUT_S)
-            return [cell.result(target, Status.REJECTED, detail="timeout") for target in targets]
+            _LOGGER.warning("%s on %s timed out after %ss", adapter.feature, adapter.platform, ADAPTER_TIMEOUT_S)
+            return [adapter.result(target, Status.REJECTED, detail="timeout") for target in targets]
         except Exception:
-            _LOGGER.exception("%s on %s failed", cell.feature, cell.platform)
-            return [cell.result(target, Status.REJECTED, detail="error") for target in targets]
-        return self._reconcile(cell, request, targets, raw, clamped_to)
+            _LOGGER.exception("%s on %s failed", adapter.feature, adapter.platform)
+            return [adapter.result(target, Status.REJECTED, detail="error") for target in targets]
+        return self._reconcile(adapter, request, targets, raw, clamped_to)
 
     def _reconcile(
         self,
-        cell: Cell,
+        adapter: Adapter,
         request: Request,
         targets: list[Target],
         raw: list[EntityResult],
@@ -129,13 +131,15 @@ class Dispatcher:
         by_id: dict[str, EntityResult] = {}
         for result in raw:
             if result.entity_id in by_id or result.entity_id not in {target.entity_id for target in targets}:
-                _LOGGER.debug("%s on %s: dropping stray result for %s", cell.feature, cell.platform, result.entity_id)
+                _LOGGER.debug(
+                    "%s on %s: dropping stray result for %s", adapter.feature, adapter.platform, result.entity_id
+                )
                 continue
             by_id[result.entity_id] = result
         ignored = bool(request.fields_present())
         out = []
         for target in targets:
-            result = by_id.get(target.entity_id) or cell.result(target, Status.REJECTED, detail="no_result")
+            result = by_id.get(target.entity_id) or adapter.result(target, Status.REJECTED, detail="no_result")
             if clamped_to is not None and result.clamped_to is None and result.status not in FAILED:
                 result = replace(result, clamped_to=clamped_to)
             if ignored and target.domain != "light" and result.detail is None:

@@ -4,17 +4,17 @@ from homeassistant.core import HomeAssistant
 
 from .addressing import unsupported_reason
 from .rpc import TIMER_LIMITS, set_with_timer
-from ...core.capabilities import CellCapabilities
-from ...core.cell import Cell
+from ...core.adapter import Adapter
+from ...core.capabilities import AdapterCapabilities
 from ...core.models import EntityResult, Target, TimedRequest
 
 
-class ShellyTurnOffFor(Cell[TimedRequest]):
+class ShellyTurnOffFor(Adapter[TimedRequest]):
     """One <Component>.Set carrying on=False and toggle_after; the device turns itself back on."""
 
     feature: ClassVar[str] = "turn_off_for"
     platform: ClassVar[str] = "shelly"
-    capabilities: ClassVar[CellCapabilities] = CellCapabilities(
+    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         experimental=True,
         domains=frozenset({"light", "switch"}),
         duration=TIMER_LIMITS,
