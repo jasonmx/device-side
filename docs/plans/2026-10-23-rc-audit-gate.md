@@ -1,7 +1,7 @@
 # RC audit gate
 
 Goal: no `vX.Y.ZrcN` tag exists unless `/audit-code` has been run over the code it ships and no
-Critical or High finding is left open. Lands as part of slice 10 of
+Critical or High finding is left open. Lands as part of slice 9 of
 `2026-10-23-device-side-repo-plan.md` (it owns the tag-format check this reuses).
 
 ## Decisions
@@ -62,13 +62,13 @@ a cell module, so the 95% cell-coverage bar doesn't apply, but cover every branc
   --prerelease --generate-notes`.
 - `permissions: contents: write` on this job only.
 - Tags pushed with `GITHUB_TOKEN` don't trigger other workflows, so anything that must run on an
-  RC (HACS release asset, slice 11) runs inside this job, not on `push: tags`.
+  RC (HACS release asset) runs inside this job, not on `push: tags`.
 
 ## Bypass protection
 
 A tag ruleset on `v*rc*` restricting creation to GitHub Actions, so a manual `git push --tags`
 can't skip the gate. Check at implementation time whether rulesets are available on this private
-repo's plan; if not, note it as a step for the day the repo goes public (slice 11).
+repo's plan; if not, note it as a step for the day the repo goes public (slice 5).
 
 ## Local helper: `.claude/skills/rc-audit/SKILL.md`
 
@@ -89,5 +89,5 @@ Replace "RCs are tagged `vX.Y.ZrcN` from it and run every tier." with:
 
 - `check_audit.py` tests green; `cut-rc` dry-run on a scratch `release/v0.0.0` branch refuses a
   missing record, an open High, and a post-audit code commit, then tags once fixed.
-- Slice 10 row in the repo plan and the CLAUDE.md Releases line point at this gate.
-- `v0.0.1rc1` is the first real RC cut through it.
+- Slice 9 row in the repo plan and the CLAUDE.md Releases line point at this gate.
+- `v0.0.2rc1` is the first real RC cut through it (v0.0.1 ships without an RC; see slice 5).
