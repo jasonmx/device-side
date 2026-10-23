@@ -73,5 +73,5 @@ duration. Light fields are not accepted.
   the same way as `Light`, but no hardware run has covered them yet.
 
 <!-- generated:shelly:start -->
-_Generated from the code by `scripts/gen_docs.py` (slice 9)._
+_Generated from the code by `scripts/gen_docs.py` (slice 8)._
 <!-- generated:shelly:end -->

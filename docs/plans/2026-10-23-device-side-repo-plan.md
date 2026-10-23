@@ -211,11 +211,13 @@ tuya 29.5%, esphome 27.3%, tplink 13.8%, zwave_js 8.3%, tasmota 7.6%.)
   block). `docs/features/<feature>.md` per feature. `docs/contributing/add-a-feature.md`,
   `add-a-platform.md`, `rig.md`. MkDocs-ready layout, no site in v1; `platforms.md` splits into
   per-platform pages only if it outgrows one file.
-- **Repo:** private until v1 ships, then public with contributor docs. MIT. American English in
+- **Repo:** private until v0.0.1 ships (slice 5), then public with contributor docs. MIT. American English in
   all user-facing text (matches HA).
 - **Versions:** minimum HA set to a release within the last six months (2026.x) so no compat
   shims; tests pin current stable; Python 3.14 in CI; copy ruff, pre-commit, codespell,
-  gitleaks, hassfest and HACS validate workflows from hue_dimmer.
+  gitleaks, hassfest and HACS validate workflows from hue_dimmer. Releases go `v0.0.x` while
+  building; `v0.1.0` once this plan is feature complete and third-party testers have validated
+  the hardware the rig lacks.
 - **hue_dimmer:** deprecated with a migration guide, but only after device_side is
   feature-complete and stable, to spare existing Hue users regressions and churn.
 
@@ -570,21 +572,24 @@ are in-use household lights.** Rig passes are recorded in `docs/bench/<platform>
 | 1 | Core + fake platform | `core/*`; `features/turn_on_for.py`, `turn_off_for.py`; fake platform (with a fake native group and `expand_group` hook); dispatcher/resolver/groups tests green (HA-group expansion for light and switch, native-group pass-through vs expansion, clamp, total-failure raise, response shape, semaphore bound, guarded-import skip). No live load yet: there is no dev HA. |
 | 2 | Shelly `turn_on_for` + `turn_off_for` | one RPC with fields; Gen1 -> unsupported; read-back -> confirmed under mock; Shelly section of `docs/platforms.md` on the template; cell `experimental=True`. |
 | 3 | Rig harness | `scripts/rig.py`, `deploy.sh`, `tests/rig/conftest.py`, inventory example, `docs/contributing/rig.md`; **first approved deploy is the integration's first load in any HA**: confirm entry adds, actions appear with translated names, the brightness fields hide for a switch-only selection; then Shelly `turn_on_for` passes against the house; bench record written; Shelly `switch` and on/off `light` -> beta (shared on/off: a relay shown as a light sends the same `Switch.Set`); Shelly light fields (`supports_fields`) unclaimed until a tester reports. |
-| 4 | Z2M `turn_on_for` | detect, addressing, publish; `light.turn_on` precedes when fields present; group topic when `native_groups`; rig test. |
-| 5 | `toggle_for` (Shelly only) | composite `run()`; state-split tests with fake + Shelly; a Z2M target returns `unsupported` from both states; rig test; derived matrix row. |
-| 6 | Hue port | five cells + bridge/transition_cache/colors; `move` across brightness, color_temp, hue, saturation; `grouped_light` native for move/stop, expanded for set/get_attributes; hue_dimmer tests ported to real-hass fixtures; rig parity with hue_dimmer `tests/RELEASE_CHECKLIST.md`. |
-| 7 | ZHA `turn_on_for` | after Jason has ZHA running on the rig; addressing; admin context passthrough; ValueError -> rejected; rig test. |
-| 8 | Matter `turn_on_for` | after Jason has Matter running on the rig; LT check; `OnWithTimedOff`; optional read-back; rig test on bulb and plug. |
-| 9 | Docs generator + templates | `gen_docs.py --check` in CI; matrix, README block, feature pages, `platforms.md` sections; `_notes.yaml`; contributing guides. |
-| 10 | Bench + tiers + tester flow | fingerprinting and computed tiers in `gen_docs.py`, including `onoff_shared`; per-cell coverage check; tag-format check; RC audit gate (`2026-10-23-rc-audit-gate.md`: `cut-rc` workflow, `check_audit.py`, `/rc-audit`); `test-report.yml` issue form; RC-only umbrella Repairs issue with multi-select flow and prefilled per-unit links; bench files filled from rig runs and tester reports; `validate.yml` re-enabled (`gh workflow enable validate.yml`; disabled on GitHub until the first RC to stop failure notifications) before the first RC is cut. |
-| 11 | First release tag (`v0.0.1`; "v1" names the scope, not the version) | manifest version, HACS release, matrix current, release checklist adapted from hue_dimmer; repo flipped public with contributor docs; nightly schedule restored in `validate.yml` and HACS validate green. |
-| 12 | HACS default-store listing | repo meets the HACS inclusion checks (public, description, topics, issues enabled, full GitHub release, brand icon in whatever form HACS requires at the time); hassfest + HACS validate green on `main`; PR to `hacs/default` adding `jasonmx/device-side` to `integration`; README install section switches from "custom repository" to a plain HACS search once merged. The review queue is slow, so this slice closes on the PR merging, not on its opening. |
+| 4 | `toggle_for` (Shelly only) + `turn_off_for` rig pass | composite `run()` (HA state decides, one `Switch.Set` with `toggle_after`); state-split tests with fake + Shelly; a non-Shelly target returns `unsupported` from both states; rig tests for `toggle_for` and `turn_off_for`; bench records written, so all three Shelly features reach beta. |
+| 5 | First release (`v0.0.1`) + HACS submission | Detail in `2026-10-23-hacs-early-release.md`. Claims Shelly `switch` and on/off `light` (shared on/off) for `turn_on_for`, `turn_off_for`, `toggle_for`. MIT `LICENSE`; `custom_components/device_side/brand/icon.png` (+ `@2x`); hand-written bench records and README matrix (inside the matrix markers, taken over by `gen_docs.py` later); README install via HACS custom repository; short `CONTRIBUTING.md`; full-history `gitleaks detect` clean; topics added; repo flipped public; `gh workflow enable validate.yml`, nightly schedule restored and private-repo guard removed; PR `release/v0.0.1` -> `main`, `ci-green` on `main` with hassfest + HACS validate green; tag `v0.0.1` and a full (not pre-) GitHub release; PR to `hacs/default` adding `jasonmx/device-side` to `integration`, from a personal fork; issue filed to switch the README install section to a plain HACS search once that PR merges (review takes months); `release/v0.0.2` cut from `main`. **v0.0.1 ships without an RC soak to start the HACS review clock; from v0.0.2 the Releases rules apply in full.** |
+| 6 | Z2M `turn_on_for` | detect, addressing, publish; `light.turn_on` precedes when fields present; group topic when `native_groups`; rig test. |
+| 7 | Hue port | five cells + bridge/transition_cache/colors; `move` across brightness, color_temp, hue, saturation; `grouped_light` native for move/stop, expanded for set/get_attributes; hue_dimmer tests ported to real-hass fixtures; rig parity with hue_dimmer `tests/RELEASE_CHECKLIST.md`. |
+| 8 | Docs generator + templates | `gen_docs.py --check` in CI; matrix, README block, feature pages, `platforms.md` sections; `_notes.yaml`; contributing guides. Lands before the first v0.0.2 RC. |
+| 9 | Bench + tiers + tester flow | fingerprinting and computed tiers in `gen_docs.py`, including `onoff_shared`; per-cell coverage check; tag-format check; RC audit gate (`2026-10-23-rc-audit-gate.md`: `cut-rc` workflow, `check_audit.py`, `/rc-audit`); `test-report.yml` issue form; RC-only umbrella Repairs issue with multi-select flow and prefilled per-unit links; bench files filled from rig runs and tester reports. Lands before the first v0.0.2 RC, which is the project's first RC. |
+| 10 | ZHA `turn_on_for` | after Jason has ZHA running on the rig; addressing; admin context passthrough; ValueError -> rejected; rig test. |
+| 11 | Matter `turn_on_for` | after Jason has Matter running on the rig; LT check; `OnWithTimedOff`; optional read-back; rig test on bulb and plug. |
+| 12 | `v0.1.0` ("v1" names the scope, not the version) | feature complete for this plan; third-party tester reports for the hardware the rig lacks; matrix current; release checklist adapted from hue_dimmer. |
+
+`v0.0.x` releases are cut between slices whenever a set of units reaches beta; one release may carry
+several platforms or features.
 
 Each slice ends with `/audit-code` on its diff (everything since the previous slice's audit, plus any
 sibling-repo changes it needed), run by a fresh subagent that gets the code and no conclusions from the
 building session. P0/P1 findings are fixed before the slice's commit; the rest are fixed or filed as issues.
 The first audit, at the end of slice 3, covers the whole repo, since nothing before it was reviewed.
-Each slice is a commit (or a few) pushed to `release/v0.0.1`, CI green (`ci-green`) before the next slice starts; no per-slice PRs before the first release, and the v0.0.1 merge to `main` is the only PR. Rule evidence that would have gone in a PR body points at a commit sha or this plan instead. Implementation starts in a **fresh session** per the planning rule;
+Each slice is a commit (or a few) pushed to the current `release/vX.Y.Z` branch, CI green (`ci-green`) before the next slice starts; no per-slice PRs, and each release's merge to `main` is its only PR. Rule evidence that would have gone in a PR body points at a commit sha or this plan instead. Implementation starts in a **fresh session** per the planning rule;
 the first action of that session is slice 0.
 
 ## Open items to verify during implementation (not before)
