@@ -110,7 +110,7 @@ tuya 29.5%, esphome 27.3%, tplink 13.8%, zwave_js 8.3%, tasmota 7.6%.)
   `OnWithTimedOff` equivalent, so `turn_on_for` is not a Z-Wave goal. Jason no longer owns
   Z-Wave hardware, so **reach out to Inovelli** (who showed interest in the timer feature in a
   thread mined by light-extras-research; see `research/timed-on-backends.md` there) to ask
-  whether they will test. Without a tester the cells stay `experimental`.
+  whether they will be the testers in the RC that carries the Z-Wave cells.
 - **Not planned (2026-10-23 check of local-only, non-Zigbee/Matter candidates):** Tuya (core
   integration is cloud, fails the offline test; its Zigbee devices already arrive via Z2M/ZHA),
   ESPHome (too experimental; auto-off is compiled into device YAML, no runtime primitive),
@@ -164,13 +164,14 @@ tuya 29.5%, esphome 27.3%, tplink 13.8%, zwave_js 8.3%, tasmota 7.6%.)
   detail?}`. Tier is not in the response: it is a subjective label about the code, not a fact
   about this call. Raise `HomeAssistantError` only on invalid input or when every target
   failed, so mixed rooms do not abort automations.
-- **Stability tiers** per feature x platform cell: `stable | beta | experimental`, declared in
-  `CellCapabilities.tier`. What tier in code buys: (a) the docs matrix is generated from the
-  cells, so a tier can never drift from the code that earns it; (b) CI enforces the ladder
-  (`beta`+ needs a bench record); (c) gating is a one-line check in `run_cells` whenever an
-  "Allow experimental features" option is added (options flow, post-v1; v1 has no options and
-  runs every tier). Tier is not logged per call and not returned in results. Mode
-  (`native | assisted`) is objective and stays in results.
+- **Stability tiers** per unit (feature x platform x call class): `experimental | untested |
+  beta | stable`. Rules live in `CLAUDE.md` (Tiers, Releases); summary: only `experimental` is
+  declared (`CellCapabilities.experimental`), the rest are computed by `gen_docs.py` from
+  coverage and bench records keyed by the cell's fingerprint; `stable` means on `main`. There is
+  no runtime tier gate and no options flow for it: a class nobody has tested is simply not
+  claimed in `domains`/`supports_fields`, so `supports()` returns `unsupported`. Tier is not
+  logged per call and not returned in results. Mode (`native | assisted`) is objective and
+  stays in results.
 - **Quality bar:** HA quality scale Gold conventions (config flow, translations, tests,
   diagnostics, docs).
 - **Config:** single config entry, one confirm step, no options in v1. Services registered in
@@ -308,7 +309,7 @@ copied from `/Users/jason/projects/hue-smooth-dimming`, plus `docs.yml` running
 # core/models.py
 class Status(StrEnum): UNSUPPORTED, REJECTED, SENT, CONFIRMED
 class Mode(StrEnum): NATIVE, ASSISTED
-class Tier(StrEnum): STABLE, BETA, EXPERIMENTAL
+class Tier(StrEnum): STABLE, BETA, UNTESTED, EXPERIMENTAL   # computed by gen_docs, never stored on a cell
 class FeatureKind(StrEnum): COMMAND, SETTING, QUERY
 
 @dataclass(frozen=True, slots=True)
@@ -325,7 +326,7 @@ class EntityResult: entity_id, status, platform, mode, clamped_to, detail, data
 # core/capabilities.py
 @dataclass(frozen=True) class DurationLimits: min_s, max_s, resolution_s
 @dataclass(frozen=True) class CellCapabilities:
-    tier: Tier; mode = NATIVE; domains = {"light"}; duration: DurationLimits | None
+    experimental: bool = False; mode = NATIVE; domains = {"light"}; duration: DurationLimits | None
     supports_fields: frozenset[str]; confirmable: bool; native_groups: bool
     max_concurrency: int = 4; notes: tuple[str, ...] = (); bench: str | None = None
 @dataclass class PlatformInfo:
@@ -410,7 +411,7 @@ class Cell[RequestT](ABC):
   `supports()` requires the OnOff FeatureMap Lighting bit else `no_lt_feature`. Optional
   `light.turn_on`, then `matter_client.send_device_command(node_id, endpoint_id,
   OnOff.Commands.OnWithTimedOff(onOffControl=0, onTime=tenths, offWaitTime=0))`; optional
-  `read_attribute` OnTime -> `CONFIRMED`. Tier experimental until the plug question is settled.
+  `read_attribute` OnTime -> `CONFIRMED`. `switch` (plug) class unclaimed until the plug question is settled.
 - **Shelly Gen2+:** `entry.runtime_data.rpc` (`None` -> `gen1_unsupported`); component and id from
   unique_id `{mac}-{light|rgb|rgbw|cct|switch}:{n}`; one `call_rpc("<Component>.Set",
   {id, on: True, toggle_after: s, **fields})` with field translation copied from `shelly/light.py`;
@@ -453,16 +454,26 @@ of a cell's targets at once so native group commands stay possible. Hue `move`/`
 ### Docs generation
 
 `scripts/gen_docs.py` imports the registry without `hass`, emits `docs/matrix.yaml` (machine
-readable: tier, mode, domains, duration, supports_fields, confirmable, native_groups, notes,
+readable: per-class tier, fingerprint, mode, domains, duration, supports_fields, confirmable, native_groups, notes,
 bench) and `docs/matrix.md`, and rewrites the generated block in README, in each
 `docs/features/*.md`, and in each platform section of `docs/platforms.md` (one marker pair per
 section, `<!-- generated:<platform>:start/end -->`). Matrix cell text: `tier · best status · duration
 range` with footnotes from `docs/_notes.yaml`. The generator fails on a missing or unused note
-key, a `bench` path that does not exist, or `tier >= beta` with `bench=None`. CI runs `--check`.
+key, a `bench` path that does not exist, or a non-experimental cell under 95% coverage
+(`coverage.json`). CI runs `--check`. Fingerprint: AST hash of the cell module, excluding
+docstrings and the `CellCapabilities` declaration; bench records carry the fingerprint they
+tested. Tier ladder: see `CLAUDE.md`. A release-workflow check rejects tags not matching
+`^v\d+\.\d+\.\d+(rc\d+)?$`.
 
-Tier ladder: `experimental` = implemented with unit tests; `beta` = rig test passed on at least
-one device, bench record written; `stable` = rig-passed on 2+ device models with bench records
-and no open cell bugs for a release.
+Tester reports: RC builds raise one fixable Repairs issue ("vX.Y.ZrcN: help test on your
+hardware"). Its repair flow multi-selects the RC's requested units that match the user's own
+entities; each chosen unit becomes a non-fixable Repairs issue ("Test wanted: <platform> ·
+<class>") whose `learn_more_url` opens the `test-report.yml` GitHub issue form prefilled (text
+fields only) with RC, HA version, unit, device model, firmware (`sw_version`) and a per-unit
+checklist. The form says: "Already tested by someone else? Still worth sending: a different model
+or firmware is new evidence." The requested units are fixed per RC (no runtime
+fetch); duplicate reports are welcome. New RCs clear and recompute these issues. Passing
+reports become bench records citing the issue.
 
 ## Testing
 
@@ -525,10 +536,10 @@ branches stay in unit tests. Unit runs never import rig fixtures (`--rig` or `DE
 gates collection; `rig` marker registered in pyproject).
 
 `.gitignore`: `tests/rig/inventory.yaml`, `.env.rig`. `tests/rig/README.md` covers token creation,
-inventory format (per platform -> entities with role tags `light_dimmable`, `light_color`,
+inventory format (per platform -> entities with role tags `light_dimmable`, `light_ct`, `light_color`,
 `switch_plug`, `group`, `scene`) and safety notes. **Claude asks before every rig run; the devices
 are in-use household lights.** Rig passes are recorded in `docs/bench/<platform>/<feature>.md`
-(date, HA version, device model, firmware) and promote tiers; tier-bump PRs link a passing run.
+(date, HA version, device model, firmware, fingerprint, source: rig run or test-report issue).
 
 ## Delivery sequence
 
@@ -536,18 +547,18 @@ are in-use household lights.** Rig passes are recorded in `docs/bench/<platform>
 |---|---|---|
 | 0 | Scaffold + CI | Plan saved to `docs/plans/`; `git init`, private GitHub repo `jasonmx/device-side`; manifest, config_flow, const, strings, icons, empty services.yaml; pyproject, pre-commit, workflows from hue_dimmer; `test_services_setup.py` green with zero features; hassfest + HACS validate green; README skeleton with matrix markers. |
 | 1 | Core + fake platform | `core/*`; `features/turn_on_for.py`, `turn_off_for.py`; fake platform (with a fake native group and `expand_group` hook); dispatcher/resolver/groups tests green (HA-group expansion for light and switch, native-group pass-through vs expansion, clamp, total-failure raise, response shape, semaphore bound, guarded-import skip). No live load yet: there is no dev HA. |
-| 2 | Shelly `turn_on_for` + `turn_off_for` | one RPC with fields; Gen1 -> unsupported; read-back -> confirmed under mock; Shelly section of `docs/platforms.md` on the template; tier experimental. |
-| 3 | Rig harness | `scripts/rig.py`, `deploy.sh`, `tests/rig/conftest.py`, inventory example, `docs/contributing/rig.md`; **first approved deploy is the integration's first load in any HA**: confirm entry adds, actions appear with translated names, the brightness fields hide for a switch-only selection; then Shelly `turn_on_for` passes against the house; bench record written; Shelly -> beta. |
+| 2 | Shelly `turn_on_for` + `turn_off_for` | one RPC with fields; Gen1 -> unsupported; read-back -> confirmed under mock; Shelly section of `docs/platforms.md` on the template; cell `experimental=True`. |
+| 3 | Rig harness | `scripts/rig.py`, `deploy.sh`, `tests/rig/conftest.py`, inventory example, `docs/contributing/rig.md`; **first approved deploy is the integration's first load in any HA**: confirm entry adds, actions appear with translated names, the brightness fields hide for a switch-only selection; then Shelly `turn_on_for` passes against the house; bench record written; Shelly `switch` -> beta (Shelly `light` unclaimed until a tester reports). |
 | 4 | Z2M `turn_on_for` | detect, addressing, publish; `light.turn_on` precedes when fields present; group topic when `native_groups`; rig test. |
 | 5 | `toggle_for` | composite `run()`; state-split tests with fake + Shelly; rig test; derived matrix row. |
 | 6 | Hue port | five cells + bridge/transition_cache/colors; `move` across brightness, color_temp, hue, saturation; `grouped_light` native for move/stop, expanded for set/get_attributes; hue_dimmer tests ported to real-hass fixtures; rig parity with hue_dimmer `tests/RELEASE_CHECKLIST.md`. |
 | 7 | ZHA `turn_on_for` | after Jason has ZHA running on the rig; addressing; admin context passthrough; ValueError -> rejected; rig test. |
 | 8 | Matter `turn_on_for` | after Jason has Matter running on the rig; LT check; `OnWithTimedOff`; optional read-back; rig test on bulb and plug. |
 | 9 | Docs generator + templates | `gen_docs.py --check` in CI; matrix, README block, feature pages, `platforms.md` sections; `_notes.yaml`; contributing guides. |
-| 10 | Bench + tiers | bench files filled from rig runs across the device matrix (handoff 7.11); tiers bumped; generator enforces bench-before-beta. |
-| 11 | v1 tag | manifest version, HACS release, matrix current, release checklist adapted from hue_dimmer; repo flipped public with contributor docs. |
+| 10 | Bench + tiers + tester flow | fingerprinting and computed tiers in `gen_docs.py`; per-cell coverage check; tag-format check; `test-report.yml` issue form; RC-only umbrella Repairs issue with multi-select flow and prefilled per-unit links; bench files filled from rig runs and tester reports. |
+| 11 | v1 tag | manifest version, HACS release, matrix current, release checklist adapted from hue_dimmer; repo flipped public with contributor docs; nightly schedule restored in `validate.yml` and HACS validate green. |
 
-Each slice is a PR to `main`. Implementation starts in a **fresh session** per the planning rule;
+Each slice is a commit (or a few) pushed to `release/v1.0.0`, CI green (`ci-green`) before the next slice starts; no per-slice PRs before v1, and the v1 merge to `main` is the only PR. Rule evidence that would have gone in a PR body points at a commit sha or this plan instead. Implementation starts in a **fresh session** per the planning rule;
 the first action of that session is slice 0.
 
 ## Open items to verify during implementation (not before)
