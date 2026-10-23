@@ -41,6 +41,11 @@ class Dispatcher:
                 early.append(
                     EntityResult(entity_id, Status.UNSUPPORTED, platform=target.platform, detail="domain_not_supported")
                 )
+            elif target.via_wrapper and request.fields_present():
+                # The caller addressed a light, so light fields are refused, not dropped as they are on a switch.
+                early.append(
+                    EntityResult(entity_id, Status.UNSUPPORTED, platform=target.platform, detail="fields_not_supported")
+                )
             else:
                 targets.append(target)
 
@@ -68,7 +73,9 @@ class Dispatcher:
         buckets: dict[str, tuple[Adapter, list[Target]]] = {}
         for target in targets:
             if (adapter := self.registry.adapter(feature_key, target.platform)) is None:
-                results.append(EntityResult(target.entity_id, Status.UNSUPPORTED, target.platform, detail="no_adapter"))
+                results.append(
+                    EntityResult(target.reported_id, Status.UNSUPPORTED, target.platform, detail="no_adapter")
+                )
                 continue
             buckets.setdefault(target.platform, (adapter, []))[1].append(target)
 
@@ -103,7 +110,7 @@ class Dispatcher:
             else:
                 expanded.extend(expand(self.hass, target))
         seen: set[str] = set()
-        return [target for target in expanded if not (target.entity_id in seen or seen.add(target.entity_id))]
+        return [target for target in expanded if not (target.reported_id in seen or seen.add(target.reported_id))]
 
     async def _run_adapter(self, adapter: Adapter, request: Request, targets: list[Target]) -> list[EntityResult]:
         clamped_to = None
@@ -129,8 +136,9 @@ class Dispatcher:
         clamped_to: float | None,
     ) -> list[EntityResult]:
         by_id: dict[str, EntityResult] = {}
+        expected = {target.reported_id for target in targets}
         for result in raw:
-            if result.entity_id in by_id or result.entity_id not in {target.entity_id for target in targets}:
+            if result.entity_id in by_id or result.entity_id not in expected:
                 _LOGGER.debug(
                     "%s on %s: dropping stray result for %s", adapter.feature, adapter.platform, result.entity_id
                 )
@@ -139,7 +147,7 @@ class Dispatcher:
         ignored = bool(request.fields_present())
         out = []
         for target in targets:
-            result = by_id.get(target.entity_id) or adapter.result(target, Status.REJECTED, detail="no_result")
+            result = by_id.get(target.reported_id) or adapter.result(target, Status.REJECTED, detail="no_result")
             if clamped_to is not None and result.clamped_to is None and result.status not in FAILED:
                 result = replace(result, clamped_to=clamped_to)
             if ignored and target.domain != "light" and result.detail is None:

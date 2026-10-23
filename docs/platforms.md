@@ -34,6 +34,12 @@ Any other Shelly entity (virtual booleans, scripts, circuit breakers) has no fli
 returns `unsupported` with detail `not_addressable`. Shelly has no device-side groups, so a light
 group helper over Shelly lights is expanded and each member gets its own command.
 
+A `switch_as_x` light over a Shelly switch is served as that switch: the helper forwards on/off
+unchanged, so the device receives the switch's own `Switch.Set`, and the result is keyed on the
+light's entity ID. Light fields sent to such a light return `unsupported` with detail
+`fields_not_supported`. An inverted helper returns `inverted_wrapper`, and a helper wrapping
+another helper returns `not_addressable`. This holds on every platform, not only Shelly.
+
 ### `turn_on_for`
 
 One `<Component>.Set` call with `on: true` and `toggle_after` set to the duration, so the device

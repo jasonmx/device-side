@@ -24,7 +24,7 @@ test. The gate exists so occupants aren't startled by devices switching on and o
    `RIG_SSH` (default `ha`).
 4. **Inventory.** Copy `tests/rig/inventory.example.yaml` to `tests/rig/inventory.yaml` (gitignored) and list
    the rig's entities per platform, each with role tags: `switch_plug`, `light_onoff` (a relay shown as a light),
-   `light_dimmable`, `light_ct`,
+   `light_wrapped` (a `switch_as_x` light over a switch), `light_dimmable`, `light_ct`,
    `light_color`, `group`, `scene`. A test that needs a role the inventory lacks skips.
 
 ## Running
