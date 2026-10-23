@@ -6,4 +6,4 @@ from ...core.capabilities import PlatformInfo
 
 PLATFORM = PlatformInfo(key="shelly", title="Shelly", ha_integration="shelly", max_concurrency=4)
 
-CELLS = [ShellyTurnOffFor, ShellyTurnOnFor]
+ADAPTERS = [ShellyTurnOffFor, ShellyTurnOnFor]

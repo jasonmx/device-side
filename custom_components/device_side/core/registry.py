@@ -3,8 +3,8 @@ import logging
 from collections.abc import Iterable, Iterator
 from types import ModuleType
 
+from .adapter import Adapter
 from .capabilities import PlatformInfo
-from .cell import Cell
 from .feature import Feature
 from .. import features as features_pkg
 from .. import platforms as platforms_pkg
@@ -12,8 +12,8 @@ from .. import platforms as platforms_pkg
 _LOGGER = logging.getLogger(__name__)
 
 
-class CellRegistry:
-    """Features, platforms and the cells joining them, built from module data with no side effects and no hass.
+class AdapterRegistry:
+    """Features, platforms and the adapters joining them, built from module data with no side effects and no hass.
 
     That is what lets gen_docs.py and the rig runner import it offline, and tests build one from an explicit list.
     """
@@ -21,12 +21,12 @@ class CellRegistry:
     def __init__(self, features: Iterable[type[Feature]], platform_modules: Iterable[str | ModuleType]):
         self.features: dict[str, type[Feature]] = {feature.key: feature for feature in features}
         self.platforms: dict[str, PlatformInfo] = {}
-        self._cells: dict[tuple[str, str], Cell] = {}
+        self._adapters: dict[tuple[str, str], Adapter] = {}
         for module in platform_modules:
             self._add_platform(module)
 
     @classmethod
-    def discover(cls) -> CellRegistry:
+    def discover(cls) -> AdapterRegistry:
         """The production registry. Imports modules, so run it in the import executor."""
         return cls(features_pkg.discover(), platforms_pkg.discover())
 
@@ -45,21 +45,21 @@ class CellRegistry:
                 return
         info: PlatformInfo = module.PLATFORM
         self.platforms[info.key] = info
-        for cell_cls in module.CELLS:
-            if cell_cls.platform != info.key:
-                raise ValueError(f"{cell_cls.__name__} declares platform {cell_cls.platform}, module is {info.key}")
-            if cell_cls.feature not in self.features:
-                raise ValueError(f"{cell_cls.__name__} serves unknown feature {cell_cls.feature}")
-            self._cells[(cell_cls.feature, info.key)] = cell_cls()
+        for cls in module.ADAPTERS:
+            if cls.platform != info.key:
+                raise ValueError(f"{cls.__name__} declares platform {cls.platform}, module is {info.key}")
+            if cls.feature not in self.features:
+                raise ValueError(f"{cls.__name__} serves unknown feature {cls.feature}")
+            self._adapters[(cls.feature, info.key)] = cls()
 
-    def cell(self, feature: str, platform: str) -> Cell | None:
-        return self._cells.get((feature, platform))
+    def adapter(self, feature: str, platform: str) -> Adapter | None:
+        return self._adapters.get((feature, platform))
 
     def available_platforms(self) -> list[PlatformInfo]:
         return [info for info in self.platforms.values() if info.available]
 
-    def matrix(self) -> Iterator[tuple[str, str, Cell | None]]:
-        """Every feature x platform pair, sorted, with its cell or None."""
+    def matrix(self) -> Iterator[tuple[str, str, Adapter | None]]:
+        """Every feature x platform pair, sorted, with its adapter or None."""
         for feature in sorted(self.features):
             for platform in sorted(self.platforms):
-                yield feature, platform, self.cell(feature, platform)
+                yield feature, platform, self.adapter(feature, platform)

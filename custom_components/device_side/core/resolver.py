@@ -6,10 +6,12 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
 from .models import Target
-from .registry import CellRegistry
+from .registry import AdapterRegistry
 
 
-def resolve(hass: HomeAssistant, registry: CellRegistry, entity_id: str, via_group: str | None = None) -> Target | str:
+def resolve(
+    hass: HomeAssistant, registry: AdapterRegistry, entity_id: str, via_group: str | None = None
+) -> Target | str:
     """The Target for an entity, or the reason key it cannot be served.
 
     Platforms with a detect hook are tried first, so Z2M claims its MQTT entities before a generic MQTT platform.

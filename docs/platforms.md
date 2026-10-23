@@ -64,7 +64,7 @@ duration. Light fields are not accepted.
 - **Timer limits are provisional.** The Shelly API documents `toggle_after` only as a number of
   seconds. Device Side accepts 0.1 s to 24 h in 0.1 s steps; durations outside that range are
   clamped and the result carries `clamped_to`. The real device limits are confirmed on hardware
-  before this cell leaves `experimental`.
+  before this adapter leaves `experimental`.
 - **The timer is the device's, not Home Assistant's.** Turning the output on or off by any other
   route (the Shelly app, a wall switch, a plain `light.turn_off`) can replace or cancel the
   flip-back timer, according to the device's own rules.

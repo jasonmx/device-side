@@ -9,14 +9,14 @@ from ..const import DOMAIN
 
 if TYPE_CHECKING:
     from .dispatcher import Dispatcher
-    from .registry import CellRegistry
+    from .registry import AdapterRegistry
 
 DATA: HassKey[DeviceSideData] = HassKey(DOMAIN)
 
 
 @dataclass(slots=True)
 class DeviceSideData:
-    registry: CellRegistry
+    registry: AdapterRegistry
     dispatcher: Dispatcher
     # Created lazily so each semaphore binds to the running loop, not the import executor's thread.
     semaphores: dict[str, asyncio.Semaphore] = field(default_factory=dict)

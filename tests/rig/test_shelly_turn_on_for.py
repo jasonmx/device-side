@@ -25,8 +25,8 @@ def is_off(state: dict | None) -> bool:
 
 
 @pytest.mark.parametrize("role", ROLES)
-async def test_on_then_off_after_duration(ha: HAClient, snapshot, require_cell, timing, role):
-    entity_id = require_cell("shelly", "turn_on_for", role)
+async def test_on_then_off_after_duration(ha: HAClient, snapshot, require_adapter, timing, role):
+    entity_id = require_adapter("shelly", "turn_on_for", role)
     domain = entity_id.partition(".")[0]
     tolerance = timing("shelly")
     await snapshot.take(entity_id)
@@ -45,8 +45,8 @@ async def test_on_then_off_after_duration(ha: HAClient, snapshot, require_cell, 
     await ha.wait_for(entity_id, is_off, 2 * tolerance)
 
 
-async def test_unclaimed_brightness_on_a_light_raises(ha: HAClient, snapshot, require_cell):
-    entity_id = require_cell("shelly", "turn_on_for", "light_onoff")
+async def test_unclaimed_brightness_on_a_light_raises(ha: HAClient, snapshot, require_adapter):
+    entity_id = require_adapter("shelly", "turn_on_for", "light_onoff")
     before = await snapshot.take(entity_id)
 
     with pytest.raises(HAError) as err:

@@ -16,15 +16,17 @@ class DurationLimits:
 
 
 @dataclass(frozen=True, slots=True)
-class CellCapabilities:
-    """What a cell claims. A class nobody has tested is left out of domains/supports_fields, not gated at runtime."""
+class AdapterCapabilities:
+    """What an adapter claims. A class nobody has tested is left out of domains/supports_fields,
+    not gated at runtime.
+    """
 
     experimental: bool = False
     mode: Mode = Mode.NATIVE
     domains: frozenset[str] = frozenset({"light"})
     duration: DurationLimits | None = None
     supports_fields: frozenset[str] = frozenset()
-    # Device-side backings the cell has proven (Shelly: RPC component names); None claims all it can address.
+    # Device-side backings the adapter has proven (Shelly: RPC component names); None claims all it can address.
     # Proof covers only the backing the call reaches, so a sibling's untested backing is left out here.
     components: frozenset[str] | None = None
     confirmable: bool = False
@@ -43,7 +45,7 @@ class PlatformInfo:
     detect: Callable[[HomeAssistant, er.RegistryEntry, dr.DeviceEntry | None], bool] | None = None
     # True for an integration-native group (Hue grouped_light, a Z2M or ZHA group entity).
     is_group: Callable[[HomeAssistant, Target], bool] | None = None
-    # Members of a native group, for cells without native_groups; None means membership is unknowable here.
+    # Members of a native group, for adapters without native_groups; None means membership is unknowable here.
     expand_group: Callable[[HomeAssistant, Target], list[Target]] | None = None
     max_concurrency: int = 4
     available: bool = True

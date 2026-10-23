@@ -4,18 +4,18 @@ from homeassistant.core import HomeAssistant
 
 from .addressing import address, unsupported_reason
 from .rpc import TIMER_LIMITS, light_params, set_with_timer
-from ...core.capabilities import CellCapabilities
-from ...core.cell import Cell
+from ...core.adapter import Adapter
+from ...core.capabilities import AdapterCapabilities
 from ...core.models import EntityResult, Target
 from ...features.turn_on_for import TurnOnForRequest
 
 
-class ShellyTurnOnFor(Cell[TurnOnForRequest]):
+class ShellyTurnOnFor(Adapter[TurnOnForRequest]):
     """One <Component>.Set carrying on, the light fields and toggle_after."""
 
     feature: ClassVar[str] = "turn_on_for"
     platform: ClassVar[str] = "shelly"
-    capabilities: ClassVar[CellCapabilities] = CellCapabilities(
+    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         experimental=True,
         domains=frozenset({"light", "switch"}),
         duration=TIMER_LIMITS,

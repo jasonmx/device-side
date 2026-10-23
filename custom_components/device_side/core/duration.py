@@ -5,7 +5,7 @@ from .models import TimedRequest
 
 
 def clamp[RequestT: TimedRequest](request: RequestT, limits: DurationLimits) -> tuple[RequestT, float | None]:
-    """Fit a request's duration to a cell's limits.
+    """Fit a request's duration to an adapter's limits.
 
     Rounding to the device's resolution is silent; clamped_to is set only when the requested value lay outside the
     range, since that is the case a caller needs to know about.
