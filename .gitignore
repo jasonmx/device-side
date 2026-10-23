@@ -1,0 +1,29 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+.*_cache
+
+# Secrets
+.env
+.env.rig
+
+# Rig inventory (household entities)
+tests/rig/inventory.yaml
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# Claude Code
+CLAUDE.md
+.claude/
