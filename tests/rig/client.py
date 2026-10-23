@@ -31,8 +31,14 @@ class HAClient:
         self._reader: asyncio.Task | None = None
 
     async def connect(self) -> None:
-        self._session = aiohttp.ClientSession(headers={"Authorization": f"Bearer {self.token}"})
-        self._ws = await self._session.ws_connect(f"{self.url}/api/websocket")
+        # The system resolver, not aiohttp's default aiodns: only the system one resolves mDNS (.local) names.
+        connector = aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
+        self._session = aiohttp.ClientSession(connector=connector, headers={"Authorization": f"Bearer {self.token}"})
+        try:
+            self._ws = await self._session.ws_connect(f"{self.url}/api/websocket")
+        except aiohttp.ClientError:
+            await self._session.close()
+            raise
         if (await self._ws.receive_json())["type"] != "auth_required":
             raise RuntimeError("unexpected WebSocket greeting")
         await self._ws.send_json({"type": "auth", "access_token": self.token})
