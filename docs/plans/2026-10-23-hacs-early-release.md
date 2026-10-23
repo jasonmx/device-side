@@ -25,9 +25,8 @@ shipping the smallest release HACS will accept.
   scaffold only, and there are no `docs/bench/` records yet.
 
 **What you decided:**
-- v0.0.1 claims Shelly **`switch`** and on/off **`light`** (shared on/off, `onoff_shared`) for `turn_on_for`, `turn_off_for` and `toggle_for`.
-- `toggle_for` keeps the plan's design: read HA state, then send one `Switch.Set` with
-  `toggle_after`.
+- v0.0.1 claims Shelly **`switch`** and on/off **`light`** (shared on/off, `onoff_shared`) for `turn_on_for` and `turn_off_for`.
+- `toggle_for` is dropped (no use case: HA's `flash` covers a short toggle).
 - The 7-day RC soak is **waived for v0.0.1 only**.
 - After v0.0.1, releases go incrementally (`v0.0.x`), and one release can carry several platforms
   or features. The bump to `v0.1.0` happens when the current plan is feature complete **and**
@@ -43,7 +42,7 @@ New delivery sequence:
 |---|---|---|
 | 0–2 | as is (done) | none |
 | 3 | Rig harness | Unchanged (running in another session). |
-| 4 | `toggle_for` (Shelly) + `turn_off_for` rig pass | Was slice 5. Unchanged design (HA state decides, one `Switch.Set` with `toggle_after`); rig tests for `toggle_for` and `turn_off_for`, so all three v0.0.1 features have bench records. |
+| 4 | `turn_off_for` rig pass | Was slice 5. Rig test for `turn_off_for`, so both v0.0.1 features have bench records. |
 | 5 | **v0.0.1 release + HACS submission** | New. Details in section 2. |
 | 6 | Z2M `turn_on_for` | Was 4. Work moves to `release/v0.0.2`. |
 | 7 | Hue port | Was 6. |
@@ -75,7 +74,7 @@ Steps on `release/v0.0.1`:
    not, file the domain with home-assistant/brands.
 3. **Claims:** confirm the Shelly adapters claim `switch` and on/off `light` only. The light fields stay unclaimed
    per the CLAUDE.md Releases rule until a tester reports.
-4. **Bench records:** write `docs/bench/shelly/{turn_on_for,turn_off_for,toggle_for}.md` by hand
+4. **Bench records:** write `docs/bench/shelly/{turn_on_for,turn_off_for}.md` by hand
    from the rig runs (date, HA version, device model, firmware, fingerprint). `gen_docs.py`
    doesn't exist yet, so compute the fingerprints with a short one-off script or by hand.
 5. **README:**
@@ -117,8 +116,7 @@ edited, because the waiver is one-off and CLAUDE.md holds standing rules only.
 - `docs/plans/2026-10-23-device-side-repo-plan.md` (sequence, Repo/Versions bullets, slice 5)
 - During slice 5: `LICENSE`, `custom_components/device_side/brand/icon.png` (+ `@2x`),
   `README.md`, `CONTRIBUTING.md`, `docs/bench/shelly/*.md`, `.github/workflows/validate.yml`
-- Slice 4: `tests/rig/test_shelly_turn_off_for.py`, `tests/rig/test_shelly_toggle_for.py`,
-  `custom_components/device_side/features/toggle_for.py` plus its Shelly adapter
+- Slice 4: `tests/rig/test_shelly_turn_off_for.py`
 
 ## Verification
 
@@ -135,5 +133,5 @@ edited, because the waiver is one-off and CLAUDE.md holds standing rules only.
 Per the planning rule, implement in a **fresh session**:
 1. Edit the repo plan (done).
 2. Slice 3 rig runs (in progress in another session).
-3. Slice 4 (`toggle_for` + `turn_off_for` rig pass; ask before each run).
+3. Slice 4 (`turn_off_for` rig pass; ask before each run).
 4. Slice 5 (release and HACS submission).

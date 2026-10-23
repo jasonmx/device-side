@@ -19,8 +19,6 @@ class Feature[RequestT: Request](ABC):
     domains: ClassVar[frozenset[str]]
     supports_response: ClassVar[SupportsResponse] = SupportsResponse.OPTIONAL
     fields: ClassVar[dict[probatio.Marker, Any]] = {}
-    # Features this one is composed from (toggle_for), for the docs matrix.
-    derived_from: ClassVar[tuple[str, ...]] = ()
 
     @classmethod
     def schema(cls):
@@ -35,5 +33,5 @@ class Feature[RequestT: Request](ABC):
     async def run(
         cls, hass: HomeAssistant, request: RequestT, targets: list[Target], dispatcher: Dispatcher
     ) -> list[EntityResult]:
-        """Composite features override this to route targets to other features' adapters."""
+        """Run this feature's adapters; a feature that routes targets elsewhere overrides this."""
         return await dispatcher.run_adapters(cls.key, request, targets)
