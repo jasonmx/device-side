@@ -81,23 +81,30 @@ def plan_lines(modules: list[RigModule], inventory: Inventory, registry: Adapter
     return lines
 
 
-def deployed_tree(ssh: str) -> str | None:
-    """The tree hash the deploy tool's sync verb last installed, or None if it never has (exit 91)."""
-    result = subprocess.run(["ssh", ssh, "the deploy status verb"], capture_output=True, text=True)
+def deployed_tree(status_cmd: str) -> str | None:
+    """The tree hash the deploy sync command last installed, or None if unset or not yet deployed (exit 91)."""
+    if not status_cmd:
+        return None
+    result = subprocess.run(status_cmd.split(), capture_output=True, text=True)
     if result.returncode == 91:
         return None
     if result.returncode != 0:
-        raise SystemExit(f"ssh {ssh} the deploy status verb failed ({result.returncode}): {result.stderr.strip()}")
+        raise SystemExit(f"{status_cmd} failed ({result.returncode}): {result.stderr.strip()}")
     return result.stdout.strip()
 
 
-def deploy_state(ssh: str) -> Deploy:
+def deploy_state(status_cmd: str) -> Deploy:
     """Whether HA runs this checkout's integration, and if not, whether origin has it to deploy.
 
-    the deploy sync verb installs a branch tip from GitHub, never the working tree, so a deploy needs the change pushed.
+    The deploy sync command installs a branch tip from GitHub, never the working tree, so a
+    deploy needs the change pushed.
     """
     branch = git("rev-parse", "--abbrev-ref", "HEAD")
-    state = Deploy(local_tree=git("rev-parse", f"HEAD:{COMPONENT}"), deployed_tree=deployed_tree(ssh), branch=branch)
+    state = Deploy(
+        local_tree=git("rev-parse", f"HEAD:{COMPONENT}"),
+        deployed_tree=deployed_tree(status_cmd),
+        branch=branch,
+    )
     if git("status", "--porcelain", "--", COMPONENT):
         state.blocker = f"uncommitted changes under {COMPONENT}; commit and push them first"
         return state
@@ -109,6 +116,16 @@ def deploy_state(ssh: str) -> Deploy:
     elif git("rev-parse", "--quiet", "--verify", f"{remote[0]}:{COMPONENT}", check=False) != state.local_tree:
         state.blocker = f"origin/{branch} does not match HEAD under {COMPONENT}; push first"
     return state
+
+
+def check_deploy(env: dict, no_restart: bool, deploy: Deploy) -> None:
+    """Raise SystemExit if the deploy cannot proceed: missing commands or a git blocker."""
+    if not env.get("RIG_SYNC_CMD"):
+        raise SystemExit("RIG_SYNC_CMD must be set in .env.rig to deploy (see tests/rig/env.example)")
+    if not no_restart and not env.get("RIG_RESTART_CMD"):
+        raise SystemExit("RIG_RESTART_CMD must be set in .env.rig to restart (see tests/rig/env.example)")
+    if deploy.blocker:
+        raise SystemExit(f"Cannot deploy: {deploy.blocker}.")
 
 
 def lock_rig(path: Path, holder: str) -> TextIO:
@@ -168,7 +185,7 @@ def wait_until_ready(
             f"HA is running but has no {'.'.join(SERVICE)}. On a first load, add the integration "
             "(Settings > Devices & services > Add integration > Device Side), then rerun with --no-deploy."
         )
-    raise SystemExit(f"HA did not report RUNNING within {timeout:.0f}s; check `the deploy log command`.")
+    raise SystemExit(f"HA did not report RUNNING within {timeout:.0f}s; check HA logs for errors.")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -192,13 +209,13 @@ def main(argv: list[str] | None = None) -> int:
     modules = select(rig_modules(), inventory, args.integration)
     if not modules:
         raise SystemExit("No rig test matches the inventory's integrations.")
-    deploy = deploy_state(env["RIG_SSH"])
+    deploy = deploy_state(env.get("RIG_STATUS_CMD", ""))
     deploying = deploy.needed and not args.no_deploy
     restarting = deploying and not args.no_restart
     print_plan(inventory, modules, deploy, deploying, restarting)
 
-    if deploying and deploy.blocker:
-        raise SystemExit(f"Cannot deploy: {deploy.blocker}.")
+    if deploying:
+        check_deploy(env, args.no_restart, deploy)
     if args.dry_run:
         return 0
     if not gate():
@@ -209,7 +226,12 @@ def main(argv: list[str] | None = None) -> int:
         command = ["sh", str(REPO / "scripts" / "deploy.sh"), deploy.branch]
         if args.no_restart:
             command.append("--no-restart")
-        subprocess.run(command, check=True, env={**os.environ, "RIG_SSH": env["RIG_SSH"]})
+        deploy_env = {
+            **os.environ,
+            "RIG_SYNC_CMD": env["RIG_SYNC_CMD"],
+            "RIG_RESTART_CMD": env.get("RIG_RESTART_CMD", ""),
+        }
+        subprocess.run(command, check=True, env=deploy_env)
     wait_until_ready(env["HA_URL"].rstrip("/"), env["HA_TOKEN"], READY_TIMEOUT_S if restarting else 15)
     return run_pytest(modules, args.keyword)
 
@@ -226,7 +248,7 @@ def print_plan(
         print(f"  {line}")
     print(f"Integration: local {deploy.local_tree[:12]}, deployed {(deploy.deployed_tree or 'none')[:12]}")
     if deploying:
-        print(f"Deploy: the deploy sync verb {deploy.branch}" + (", then restart Home Assistant" if restarting else ", no restart"))
+        print(f"Deploy: sync {deploy.branch}" + (", then restart Home Assistant" if restarting else ", no restart"))
     elif deploy.needed:
         print("Deploy: skipped (--no-deploy); the tests exercise the deployed tree, not this checkout")
     else:
