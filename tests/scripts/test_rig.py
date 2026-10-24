@@ -73,7 +73,7 @@ def test_select_and_plan_lines(inventory):
 
     lines = rig.plan_lines(selected, inventory, AdapterRegistry.discover())
     assert lines == [
-        "shelly / turn_on_for -> switch.plug (experimental)",
+        "shelly / turn_on_for -> switch.plug (untested)",
         "hue / move -> light.lamp (no adapter, will skip)",
     ]
 

@@ -15,7 +15,6 @@ class ShellyTurnOffFor(Adapter[TimedRequest]):
     feature: ClassVar[str] = "turn_off_for"
     platform: ClassVar[str] = "shelly"
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        experimental=True,
         domains=frozenset({"light", "switch"}),
         duration=TIMER_LIMITS,
         confirmable=True,
