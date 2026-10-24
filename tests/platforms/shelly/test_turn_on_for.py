@@ -12,7 +12,7 @@ from ...conftest import call
 from ...fixtures.fake import add_switch_as_x
 from ...fixtures.shelly import add_shelly_entity, shelly_device
 
-CONFIRMED = {"status": "confirmed", "mode": "native", "platform": "shelly"}
+CONFIRMED = {"status": "confirmed", "platform": "shelly"}
 
 
 @pytest.fixture
@@ -112,7 +112,6 @@ async def test_fields_the_component_cannot_take_are_refused(
 
     assert response[entity_id] == {
         "status": "unsupported",
-        "mode": "native",
         "platform": "shelly",
         "detail": "fields_not_supported",
     }
@@ -176,7 +175,7 @@ async def test_inconclusive_read_back_reports_sent(hass, setup_production, statu
 
     response = await call(hass, "turn_on_for", {"entity_id": "switch.porch", "duration": 5})
 
-    assert response == {"switch.porch": {"status": "sent", "mode": "native", "platform": "shelly", "detail": detail}}
+    assert response == {"switch.porch": {"status": "sent", "platform": "shelly", "detail": detail}}
 
 
 async def test_duration_beyond_the_limit_is_clamped(hass, setup_production):

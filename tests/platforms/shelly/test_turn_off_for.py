@@ -5,7 +5,7 @@ from unittest.mock import call as rpc_call
 from ...conftest import call
 from ...fixtures.shelly import add_shelly_entity, shelly_device
 
-CONFIRMED = {"status": "confirmed", "mode": "native", "platform": "shelly"}
+CONFIRMED = {"status": "confirmed", "platform": "shelly"}
 
 
 async def test_switch_and_relay_light_each_get_one_set_and_an_unclaimed_component_is_refused(hass, setup_production):
@@ -40,7 +40,6 @@ async def test_gen1_is_unsupported(hass, setup_production):
 
     assert response["switch.old_relay"] == {
         "status": "unsupported",
-        "mode": "native",
         "platform": "shelly",
         "detail": "gen1_unsupported",
     }

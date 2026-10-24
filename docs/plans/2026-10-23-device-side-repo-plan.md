@@ -44,9 +44,9 @@ tuya 29.5%, esphome 27.3%, tplink 13.8%, zwave_js 8.3%, tasmota 7.6%.)
      accepted but not prioritized.
 - **One action per user intent, not per protocol primitive.** Zigbee has move/step/moveto;
   device_side exposes one `move`. Command selection is hidden in the platform adapter.
-- **Fallback policy: opt-in "assisted" only.** HA-side help is allowed only where it adds safety
-  on top of a native mechanism. Pure emulation is never shipped; docs show how to build it with `set_attributes` plus
-  an automation.
+- **No HA-side help.** Every feature runs on the device or bridge; nothing Device Side does
+  depends on HA staying up. Emulation is never shipped; docs show how to build it with
+  `set_attributes` plus an automation.
 - **Audience:** automation authors and dashboard users from v1. Actions for everything; entities
   only where a feature is a persistent setting, not a command.
 
@@ -169,8 +169,7 @@ tuya 29.5%, esphome 27.3%, tplink 13.8%, zwave_js 8.3%, tasmota 7.6%.)
     address an HA group natively, which is fine because no device can. Goal throughout:
     minimize radio traffic and popcorning by sending to the largest unit the device accepts.
 - **Results:** `SupportsResponse.OPTIONAL`. Response maps entity_id to
-  `{status: unsupported|rejected|sent|confirmed, mode: native|assisted, platform, clamped_to?,
-  detail?}`. Tier is not in the response: it is a subjective label about the code, not a fact
+  `{status: unsupported|rejected|sent|confirmed, platform, clamped_to?, detail?}`. Tier is not in the response: it is a subjective label about the code, not a fact
   about this call. Raise `HomeAssistantError` only on invalid input or when every target
   failed, so mixed rooms do not abort automations.
 - **Stability tiers** per adapter (feature x platform): `experimental | untested | beta |
@@ -180,8 +179,7 @@ tuya 29.5%, esphome 27.3%, tplink 13.8%, zwave_js 8.3%, tasmota 7.6%.)
   claims carry the scope, so a tier covers everything the adapter claims: there is no runtime
   tier gate and no options flow for it, and a backing or field nobody has tested is simply not
   claimed in `components`/`supports_fields`, so `supports()` returns `unsupported`. Tier is not
-  logged per call and not returned in results. Mode (`native | assisted`) is objective and
-  stays in results.
+  logged per call and not returned in results.
 - **Quality bar:** HA quality scale Gold conventions (config flow, translations, tests,
   diagnostics, docs).
 - **Config:** single config entry, one confirm step, no options in v1. Services registered in
@@ -268,7 +266,7 @@ custom_components/device_side/
   icons.json             "services": {<feature>: {"service": "mdi:..."}}
   translations/en.json   copy of strings.json
   core/
-    models.py            Status, Mode, Tier, FeatureKind, Target, EntityResult, LightFields + validators
+    models.py            Status, Tier, FeatureKind, Target, EntityResult, LightFields + validators
     capabilities.py      DurationLimits, AdapterCapabilities, PlatformInfo
     feature.py           Feature[RequestT] base class
     adapter.py              Adapter[RequestT] base class + gather() pacing helper
@@ -325,7 +323,6 @@ copied from `/Users/jason/projects/hue-smooth-dimming`, plus `docs.yml` running
 ```python
 # core/models.py
 class Status(StrEnum): UNSUPPORTED, REJECTED, SENT, CONFIRMED
-class Mode(StrEnum): NATIVE, ASSISTED
 class Tier(StrEnum): STABLE, BETA, UNTESTED, EXPERIMENTAL   # computed by gen_docs, never stored on an adapter
 class FeatureKind(StrEnum): COMMAND, SETTING, QUERY
 
@@ -337,13 +334,13 @@ class LightFields:  # brightness, color_temp_kelvin, hs_color, rgb_color, xy_col
 class Target: entity_id, domain, platform, entry: er.RegistryEntry, device, config_entry, state, via_group
 
 @dataclass(slots=True)
-class EntityResult: entity_id, status, platform, mode, clamped_to, detail, data
+class EntityResult: entity_id, status, platform, clamped_to, detail, data
     def as_response(self) -> dict   # drops None; data under "attributes"; no tier
 
 # core/capabilities.py
 @dataclass(frozen=True) class DurationLimits: min_s, max_s
 @dataclass(frozen=True) class AdapterCapabilities:
-    experimental: bool = False; mode = NATIVE; domains = {"light"}; duration: DurationLimits | None
+    experimental: bool = False; domains = {"light"}; duration: DurationLimits | None
     supports_fields: frozenset[str]; confirmable: bool; native_groups: bool
     max_concurrency: int = 4; notes: tuple[str, ...] = (); bench: str | None = None
 @dataclass class PlatformInfo:
@@ -367,7 +364,7 @@ class Adapter[RequestT](ABC):
     feature: ClassVar[str]; platform: ClassVar[str]; capabilities: ClassVar[AdapterCapabilities]
     def supports(self, hass, request, target) -> str | None  # None = ok, else reason key; sync, cheap; request so unclaimed fields refuse
     @abstractmethod async def execute(self, hass, request, targets) -> list[EntityResult]
-    def result(self, target, status, **kw) -> EntityResult  # stamps platform/mode
+    def result(self, target, status, **kw) -> EntityResult  # stamps platform
     async def gather(self, hass, targets, send) -> list[EntityResult]  # platform + per-adapter semaphores; exc -> that target REJECTED
 ```
 
@@ -468,7 +465,7 @@ of an adapter's targets at once so native group commands stay possible. Hue `mov
 ### Docs generation
 
 `scripts/gen_docs.py` imports the registry without `hass`, emits `docs/matrix.yaml` (machine
-readable: per-adapter tier, fingerprint, mode, domains, duration, supports_fields, confirmable, native_groups, notes,
+readable: per-adapter tier, fingerprint, domains, duration, supports_fields, confirmable, native_groups, notes,
 bench) and `docs/matrix.md`, and rewrites the generated block in README, in each
 `docs/features/*.md`, and in each platform section of `docs/platforms.md` (one marker pair per
 section, `<!-- generated:<platform>:start/end -->`). Matrix adapter text: `tier · best status · duration
