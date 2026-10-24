@@ -34,8 +34,8 @@ If you're OK with these, let's dive in!
 | Hold-to-Dim            |           🔵            |     🔵      | 🔵  |   🔵   | ✅¹ |
 | Set Without Turning On |           🔵            |     🔵      | 🔵  |   🔵   | ✅¹ |
 
-✨ New, tested on real hardware · ✅ Stable · 🙋 Built, needs a volunteer with the device to test it
-([help test](CONTRIBUTING.md)) · 🔵 Roadmap · ❌ The devices can't do it
+✨ New, tested on real hardware · ✅ Stable · 🙋 Needs a volunteer to test it
+([help test](CONTRIBUTING.md)) · 🔵 Roadmap · ❌ Appears not possible
 
 ¹ Available now in [Hue Smooth Dimming](https://github.com/jasonmx/hue-smooth-dimming), and moving into Device Side.
 
