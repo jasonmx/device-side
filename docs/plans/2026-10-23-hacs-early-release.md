@@ -25,11 +25,11 @@ shipping the smallest release HACS will accept.
   scaffold only, and there are no `docs/bench/` records yet.
 
 **What you decided:**
-- v0.0.1 claims Shelly **`switch`** and on/off **`light`** (both the same `Switch.Set` on the `Switch` backing) for `turn_on_for` and `turn_off_for`.
+- v0.0.1 scopes Shelly to **`switch`** and on/off **`light`** (both the same `Switch.Set` on the `Switch` capability) for `turn_on_for` and `turn_off_for`.
 - `toggle_for` is dropped (no use case: HA's `flash` covers a short toggle).
 - The 7-day RC soak is **waived for v0.0.1 only**.
-- After v0.0.1, releases go incrementally (`v0.0.x`), and one release can carry several platforms
-  or features. The bump to `v0.1.0` happens when the current plan is feature complete **and**
+- After v0.0.1, releases go incrementally (`v0.0.x`), and one release can carry several integrations
+  or actions. The bump to `v0.1.0` happens when the current plan is feature complete **and**
   third-party testers have validated the hardware the rig doesn't have.
 
 ## Approach
@@ -42,7 +42,7 @@ New delivery sequence:
 |---|---|---|
 | 0–2 | as is (done) | none |
 | 3 | Rig harness | Unchanged (running in another session). |
-| 4 | `turn_off_for` rig pass | Was slice 5. Rig test for `turn_off_for`, so both v0.0.1 features have bench records. |
+| 4 | `turn_off_for` rig pass | Was slice 5. Rig test for `turn_off_for`, so both v0.0.1 actions have bench records. |
 | 5 | **v0.0.1 release + HACS submission** | New. Details in section 2. |
 | 6 | Z2M `turn_on_for` | Was 4. Work moves to `release/v0.0.2`. |
 | 7 | Hue port | Was 6. |
@@ -72,7 +72,7 @@ Steps on `release/v0.0.1`:
 2. **Brand icon:** add `custom_components/device_side/brand/icon.png` (256×256 and `icon@2x.png`
    512×512, square, transparent background). Confirm the HACS action accepts that location; if
    not, file the domain with home-assistant/brands.
-3. **Claims:** confirm the Shelly adapters claim `switch` and on/off `light` only. The light fields stay unclaimed
+3. **Scope:** confirm the Shelly adapters' scope is `switch` and on/off `light` only. The light fields stay out of scope
    per the CLAUDE.md Releases rule until a tester reports.
 4. **Bench records:** write `docs/bench/shelly/{turn_on_for,turn_off_for}.md` by hand
    from the rig runs (date, HA version, device model, firmware, fingerprint). `gen_docs.py`
@@ -80,9 +80,9 @@ Steps on `release/v0.0.1`:
 5. **README:**
    - Pitch.
    - Install as a HACS custom repository (until the default-store PR merges).
-   - Hand-written support matrix: Shelly `switch` × three features, inside the
+   - Hand-written support matrix: Shelly `switch` × three actions, inside the
      `<!-- matrix -->` markers so `gen_docs.py` takes it over later.
-   - Link to the Shelly section of `docs/platforms.md`.
+   - Link to the Shelly section of `docs/integrations.md`.
 6. **Contributor docs:** a short `CONTRIBUTING.md` pointing at `docs/contributing/rig.md`. The full
    guides stay in slice 8.
 7. **Before going public:**

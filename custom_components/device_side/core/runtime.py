@@ -20,8 +20,8 @@ class DeviceSideData:
     dispatcher: Dispatcher
     # Created lazily so each semaphore binds to the running loop, not the import executor's thread.
     semaphores: dict[str, asyncio.Semaphore] = field(default_factory=dict)
-    # Per-platform scratch state that outlives one call (the Hue transition cache).
-    platform_state: dict[str, Any] = field(default_factory=dict)
+    # Per-integration scratch state that outlives one call (the Hue transition cache).
+    integration_state: dict[str, Any] = field(default_factory=dict)
 
     def semaphore(self, key: str, limit: int) -> asyncio.Semaphore:
         if (semaphore := self.semaphores.get(key)) is None:

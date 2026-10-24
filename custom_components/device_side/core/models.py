@@ -32,7 +32,7 @@ class Tier(StrEnum):
     EXPERIMENTAL = "experimental"
 
 
-class FeatureKind(StrEnum):
+class ActionKind(StrEnum):
     COMMAND = "command"
     SETTING = "setting"
     QUERY = "query"
@@ -69,10 +69,10 @@ class LightFields:
 
 @dataclass(frozen=True, slots=True)
 class Request:
-    """Base for a feature's parsed call. Subclasses add their fields."""
+    """Base for an action's parsed call. Subclasses add their fields."""
 
     def fields_present(self) -> frozenset[str]:
-        """light.turn_on fields this request carries; adapters must claim them in supports_fields."""
+        """light.turn_on fields this request carries; adapters must have them in scope.fields."""
         return frozenset()
 
 
@@ -87,7 +87,7 @@ class TimedRequest(Request):
 class Target:
     entity_id: str
     domain: str
-    platform: str
+    integration: str
     entry: er.RegistryEntry
     device: dr.DeviceEntry | None
     config_entry: ConfigEntry
@@ -107,14 +107,14 @@ class Target:
 class EntityResult:
     entity_id: str
     status: Status
-    platform: str | None = None
+    integration: str | None = None
     clamped_to: float | None = None
     detail: str | None = None
     data: dict | None = None
 
     def as_response(self) -> dict:
         response: dict[str, Any] = {"status": self.status.value}
-        for name in ("platform", "clamped_to", "detail"):
+        for name in ("integration", "clamped_to", "detail"):
             if (value := getattr(self, name)) is not None:
                 response[name] = value
         if self.data is not None:

@@ -7,8 +7,8 @@ from homeassistant.core import State
 
 from .addressing import address, rpc_device
 from ...core.adapter import Adapter
-from ...core.capabilities import DurationLimits
 from ...core.models import EntityResult, LightFields, Status, Target
+from ...core.scope import DurationLimits
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ async def set_with_timer(adapter: Adapter, target: Target, params: dict[str, Any
     try:
         status = await device.call_rpc(f"{rpc.component}.GetStatus", {"id": rpc.id})
     except Exception as err:  # noqa: BLE001 - aioshelly's errors can't be imported here; see addressing.py
-        _LOGGER.debug("%s read-back failed for %s: %s", adapter.feature, target.entity_id, err)
+        _LOGGER.debug("%s read-back failed for %s: %s", adapter.action, target.entity_id, err)
         return adapter.result(target, Status.SENT, detail="readback_failed")
     if status.get("output") is params["on"] and "timer_duration" in status:
         return adapter.result(target, Status.CONFIRMED)

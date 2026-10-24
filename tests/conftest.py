@@ -6,13 +6,13 @@ import pytest
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.device_side import features
+from custom_components.device_side import actions
 from custom_components.device_side.const import DOMAIN
 from custom_components.device_side.core.registry import AdapterRegistry
 
 from .fakes.scripted import SCRIPT
 
-FAKE_PLATFORMS = ["tests.fakes.broken_platform", "tests.fakes.fake_platform", "tests.fakes.fake_special"]
+FAKE_INTEGRATIONS = ["tests.fakes.broken_integration", "tests.fakes.fake_integration", "tests.fakes.fake_special"]
 
 RIG_DIR = Path(__file__).parent / "rig"
 
@@ -37,8 +37,8 @@ def reset_script():
 
 @pytest.fixture
 def fake_registry():
-    """Production features over the fake platforms, in place of discovery."""
-    with patch.object(AdapterRegistry, "discover", lambda: AdapterRegistry(features.discover(), FAKE_PLATFORMS)):
+    """Production actions over the fake integrations, in place of discovery."""
+    with patch.object(AdapterRegistry, "discover", lambda: AdapterRegistry(actions.discover(), FAKE_INTEGRATIONS)):
         yield
 
 
@@ -53,7 +53,7 @@ async def setup_integration(hass: HomeAssistant, fake_registry) -> MockConfigEnt
 
 @pytest.fixture
 async def setup_production(hass: HomeAssistant) -> MockConfigEntry:
-    """The integration over the real discovered platforms, for platform adapter tests."""
+    """The integration over the real discovered integrations, for adapter tests."""
     entry = MockConfigEntry(domain=DOMAIN)
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)

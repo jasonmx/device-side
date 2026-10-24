@@ -1,7 +1,7 @@
-"""Platform "fake": a generic platform with native groups whose members it can list."""
+"""Integration "fake": a generic integration with native groups whose members it can list."""
 
-from custom_components.device_side.core.capabilities import AdapterCapabilities, DurationLimits, PlatformInfo
 from custom_components.device_side.core.resolver import resolve
+from custom_components.device_side.core.scope import AdapterScope, DurationLimits, IntegrationInfo
 
 from ..scripted import ScriptedAdapter
 
@@ -18,10 +18,10 @@ def expand_group(hass, target):
     return [t for m in members if not isinstance(t := resolve(hass, registry, m, target.entity_id), str)]
 
 
-PLATFORM = PlatformInfo(
+INTEGRATION = IntegrationInfo(
     key="fake",
     title="Fake",
-    ha_integration="fake",
+    ha_domain="fake",
     is_group=is_group,
     expand_group=expand_group,
     max_concurrency=2,
@@ -29,19 +29,19 @@ PLATFORM = PlatformInfo(
 
 
 class FakeTurnOnFor(ScriptedAdapter):
-    feature = "turn_on_for"
-    platform = "fake"
-    capabilities = AdapterCapabilities(
+    action = "turn_on_for"
+    integration = "fake"
+    scope = AdapterScope(
         domains=frozenset({"light", "switch"}),
         duration=LIMITS,
-        supports_fields=frozenset({"brightness", "transition"}),
+        fields=frozenset({"brightness", "transition"}),
     )
 
 
 class FakeTurnOffFor(ScriptedAdapter):
-    feature = "turn_off_for"
-    platform = "fake"
-    capabilities = AdapterCapabilities(domains=frozenset({"switch"}), duration=LIMITS, native_groups=True)
+    action = "turn_off_for"
+    integration = "fake"
+    scope = AdapterScope(domains=frozenset({"switch"}), duration=LIMITS, native_groups=True)
 
 
 ADAPTERS = [FakeTurnOnFor, FakeTurnOffFor]
