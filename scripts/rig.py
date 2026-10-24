@@ -5,10 +5,13 @@ The rig is the household's own Home Assistant and its in-use lights. Nothing cha
 preflight reads the inventory, the adapter registry and the deployed tree hash, prints what will run, then asks.
 DEVICE_SIDE_RIG_APPROVED=1 answers the gate for a non-interactive caller that already has a human's yes.
 
+One run at a time: a lock in the git common dir, shared by every worktree, refuses a second.
+
 Usage: scripts/rig.py [--dry-run] [--no-deploy] [--no-restart] [--platform KEY ...] [-k EXPR]
 """
 
 import argparse
+import fcntl
 import json
 import os
 import subprocess
@@ -19,7 +22,7 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
@@ -31,6 +34,7 @@ COMPONENT = "custom_components/device_side"
 SERVICE = ("device_side", "turn_on_for")
 READY_TIMEOUT_S = 180
 RESTART_ESTIMATE_S = 90
+LOCK_NAME = "device_side-rig.lock"
 
 
 @dataclass(slots=True)
@@ -107,6 +111,25 @@ def deploy_state(ssh: str) -> Deploy:
     return state
 
 
+def lock_rig(path: Path, holder: str) -> TextIO:
+    """Hold an exclusive lock on `path` for the process's life; exits naming the holder if another run has it.
+
+    One lock in the git common dir covers every worktree. flock drops when the process dies, so nothing goes stale.
+    """
+    handle = path.open("a+")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.seek(0)
+        held_by = handle.read().strip() or "an unnamed process"
+        handle.close()
+        raise SystemExit(f"Another rig run holds the lock: {held_by}.") from None
+    handle.truncate(0)
+    handle.write(f"{holder} (pid {os.getpid()})\n")
+    handle.flush()
+    return handle
+
+
 def gate(prompt: Callable[[str], str] = input) -> bool:
     if os.environ.get("DEVICE_SIDE_RIG_APPROVED") == "1":
         print("Approved by DEVICE_SIDE_RIG_APPROVED=1.")
@@ -157,11 +180,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("-k", dest="keyword", help="passed to pytest -k")
     args = parser.parse_args(argv)
 
+    if not args.dry_run:
+        lock = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir")) / LOCK_NAME
+        _held = lock_rig(lock, git("rev-parse", "--abbrev-ref", "HEAD"))  # noqa: F841 (held until exit)
     env = load_env()
     if not args.dry_run and not (env.get("HA_URL") and env.get("HA_TOKEN")):
         raise SystemExit("HA_URL and HA_TOKEN must be set in .env.rig (see tests/rig/env.example)")
     if not INVENTORY.exists():
-        raise SystemExit(f"{INVENTORY.relative_to(REPO)} is absent; copy inventory.example.yaml and fill it in")
+        raise SystemExit(f"{INVENTORY} is absent; copy inventory.example.yaml and fill it in")
     inventory = Inventory.load()
     modules = select(rig_modules(), inventory, args.platform)
     if not modules:
@@ -191,7 +217,7 @@ def main(argv: list[str] | None = None) -> int:
 def print_plan(
     inventory: Inventory, modules: list[RigModule], deploy: Deploy, deploying: bool, restarting: bool
 ) -> None:
-    print(f"Inventory ({INVENTORY.relative_to(REPO)}):")
+    print(f"Inventory ({INVENTORY}):")
     for platform, entities in inventory.platforms.items():
         for entity in entities:
             print(f"  {platform:8} {entity.entity_id:40} {', '.join(sorted(entity.roles))}")
