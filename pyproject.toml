@@ -1,9 +1,11 @@
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = ["rig: drives the live rig HA; run through scripts/rig.py only"]
 
 [tool.ruff]
 line-length = 120
+target-version = "py314"
 
 lint.select = [
     "E",  # pycodestyle errors (settings from FastAPI, thanks, @tiangolo!)
@@ -26,3 +28,8 @@ known-first-party = []
 
 [tool.codespell]
 ignore-words-list = "hass"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.17.2",
+]

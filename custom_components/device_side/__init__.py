@@ -4,12 +4,20 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN
+from .core.actions import async_setup_services
+from .core.dispatcher import Dispatcher
+from .core.registry import AdapterRegistry
+from .core.runtime import DATA, DeviceSideData
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType):
+    # Discovery imports every integration module, so it runs in the import executor rather than the event loop.
+    registry = await hass.async_add_import_executor_job(AdapterRegistry.discover)
+    hass.data[DATA] = DeviceSideData(registry=registry, dispatcher=Dispatcher(hass, registry))
     # Services are registered once per HA run, not per entry; handlers refuse calls until the entry loads.
+    async_setup_services(hass)
     return True
 
 

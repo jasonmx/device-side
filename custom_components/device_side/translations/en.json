@@ -17,7 +17,61 @@
   "exceptions": {
     "not_loaded": {
       "message": "Device Side is not loaded. Check the integration is set up and enabled."
+    },
+    "no_targets": {
+      "message": "No entities were targeted. Choose at least one light or switch."
+    },
+    "invalid_duration": {
+      "message": "Duration must be greater than zero."
+    },
+    "all_targets_failed": {
+      "message": "No targeted entity accepted the command: {summary}"
     }
   },
-  "services": {}
+  "services": {
+    "turn_off_for": {
+      "name": "Turn off for",
+      "description": "Devices turn off, then on again after a delay. To cancel the timed on, send a regular turn off.",
+      "fields": {
+        "duration": {
+          "name": "Duration",
+          "description": "How long to stay off before turning back on."
+        }
+      }
+    },
+    "turn_on_for": {
+      "name": "Turn on for",
+      "description": "Devices turn on, then off again after a delay. To cancel the timed off, send a regular turn on.",
+      "fields": {
+        "duration": {
+          "name": "Duration",
+          "description": "How long to stay on before turning off."
+        },
+        "brightness": {
+          "name": "Brightness value",
+          "description": "Brightness to turn on at, from 1 (minimum) to 255 (maximum). Lights only."
+        },
+        "color_temp_kelvin": {
+          "name": "Color temperature",
+          "description": "Color temperature in Kelvin to turn on at. Lights only."
+        },
+        "hs_color": {
+          "name": "Hue/Sat color",
+          "description": "Color in hue/sat format to turn on at. A list of two numbers: hue 0-360, saturation 0-100. Lights only."
+        },
+        "rgb_color": {
+          "name": "Color",
+          "description": "Color in RGB format to turn on at. A list of three integers between 0 and 255. Lights only."
+        },
+        "xy_color": {
+          "name": "XY-color",
+          "description": "Color in XY format to turn on at. A list of two decimal numbers between 0 and 1. Lights only."
+        },
+        "transition": {
+          "name": "Transition",
+          "description": "Seconds the light takes to reach the brightness and color above. Lights only."
+        }
+      }
+    }
+  }
 }

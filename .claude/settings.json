@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:shelly-api-docs.shelly.cloud)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(.venv/bin/pytest *)"
+    ]
+  }
+}

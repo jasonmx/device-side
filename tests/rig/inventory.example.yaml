@@ -1,0 +1,13 @@
+# Copy to tests/rig/inventory.yaml (gitignored) and name the rig's own entities.
+# One list per integration key (shelly, z2m, zha, matter, hue). Roles pick which test uses an entity:
+#   switch_plug, light_onoff (a relay shown as a light), light_wrapped (a switch_as_x light over a switch),
+#   light_dimmable, light_ct, light_color, group, scene
+# Tests restore each entity's prior state afterwards, but every entity here will visibly change state.
+
+shelly:
+  - entity_id: switch.office_plug
+    roles: [switch_plug]
+  - entity_id: light.hall_relay
+    roles: [light_onoff]
+  - entity_id: light.porch_lamp
+    roles: [light_wrapped]

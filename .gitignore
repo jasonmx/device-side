@@ -7,8 +7,9 @@ __pycache__/
 .env
 .env.rig
 
-# Rig inventory (household entities)
+# Household details (also check-private's blocklist)
 tests/rig/inventory.yaml
+.private-terms
 
 # Virtual environments
 .venv/
@@ -25,5 +26,15 @@ env/
 *.log
 
 # Claude Code
-CLAUDE.md
-.claude/
+CLAUDE.local.md
+.claude/settings.local.json
+
+# pytest-cov data
+.coverage
+.coverage.*
+
+# Worktrees (claude --worktree, EnterWorktree)
+.claude/worktrees/
+
+# Working notes (interviews, scratch)
+/notes/

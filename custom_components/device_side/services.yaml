@@ -1,2 +1,101 @@
-# One block per feature: target filters and field selectors only. Names and descriptions live in strings.json.
-{}
+# One block per action: target filters and field selectors only. Names and descriptions live in strings.json.
+# Target filters are a UI convenience; adapters enforce support through supports(). Each filter lists exactly the
+# integrations with an adapter for that action (tests/core/test_actions_setup.py). Field filters are copied from
+# light/services.yaml so the light fields hide when no selected target is a light that can use them. They are
+# written out, not shared through top-level .anchor keys as core does: hassfest rejects those in a custom component.
+
+turn_on_for:
+  target:
+    entity:
+      - domain: [light, switch]
+        integration: shelly
+  fields:
+    duration: &duration
+      required: true
+      example: "00:05:00"
+      selector:
+        duration:
+          enable_millisecond: true
+    brightness:
+      filter:
+        attribute:
+          supported_color_modes:
+            - light.ColorMode.BRIGHTNESS
+            - light.ColorMode.COLOR_TEMP
+            - light.ColorMode.HS
+            - light.ColorMode.XY
+            - light.ColorMode.RGB
+            - light.ColorMode.RGBW
+            - light.ColorMode.RGBWW
+      selector:
+        number:
+          min: 1
+          max: 255
+    color_temp_kelvin:
+      filter:
+        attribute:
+          supported_color_modes:
+            - light.ColorMode.COLOR_TEMP
+            - light.ColorMode.HS
+            - light.ColorMode.XY
+            - light.ColorMode.RGB
+            - light.ColorMode.RGBW
+            - light.ColorMode.RGBWW
+      selector:
+        color_temp:
+          unit: "kelvin"
+          min: 2000
+          max: 6500
+    rgb_color:
+      filter:
+        attribute:
+          supported_color_modes:
+            - light.ColorMode.HS
+            - light.ColorMode.XY
+            - light.ColorMode.RGB
+            - light.ColorMode.RGBW
+            - light.ColorMode.RGBWW
+      example: "[255, 100, 100]"
+      selector:
+        color_rgb:
+    hs_color:
+      filter:
+        attribute:
+          supported_color_modes:
+            - light.ColorMode.HS
+            - light.ColorMode.XY
+            - light.ColorMode.RGB
+            - light.ColorMode.RGBW
+            - light.ColorMode.RGBWW
+      example: "[300, 70]"
+      selector:
+        object:
+    xy_color:
+      filter:
+        attribute:
+          supported_color_modes:
+            - light.ColorMode.HS
+            - light.ColorMode.XY
+            - light.ColorMode.RGB
+            - light.ColorMode.RGBW
+            - light.ColorMode.RGBWW
+      example: "[0.52, 0.43]"
+      selector:
+        object:
+    transition:
+      filter:
+        supported_features:
+          - light.LightEntityFeature.TRANSITION
+      selector:
+        number:
+          min: 0
+          max: 300
+          unit_of_measurement: seconds
+
+turn_off_for:
+  target:
+    entity:
+      - domain: [light, switch]
+        integration: shelly
+  fields:
+    duration: *duration
