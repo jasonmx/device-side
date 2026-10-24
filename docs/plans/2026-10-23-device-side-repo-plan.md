@@ -45,8 +45,7 @@ tuya 29.5%, esphome 27.3%, tplink 13.8%, zwave_js 8.3%, tasmota 7.6%.)
 - **One action per user intent, not per protocol primitive.** Zigbee has move/step/moveto;
   device_side exposes one `move`. Command selection is hidden in the platform adapter.
 - **Fallback policy: opt-in "assisted" only.** HA-side help is allowed only where it adds safety
-  on top of a native mechanism (example: cancel a Hue bridge timer when the light is toggled
-  early). Pure emulation is never shipped; docs show how to build it with `set_attributes` plus
+  on top of a native mechanism. Pure emulation is never shipped; docs show how to build it with `set_attributes` plus
   an automation.
 - **Audience:** automation authors and dashboard users from v1. Actions for everything; entities
   only where a feature is a persistent setting, not a command.
@@ -54,12 +53,18 @@ tuya 29.5%, esphome 27.3%, tplink 13.8%, zwave_js 8.3%, tasmota 7.6%.)
 ### Scope
 
 - **Platforms (v1):** Zigbee2MQTT via `mqtt`, ZHA, Matter, Shelly Gen2+, Hue v2. Hue is v1 for the
-  hue_dimmer port only; Hue timed turn-on (bridge `behavior_instance`) and its assisted cancel
-  hook are deferred.
+  hue_dimmer port first; Hue `turn_on_for`/`turn_off_for` follow in slice 7, once the
+  cancel experiments (open item 10) pass.
 - **Features (v1):**
   - `turn_on_for` on Z2M, ZHA, Matter, Shelly.
   - `turn_off_for` on Shelly only: it is Shelly-only natively (Zigbee/Matter `OnWithTimedOff` is
     on-then-off only; `off_wait_time` is a re-on guard). Other platforms return `unsupported`.
+  - **Cancel contract:** a regular `turn_on` or `turn_off` cancels the delayed flip, on every
+    backing. The action descriptions promise this. Shelly honors it natively (bench, 2026-10-24,
+    Gen3/Gen4 fw 2.0.1: any `Set` without `toggle_after` cancels; a new `toggle_after` replaces;
+    `toggle_after: 0` is rejected). A backing that can't honor it natively adds a
+    `cancel_delayed_toggle` action, offered across all backings, and the descriptions change to
+    point at it. No HA-side cancel hook: users who want one wire an automation to the action.
   - `toggle_for` dropped (2026-10-23): no use case. HA's `flash` covers a short toggle, and nobody
     needs a long one.
   - `turn_on_for` accepts `light.turn_on` fields (`brightness`, `color_temp_kelvin`, `hs_color`,
@@ -106,7 +111,7 @@ tuya 29.5%, esphome 27.3%, tplink 13.8%, zwave_js 8.3%, tasmota 7.6%.)
     write with the longest duration and record `detail: shared_duration` (open item 12).
 - **Deferred, architecture must accommodate:** `set_turn_on_defaults` (wraps existing ZHA/Matter number
   entities and Z2M `level_config`; no new entities), cross-platform `set_attributes`,
-  cross-platform `move`/`stop`, Hue `turn_on_for` + assisted cancel, Shelly Gen1, further
+  cross-platform `move`/`stop`, Shelly Gen1, further
   domains (cover, valve, lock), and one further platform: **Z-Wave JS**.
 - **Z-Wave JS (post-v1, decided 2026-10-23):** scope is `move`/`stop` via Multilevel Switch CC
   Start/Stop Level Change (direction + duration), plus `set_turn_on_defaults` and auto-off only where a
@@ -573,7 +578,7 @@ are in-use household lights.** Rig passes are recorded in `docs/bench/<platform>
 | 4 | `turn_off_for` rig pass | rig test for `turn_off_for`; bench records written, so both Shelly features reach beta. (`toggle_for` was dropped.) |
 | 5 | First release (`v0.0.1`) + HACS submission | Detail in `2026-10-23-hacs-early-release.md`. Claims Shelly `switch` and on/off `light` (shared on/off) for `turn_on_for` and `turn_off_for`. MIT `LICENSE`; `custom_components/device_side/brand/icon.png` (+ `@2x`); hand-written bench records and README matrix (inside the matrix markers, taken over by `gen_docs.py` later); README install via HACS custom repository; short `CONTRIBUTING.md`; full-history `gitleaks detect` clean; topics added; repo flipped public; `gh workflow enable validate.yml`, nightly schedule restored and private-repo guard removed; PR `release/v0.0.1` -> `main`, `ci-green` on `main` with hassfest + HACS validate green; tag `v0.0.1` and a full (not pre-) GitHub release; PR to `hacs/default` adding `jasonmx/device-side` to `integration`, from a personal fork; issue filed to switch the README install section to a plain HACS search once that PR merges (review takes months); `release/v0.0.2` cut from `main`. **v0.0.1 ships without an RC soak to start the HACS review clock; from v0.0.2 the Releases rules apply in full.** |
 | 6 | Z2M `turn_on_for` | detect, addressing, publish; `light.turn_on` precedes when fields present; group topic when `native_groups`; rig test. |
-| 7 | Hue port | five adapters + bridge/transition_cache/colors; `move` across brightness, color_temp, hue, saturation; `grouped_light` native for move/stop, expanded for set/get_attributes; hue_dimmer tests ported to real-hass fixtures; rig parity with hue_dimmer `tests/RELEASE_CHECKLIST.md`. |
+| 7 | Hue port | five adapters + bridge/transition_cache/colors; `move` across brightness, color_temp, hue, saturation; `grouped_light` native for move/stop, expanded for set/get_attributes; hue_dimmer tests ported to real-hass fixtures; rig parity with hue_dimmer `tests/RELEASE_CHECKLIST.md`; then Hue `turn_on_for`/`turn_off_for` once open item 10 is answered (`experimental=True`), with `cancel_delayed_toggle` across all backings if the cancel contract needs it. |
 | 8 | Docs generator + templates | `gen_docs.py --check` in CI; matrix, README block, feature pages, `platforms.md` sections; `_notes.yaml`; contributing guides. Lands before the first v0.0.2 RC. |
 | 9 | Bench + tiers + tester flow | fingerprinting and computed tiers in `gen_docs.py`, including the claims-coverage check; per-adapter coverage check; tag-format check; RC audit gate (`2026-10-23-rc-audit-gate.md`: `cut-rc` workflow, `check_audit.py`, `/rc-audit`); `test-report.yml` issue form; RC-only umbrella Repairs issue with multi-select flow and prefilled per-test links; bench files filled from rig runs and tester reports. Lands before the first v0.0.2 RC, which is the project's first RC. |
 | 10 | ZHA `turn_on_for` | after Jason has ZHA running on the rig; addressing; admin context passthrough; ValueError -> rejected; rig test. |
@@ -619,7 +624,12 @@ the first action of that session is slice 0.
    names above are from memory.
 9. hassfest on custom components: accepts `services.yaml` without name/description when
    `strings.json` has `services`; `integration_type: service` + `single_config_entry`.
-10. Hue `turn_on_for` via `behavior_instance` stays deferred (handoff 7.1).
+10. Hue `turn_on_for`/`turn_off_for` (slice 7): bench handoff 7.1 (whether a one-shot
+    `behavior_instance` can express the timer), then the cancel experiments. Does a regular
+    `light.turn_on`/`turn_off` through the bridge cancel the instance? Does a Hue app or dimmer
+    switch press cancel it? Does deleting or disabling the instance cancel it? What happens to a
+    second `turn_on_for` while one is running? If the bridge can't honor the cancel contract, Hue's
+    `cancel_delayed_toggle` deletes the instance.
 11. Rig transport: WebSocket `call_service` `return_response` payload key and whether REST
     `?return_response` still exists in 2026.x (`websocket_api/commands.py:handle_call_service`,
     `api/__init__.py:APIDomainServicesView`); restart needs an admin token; SSH port and config
