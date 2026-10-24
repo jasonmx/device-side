@@ -587,7 +587,7 @@ Each slice ends with `/audit-code` on its diff (everything since the previous sl
 sibling-repo changes it needed), run by a fresh subagent that gets the code and no conclusions from the
 building session. P0/P1 findings are fixed before the slice's commit; the rest are fixed or filed as issues.
 The first audit, at the end of slice 3, covers the whole repo, since nothing before it was reviewed.
-Each slice is a commit (or a few) pushed to the current `release/vX.Y.Z` branch, CI green (`ci-green`) before the next slice starts; no per-slice PRs, and each release's merge to `main` is its only PR. Rule evidence that would have gone in a PR body points at a commit sha or this plan instead. Implementation starts in a **fresh session** per the planning rule;
+Each slice lands by PR into the current `release/vX.Y.Z` branch, one per session, from that session's own worktree and `wt/<topic>` branch; the session squash-merges it once `ci-green` passes (see `docs/plans/2026-10-24-parallel-sessions.md`). Implementation starts in a **fresh session** per the planning rule;
 the first action of that session is slice 0.
 
 ## Open items to verify during implementation (not before)
