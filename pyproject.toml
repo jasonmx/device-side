@@ -28,3 +28,8 @@ known-first-party = []
 
 [tool.codespell]
 ignore-words-list = "hass"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.17.2",
+]
