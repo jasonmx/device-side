@@ -1,8 +1,8 @@
 import pytest
 
-from custom_components.device_side.core.capabilities import DurationLimits
 from custom_components.device_side.core.duration import clamp
 from custom_components.device_side.core.models import TimedRequest
+from custom_components.device_side.core.scope import DurationLimits
 
 LIMITS = DurationLimits(min_s=1, max_s=100)
 

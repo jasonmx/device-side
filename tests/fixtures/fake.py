@@ -1,4 +1,4 @@
-"""Fabricate entities on the fake platforms and HA groups over them."""
+"""Fabricate entities on the fake integrations and HA groups over them."""
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant

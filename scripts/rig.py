@@ -7,7 +7,7 @@ DEVICE_SIDE_RIG_APPROVED=1 answers the gate for a non-interactive caller that al
 
 One run at a time: a lock in the git common dir, shared by every worktree, refuses a second.
 
-Usage: scripts/rig.py [--dry-run] [--no-deploy] [--no-restart] [--platform KEY ...] [-k EXPR]
+Usage: scripts/rig.py [--dry-run] [--no-deploy] [--no-restart] [--integration KEY ...] [-k EXPR]
 """
 
 import argparse
@@ -53,11 +53,11 @@ def git(*args: str, check: bool = True) -> str:
     return subprocess.run(["git", "-C", str(REPO), *args], check=check, capture_output=True, text=True).stdout.strip()
 
 
-def select(modules: list[RigModule], inventory: Inventory, platforms: list[str] | None) -> list[RigModule]:
+def select(modules: list[RigModule], inventory: Inventory, integrations: list[str] | None) -> list[RigModule]:
     return [
         module
         for module in modules
-        if module.platform in inventory.platforms and (not platforms or module.platform in platforms)
+        if module.integration in inventory.integrations and (not integrations or module.integration in integrations)
     ]
 
 
@@ -65,19 +65,19 @@ def plan_lines(modules: list[RigModule], inventory: Inventory, registry: Adapter
     """One line per adapter about to run: which household entities it will move, and the adapter's declared tier."""
     lines = []
     for module in modules:
-        adapter = registry.adapter(module.feature, module.platform)
+        adapter = registry.adapter(module.action, module.integration)
         if adapter is None:
             tier = "no adapter, will skip"
         else:
             # A hand-written bench record counts as beta; slice 9 checks it against the adapter's fingerprint.
-            bench = REPO / "docs" / "bench" / module.platform / f"{module.feature}.md"
-            if adapter.capabilities.experimental:
+            bench = REPO / "docs" / "bench" / module.integration / f"{module.action}.md"
+            if adapter.scope.experimental:
                 tier = "experimental"
             else:
                 tier = "beta" if bench.exists() else "untested"
-        entities = [entity for role in module.roles if (entity := inventory.entity(module.platform, role))]
+        entities = [entity for role in module.roles if (entity := inventory.entity(module.integration, role))]
         targets = ", ".join(entities) or "no entity, will skip"
-        lines.append(f"{module.platform} / {module.feature} -> {targets} ({tier})")
+        lines.append(f"{module.integration} / {module.action} -> {targets} ({tier})")
     return lines
 
 
@@ -176,7 +176,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="print the plan and stop before the gate")
     parser.add_argument("--no-deploy", action="store_true", help="test whatever HA already runs")
     parser.add_argument("--no-restart", action="store_true", help="sync the integration but do not restart HA")
-    parser.add_argument("--platform", action="append", help="limit to a platform key (repeatable)")
+    parser.add_argument("--integration", action="append", help="limit to an integration key (repeatable)")
     parser.add_argument("-k", dest="keyword", help="passed to pytest -k")
     args = parser.parse_args(argv)
 
@@ -189,9 +189,9 @@ def main(argv: list[str] | None = None) -> int:
     if not INVENTORY.exists():
         raise SystemExit(f"{INVENTORY} is absent; copy inventory.example.yaml and fill it in")
     inventory = Inventory.load()
-    modules = select(rig_modules(), inventory, args.platform)
+    modules = select(rig_modules(), inventory, args.integration)
     if not modules:
-        raise SystemExit("No rig test matches the inventory's platforms.")
+        raise SystemExit("No rig test matches the inventory's integrations.")
     deploy = deploy_state(env["RIG_SSH"])
     deploying = deploy.needed and not args.no_deploy
     restarting = deploying and not args.no_restart
@@ -218,9 +218,9 @@ def print_plan(
     inventory: Inventory, modules: list[RigModule], deploy: Deploy, deploying: bool, restarting: bool
 ) -> None:
     print(f"Inventory ({INVENTORY}):")
-    for platform, entities in inventory.platforms.items():
+    for integration, entities in inventory.integrations.items():
         for entity in entities:
-            print(f"  {platform:8} {entity.entity_id:40} {', '.join(sorted(entity.roles))}")
+            print(f"  {integration:8} {entity.entity_id:40} {', '.join(sorted(entity.roles))}")
     print("Adapters:")
     for line in plan_lines(modules, inventory, AdapterRegistry.discover()):
         print(f"  {line}")

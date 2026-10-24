@@ -53,11 +53,11 @@ async def ha():
 def require_adapter(inventory: Inventory, registry: AdapterRegistry):
     """The inventory entity for a role, skipping when the rig has none or the registry lacks the adapter."""
 
-    def _require(platform: str, feature: str, role: str) -> str:
-        if registry.adapter(feature, platform) is None:
-            pytest.skip(f"no {feature} adapter on {platform}")
-        if (entity_id := inventory.entity(platform, role)) is None:
-            pytest.skip(f"inventory has no {platform} entity with role {role}")
+    def _require(integration: str, action: str, role: str) -> str:
+        if registry.adapter(action, integration) is None:
+            pytest.skip(f"no {action} adapter on {integration}")
+        if (entity_id := inventory.entity(integration, role)) is None:
+            pytest.skip(f"inventory has no {integration} entity with role {role}")
         return entity_id
 
     return _require
@@ -65,8 +65,8 @@ def require_adapter(inventory: Inventory, registry: AdapterRegistry):
 
 @pytest.fixture
 def timing():
-    def _tolerance(platform: str) -> float:
-        return TOLERANCE_S[platform]
+    def _tolerance(integration: str) -> float:
+        return TOLERANCE_S[integration]
 
     return _tolerance
 

@@ -2,8 +2,8 @@
 
 from .turn_off_for import ShellyTurnOffFor
 from .turn_on_for import ShellyTurnOnFor
-from ...core.capabilities import PlatformInfo
+from ...core.scope import IntegrationInfo
 
-PLATFORM = PlatformInfo(key="shelly", title="Shelly", ha_integration="shelly", max_concurrency=4)
+INTEGRATION = IntegrationInfo(key="shelly", title="Shelly", ha_domain="shelly", max_concurrency=4)
 
 ADAPTERS = [ShellyTurnOffFor, ShellyTurnOnFor]

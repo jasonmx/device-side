@@ -7,8 +7,8 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.service import async_extract_entity_ids
 
 from . import duration
+from .action import Action
 from .adapter import Adapter
-from .feature import Feature
 from .groups import expand_ha_groups
 from .models import FAILED, EntityResult, Request, Status, Target, TimedRequest
 from .registry import AdapterRegistry
@@ -23,8 +23,8 @@ class Dispatcher:
         self.hass = hass
         self.registry = registry
 
-    async def handle(self, feature: type[Feature], call: ServiceCall) -> ServiceResponse:
-        request = feature.parse(self.hass, call)
+    async def handle(self, action: type[Action], call: ServiceCall) -> ServiceResponse:
+        request = action.parse(self.hass, call)
         # expand_group=False: we expand group.* ourselves so members remember which group they came from.
         entity_ids = sorted(await async_extract_entity_ids(call, expand_group=False))
         if not entity_ids:
@@ -37,19 +37,23 @@ class Dispatcher:
             target = resolve(self.hass, self.registry, entity_id, via_group)
             if isinstance(target, str):
                 early.append(EntityResult(entity_id, Status.UNSUPPORTED, detail=target))
-            elif target.domain not in feature.domains:
+            elif target.domain not in action.domains:
                 early.append(
-                    EntityResult(entity_id, Status.UNSUPPORTED, platform=target.platform, detail="domain_not_supported")
+                    EntityResult(
+                        entity_id, Status.UNSUPPORTED, integration=target.integration, detail="domain_not_supported"
+                    )
                 )
             elif target.via_wrapper and request.fields_present():
                 # The caller addressed a light, so light fields are refused, not dropped as they are on a switch.
                 early.append(
-                    EntityResult(entity_id, Status.UNSUPPORTED, platform=target.platform, detail="fields_not_supported")
+                    EntityResult(
+                        entity_id, Status.UNSUPPORTED, integration=target.integration, detail="fields_not_supported"
+                    )
                 )
             else:
                 targets.append(target)
 
-        results = (await feature.run(self.hass, request, targets, self) if targets else []) + early
+        results = (await action.run(self.hass, request, targets, self) if targets else []) + early
         order = {entity_id: index for index, entity_id in enumerate([*members, *empty_groups])}
         results.sort(key=lambda result: order.get(result.entity_id, len(order)))
 
@@ -64,7 +68,7 @@ class Dispatcher:
             return None
         return {result.entity_id: result.as_response() for result in results}
 
-    async def run_adapters(self, feature_key: str, request: Request, targets: list[Target]) -> list[EntityResult]:
+    async def run_adapters(self, action_key: str, request: Request, targets: list[Target]) -> list[EntityResult]:
         """Bucket targets by adapter, expand native groups an adapter can't address, run every adapter concurrently.
 
         Returns exactly one result per (expanded) target.
@@ -72,12 +76,12 @@ class Dispatcher:
         results: list[EntityResult] = []
         buckets: dict[str, tuple[Adapter, list[Target]]] = {}
         for target in targets:
-            if (adapter := self.registry.adapter(feature_key, target.platform)) is None:
+            if (adapter := self.registry.adapter(action_key, target.integration)) is None:
                 results.append(
-                    EntityResult(target.reported_id, Status.UNSUPPORTED, target.platform, detail="no_adapter")
+                    EntityResult(target.reported_id, Status.UNSUPPORTED, target.integration, detail="no_adapter")
                 )
                 continue
-            buckets.setdefault(target.platform, (adapter, []))[1].append(target)
+            buckets.setdefault(target.integration, (adapter, []))[1].append(target)
 
         runs = []
         for adapter, bucket in buckets.values():
@@ -98,9 +102,9 @@ class Dispatcher:
     def _expand_native_groups(
         self, adapter: Adapter, bucket: list[Target], results: list[EntityResult]
     ) -> list[Target]:
-        if adapter.capabilities.native_groups or not any(target.is_group for target in bucket):
+        if adapter.scope.native_groups or not any(target.is_group for target in bucket):
             return bucket
-        expand = self.registry.platforms[adapter.platform].expand_group
+        expand = self.registry.integrations[adapter.integration].expand_group
         expanded: list[Target] = []
         for target in bucket:
             if not target.is_group:
@@ -115,15 +119,15 @@ class Dispatcher:
     async def _run_adapter(self, adapter: Adapter, request: Request, targets: list[Target]) -> list[EntityResult]:
         clamped_to = None
         if isinstance(request, TimedRequest):
-            request, clamped_to = duration.clamp(request, adapter.capabilities.duration)
+            request, clamped_to = duration.clamp(request, adapter.scope.duration)
         try:
             async with asyncio.timeout(ADAPTER_TIMEOUT_S):
                 raw = await adapter.execute(self.hass, request, targets)
         except TimeoutError:
-            _LOGGER.warning("%s on %s timed out after %ss", adapter.feature, adapter.platform, ADAPTER_TIMEOUT_S)
+            _LOGGER.warning("%s on %s timed out after %ss", adapter.action, adapter.integration, ADAPTER_TIMEOUT_S)
             return [adapter.result(target, Status.REJECTED, detail="timeout") for target in targets]
         except Exception:
-            _LOGGER.exception("%s on %s failed", adapter.feature, adapter.platform)
+            _LOGGER.exception("%s on %s failed", adapter.action, adapter.integration)
             return [adapter.result(target, Status.REJECTED, detail="error") for target in targets]
         return self._reconcile(adapter, request, targets, raw, clamped_to)
 
@@ -140,7 +144,7 @@ class Dispatcher:
         for result in raw:
             if result.entity_id in by_id or result.entity_id not in expected:
                 _LOGGER.debug(
-                    "%s on %s: dropping stray result for %s", adapter.feature, adapter.platform, result.entity_id
+                    "%s on %s: dropping stray result for %s", adapter.action, adapter.integration, result.entity_id
                 )
                 continue
             by_id[result.entity_id] = result
