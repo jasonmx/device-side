@@ -20,6 +20,7 @@ We're looking for four kinds of help in particular:
 
 ## Developing
 
+- To test on your own Home Assistant, see [docs/contributing/testing.md](docs/contributing/testing.md).
 - If you use a coding agent, point it at [CLAUDE.md](CLAUDE.md). It holds the repo's rules.
 - Open pull requests against whichever is newer: `main` or the latest `release/vX.Y.Z` branch.
   Just after a release there may be no release branch.

@@ -230,7 +230,7 @@ requires it.
   links). Start with a single `docs/integrations.md`, one section per integration on a fixed template
   (what it talks to, how targets resolve, per-action notes, sharp edges, generated scope
   block). `docs/actions/<action>.md` per action. `docs/contributing/add-an-action.md`,
-  `add-an-integration.md`, `rig.md`. MkDocs-ready layout, no site in v1; `integrations.md` splits into
+  `add-an-integration.md`, `testing.md`. MkDocs-ready layout, no site in v1; `integrations.md` splits into
   per-integration pages only if it outgrows one file.
 - **Repo:** private until v0.0.1 ships (slice 5), then public with contributor docs. MIT. American English in
   all user-facing text (matches HA).
@@ -320,7 +320,7 @@ docs/
   _notes.yaml                                note key -> Markdown footnote text
   actions/<action>.md  integrations.md            fixed templates with <!-- generated:start/end --> blocks
                                              (integrations.md: one section + one block each)
-  contributing/add-an-action.md  add-an-integration.md  bench-checklist-template.md  rig.md
+  contributing/add-an-action.md  add-an-integration.md  bench-checklist-template.md  testing.md
   bench/<integration>/<action>.md            per-adapter bench record; gates tier promotion
 tests/
   conftest.py            enable_custom_integrations autouse; setup_integration; fake_registry; call()
@@ -548,7 +548,7 @@ duration and whether a restart is needed, then requires interactive y/N (or
 `DEVICE_SIDE_RIG_APPROVED=1`). `scripts/rig.py` flow:
 
 1. Read-only preflight: load inventory and `.env.rig` (`HA_URL`, `HA_TOKEN` for a non-admin user,
-   `RIG_SSH` default `ha`); `AdapterRegistry.discover()` (no hass) intersected with inventory
+   `RIG_SYNC_CMD`, `RIG_STATUS_CMD`, `RIG_RESTART_CMD`); `AdapterRegistry.discover()` (no hass) intersected with inventory
    integrations -> one line per adapter (`shelly / turn_on_for -> light.office_strip (beta)`); sum each
    test's `RIG_SECONDS` for the estimate; compare `HEAD:custom_components/device_side` with
    `the deploy status command` to decide whether a deploy+restart is needed, and refuse a deploy unless
@@ -577,10 +577,12 @@ collection; the fixtures skip everything without `DEVICE_SIDE_RIG_APPROVED=1`; `
 registered in pyproject).
 
 `.gitignore`: `tests/rig/inventory.yaml`, `.env.rig` (example at `tests/rig/env.example`).
-`docs/contributing/rig.md` covers the shim deploy path, token creation, inventory format (per
-integration -> entities with role tags `light_dimmable`, `light_ct`, `light_color`, `switch_plug`,
-`group`, `scene`), the first-load checklist and safety notes. **Claude asks before every rig run; the devices
-are in-use household lights.** Rig passes are recorded in `docs/bench/<integration>/<action>.md`
+The maintainer's rig has private setup docs. `docs/contributing/testing.md` covers manual testing
+on any Home Assistant: install, first-load check, and how to file a test report.
+Inventory format (per integration -> entities with role tags `light_dimmable`, `light_ct`,
+`light_color`, `switch_plug`, `group`, `scene`) is in `tests/rig/env.example` and
+`tests/rig/inventory.example.yaml`. **Claude asks before every rig run; the devices are
+in-use household lights.** Rig passes are recorded in `docs/bench/<integration>/<action>.md`
 (date, HA version, device model, firmware, fingerprint, source: rig run or test-report issue).
 
 ## Delivery sequence
@@ -590,13 +592,13 @@ are in-use household lights.** Rig passes are recorded in `docs/bench/<integrati
 | 0 | Scaffold + CI | Plan saved to `docs/plans/`; `git init`, private GitHub repo `jasonmx/device-side`; manifest, config_flow, const, strings, icons, empty services.yaml; pyproject, pre-commit, workflows from hue_dimmer; `test_actions_setup.py` green with zero actions; hassfest + HACS validate green; README skeleton with matrix markers. |
 | 1 | Core + fake integration | `core/*`; `actions/turn_on_for.py`, `turn_off_for.py`; fake integration (with a fake native group and `expand_group` hook); dispatcher/resolver/groups tests green (HA-group expansion for light and switch, native-group pass-through vs expansion, clamp, total-failure raise, response shape, semaphore bound, guarded-import skip). No live load yet: there is no dev HA. |
 | 2 | Shelly `turn_on_for` + `turn_off_for` | one RPC with fields; Gen1 -> unsupported; read-back -> confirmed under mock; Shelly section of `docs/integrations.md` on the template; adapter `experimental=True`. |
-| 3 | Rig harness | `scripts/rig.py`, `deploy.sh`, `tests/rig/conftest.py`, inventory example, `docs/contributing/rig.md`; **first approved deploy is the integration's first load in any HA**: confirm entry adds, actions appear with translated names, the brightness fields hide for a switch-only selection; then Shelly `turn_on_for` passes against the house; bench record written; Shelly `switch` and on/off `light` -> beta (shared on/off: a relay shown as a light sends the same `Switch.Set`); Shelly light fields and the `Light`/`CCT`/`RGB*` components out of scope until a tester reports. |
+| 3 | Rig harness | `scripts/rig.py`, `deploy.sh`, `tests/rig/conftest.py`, inventory example, `docs/contributing/testing.md`; **first approved deploy is the integration's first load in any HA**: confirm entry adds, actions appear with translated names, the brightness fields hide for a switch-only selection; then Shelly `turn_on_for` passes against the house; bench record written; Shelly `switch` and on/off `light` -> beta (shared on/off: a relay shown as a light sends the same `Switch.Set`); Shelly light fields and the `Light`/`CCT`/`RGB*` components out of scope until a tester reports. |
 | 4 | `turn_off_for` rig pass | rig test for `turn_off_for`; bench records written, so both Shelly adapters reach beta. (`toggle_for` was dropped.) |
 | 5 | First release (`v0.0.1`) + HACS submission | Detail in `2026-10-23-hacs-early-release.md`. Scope: Shelly `switch` and on/off `light` (shared on/off) for `turn_on_for` and `turn_off_for`. MIT `LICENSE`; `custom_components/device_side/brand/icon.png` (+ `@2x`); hand-written bench records and README matrix (inside the matrix markers, taken over by `gen_docs.py` later); README install via HACS custom repository; short `CONTRIBUTING.md`; full-history `gitleaks detect` clean; topics added; repo flipped public; `gh workflow enable validate.yml`, nightly schedule restored and private-repo guard removed; PR `release/v0.0.1` -> `main`, `ci-green` on `main` with hassfest + HACS validate green; tag `v0.0.1` and a full (not pre-) GitHub release; PR to `hacs/default` adding `jasonmx/device-side` to `integration`, from a personal fork; issue filed to switch the README install section to a plain HACS search once that PR merges (review takes months); `release/v0.0.2` cut from `main`. **v0.0.1 ships without an RC soak to start the HACS review clock; from v0.0.2 the Releases rules apply in full.** |
 | 6 | Z2M `turn_on_for` | detect, addressing, publish; `light.turn_on` precedes when fields present; group topic when `native_groups`; rig test. |
 | 7 | Hue port | five adapters + bridge/transition_cache/colors; `move` across brightness, color_temp, hue, saturation; `grouped_light` native for move/stop, expanded for set/get_attributes; hue_dimmer tests ported to real-hass fixtures; rig parity with hue_dimmer `tests/RELEASE_CHECKLIST.md`; then Hue `turn_on_for`/`turn_off_for` once open item 10 is answered (`experimental=True`), with `cancel_delayed_toggle` across all integrations if the cancel contract needs it. |
 | 8 | Docs generator + templates | `gen_docs.py --check` in CI; matrix, README block, action pages, `integrations.md` sections; `_notes.yaml`; contributing guides. Lands before the first v0.0.2 RC. |
-| 9 | Bench + tiers + tester flow | fingerprinting and computed tiers in `gen_docs.py`, including the scope-coverage check; per-adapter coverage check; tag-format check; RC audit gate (`2026-10-23-rc-audit-gate.md`: `cut-rc` workflow, `check_audit.py`, `/rc-audit`); `test-report.yml` issue form; RC-only umbrella Repairs issue with multi-select flow and prefilled per-test links; bench files filled from rig runs and tester reports. Lands before the first v0.0.2 RC, which is the project's first RC. |
+| 9 | Bench + tiers + tester flow | **plan in /plan first** (interview the maintainer before any code); automated tester runner: standalone file (`uv run`, PEP 723 inline metadata, aiohttp WebSocket + PyYAML), talks to HA_URL + long-lived token, assumes integration installed via HACS or by hand (no deploy); `tests/rig/client.py` moved to a location both the runner and `scripts/rig.py` import; rig tests converted to declarative YAML step files (set state → call action → expect → restore), keyed by inventory roles so the user maps roles to their own entities; `--dry-run` prints the steps with entities filled in; confirmation gate on every run; `scripts/rig.py` uses the same YAML step files for the maintainer's rig; runner prints a prefilled test-report issue body (pass/fail per step, HA version, device model, firmware, adapter fingerprint) feeding `test-report.yml` and bench records; `testing.md` updated: dedicated non-admin HA user for the token; check whether ZHA admin context needs an exception; fingerprinting and computed tiers in `gen_docs.py`, including the scope-coverage check; per-adapter coverage check; tag-format check; RC audit gate (`2026-10-23-rc-audit-gate.md`: `cut-rc` workflow, `check_audit.py`, `/rc-audit`); `test-report.yml` issue form; RC-only umbrella Repairs issue with multi-select flow and prefilled per-test links; bench files filled from rig runs and tester reports. Lands before the first v0.0.2 RC, which is the project's first RC. |
 | 10 | ZHA `turn_on_for` | after Jason has ZHA running on the rig; addressing; admin context passthrough; ValueError -> rejected; rig test. |
 | 11 | Matter `turn_on_for` | after Jason has Matter running on the rig; LT check; `OnWithTimedOff`; optional read-back; rig test on bulb and plug. |
 | 12 | `v0.1.0` ("v1" names the scope, not the version) | feature complete for this plan; third-party tester reports for the hardware the rig lacks; matrix current; release checklist adapted from hue_dimmer. |
