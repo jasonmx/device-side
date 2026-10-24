@@ -1,14 +1,13 @@
 # Contributing
 
-Device Side grows one adapter at a time: one feature on one platform, in
-`custom_components/device_side/platforms/<platform>/<feature>.py`.
+Instructions for testing features on your own devices are coming with the experimental pre-release.
 
-Every adapter is tested on real hardware before release, because mocks miss what devices really
-do. If you write an adapter for hardware you don't own, someone who owns it can test it.
+## What gets built
 
-- **Run the tests:** `uv sync`, `uv pip install -r requirements_test.txt`, then `.venv/bin/pytest`.
-- **Test on hardware:** [docs/contributing/rig.md](docs/contributing/rig.md).
-- **Before a PR:** `pre-commit run --all-files`. PRs go to the current `release/vX.Y.Z` branch,
-  not `main`.
-
-Fuller guides for writing adapters and reporting tests are on the way.
+- **Popular features only.** A feature needs an integration on over 20% of Home Assistant installs
+  that can support it, and more than one person asking for it. Devices offer far more commands than
+  people use.
+- **Fill gaps, don't copy Core.** A Core feature is redone only to fix a sharp edge or make it much
+  easier to use.
+- **Built for people, not a passthrough.** Actions take what people think in (a dim speed), not the
+  device's raw parameters (a distance and a duration).
