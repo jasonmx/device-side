@@ -5,7 +5,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
-from .models import Mode, Target
+from .models import Target
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,7 +21,6 @@ class AdapterCapabilities:
     """
 
     experimental: bool = False
-    mode: Mode = Mode.NATIVE
     domains: frozenset[str] = frozenset({"light"})
     duration: DurationLimits | None = None
     supports_fields: frozenset[str] = frozenset()

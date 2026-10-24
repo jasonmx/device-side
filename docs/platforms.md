@@ -65,15 +65,22 @@ ignored and the result says so with detail `light_fields_ignored`.
 The same `Set` with `on: false`: the device turns off now and turns itself back on after the
 duration. Light fields are not accepted.
 
+### Cancelling
+
+Send a regular `turn_on` or `turn_off`: either cancels the flip-back timer. A `turn_on_for` or
+`turn_off_for` during a timer replaces it, so the countdown restarts at the new duration.
+
+Tested on Gen3 and Gen4 relays (firmware 2.0.1) by direct RPC. A wall switch wired to the device's
+input was not tested, and what it does may depend on the input mode.
+
 ### Sharp edges
 
 - **Timer limits are the device's.** The device accepts any duration over 0 s up to 7 days
   (604800 s) and keeps it to 0.01 s. Device Side rounds every duration to 10 ms with a 50 ms
   floor, for all platforms; a duration under 50 ms or over 7 days is clamped and the result
   carries `clamped_to`.
-- **The timer is the device's, not Home Assistant's.** Turning the output on or off by any other
-  route (the Shelly app, a wall switch, a plain `light.turn_off`) can replace or cancel the
-  flip-back timer, according to the device's own rules.
+- **The timer is the device's, not Home Assistant's.** Any on or off command cancels it, whatever
+  sent it: Home Assistant, the Shelly app or another integration (see Cancelling).
 - **Colors other than RGB.** `hs_color` and `xy_color` are refused rather than converted, because
   the conversion depends on the component's color mode. Send `rgb_color` or `color_temp_kelvin`.
 - **Only relays are claimed.** `Light`, `CCT`, `RGB`, `RGBW` and `RGBCCT` document `toggle_after`

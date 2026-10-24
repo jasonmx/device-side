@@ -38,7 +38,6 @@ async def test_on_then_off_after_duration(ha: HAClient, snapshot, require_adapte
 
     assert response[entity_id]["status"] in ("confirmed", "sent"), response
     assert response[entity_id]["platform"] == "shelly"
-    assert response[entity_id]["mode"] == "native"
     await ha.wait_for(entity_id, is_on, tolerance)
     await asyncio.sleep(DURATION_S - tolerance)
     assert is_on(await ha.get_state(entity_id)), "turned off before the duration"
