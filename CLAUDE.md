@@ -32,30 +32,12 @@ existing records survive because the fingerprint excludes the declaration.
 **Setting `experimental`:** set it for a new action, a new field or attribute, or a new integration
 (including ports). Leave it off for fixes, refactors and performance work. When unsure, ask.
 
-## Releases
+## Pull requests
 
-- Work lands on `release/vX.Y.Z` by self-merged PR; RCs are tagged `vX.Y.ZrcN` from it and run every tier.
-- Before any RC tag, point Jason at a rig run (`scripts/rig.py`) and don't tag until he confirms it passed.
-- Merge to `main` and tag `vX.Y.Z` only when every adapter is `beta` and the latest RC has
-  soaked 7+ days with no open `regression` issue. A new RC restarts the soak.
-- Follow a release that leaves a capability or field out of scope with a "testers needed" RC.
-- Hotfixes for `severity:high` regressions go straight to `main` and keep their tier. Other fixes
-  ride the next release branch and re-climb.
-- Passing tester reports (GitHub "Test report" issues) become `docs/bench/<integration>/<action>.md`
-  records citing the issue.
-
-## Parallel sessions
-
-- Every session works in its own worktree, branch `wt/<topic>` off `release/vX.Y.Z`. The main checkout stays clean
-  on the release branch and is never edited.
-- New worktree: `uv sync`, then `uv pip install -r requirements_test.txt`.
-- Household files (`inventory.yaml`, `.env.rig`, `.private-terms`) are read from the main checkout; never copy them
-  into a worktree.
-- Before each push: `.venv/bin/pytest` and `pre-commit run --all-files`.
-- PR into `release/vX.Y.Z`; once `ci-green` passes, merge it yourself with `gh pr merge --squash --delete-branch`.
-  If the base moved, rebase, push and `ci-green` again first. Then remove the worktree and its local branch.
-- Release PRs into `main` and every tag (RC or release) are Jason's.
-- One rig run at a time: `scripts/rig.py` takes a lock and refuses a second run.
+- Base: whichever is newer, `main` or the latest `release/vX.Y.Z` branch.
+- Setup: `uv sync`, then `uv pip install -r requirements_test.txt`.
+- Before each push: `.venv/bin/pytest` and `pre-commit run --all-files` (ruff and the household check).
+- Before opening the PR: `/audit-code` on the diff.
 
 ## Layout
 
@@ -70,7 +52,3 @@ existing records survive because the fingerprint excludes the declaration.
 
 - Async throughout; `_LOGGER = logging.getLogger(__name__)`; actions registered once in `async_setup`.
 - American English, matching HA. The version lives in `manifest.json`.
-
-## Development
-
-- pre-commit runs ruff and the household check. Wait on CI with `ci-green`.
