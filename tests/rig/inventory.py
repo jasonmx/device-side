@@ -5,6 +5,7 @@ Pure file reading, no HA or pytest imports, so the runner's preflight can load i
 
 import ast
 import os
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -12,8 +13,23 @@ import yaml
 
 RIG_DIR = Path(__file__).parent
 REPO = RIG_DIR.parents[1]
-INVENTORY = RIG_DIR / "inventory.yaml"
-ENV_FILE = REPO / ".env.rig"
+
+
+def main_checkout(repo: Path = REPO) -> Path:
+    """The main checkout, which holds the gitignored household files for every linked worktree; else `repo`."""
+    try:
+        common = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return repo
+    return Path(common).parent
+
+
+MAIN_CHECKOUT = main_checkout()
+INVENTORY = MAIN_CHECKOUT / RIG_DIR.relative_to(REPO) / "inventory.yaml"
+ENV_FILE = MAIN_CHECKOUT / ".env.rig"
 
 ROLES = frozenset(
     {"light_onoff", "light_wrapped", "light_dimmable", "light_ct", "light_color", "switch_plug", "group", "scene"}
