@@ -1,6 +1,6 @@
 # Device Side
 
-Device Side unlocks popular on-device features like on-with-timed-off for lights and switches, via the core Matter, Zigbee, Shelly and Hue integrations. Device-side features are more reliable than HA automations, as they work even when HA crashes or a network gets congested.
+Device Side unlocks popular on-device features for lights and switches, like on-with-timed-off, via the Matter, Zigbee, Shelly and Hue integrations. Device-side features are more reliable than HA automations, as they work even when HA crashes or a network gets congested.
 
 **Disclaimers:**
 
