@@ -43,9 +43,9 @@ Three features:
 | Out-of-range durations | Clamp, log a warning, and return `clamped_to` in the per-entity result. Limits go in the services.yaml description. Clamping is the safe direction (light turns off sooner, never not at all). |
 | OnLevel | Native only, brightness only. Colour/CT on-level does not exist natively anywhere (see 4.5). HA-side emulation of OnLevel is dropped. |
 | Emulation | Users who want OnLevel emulation can build it with `set_attributes` plus an automation. |
-| Assisted hooks | Opt-in. Allowed only where the feature still delivers, or degrades to plain device behaviour, if HA goes offline. Allowed example: cancelling a Hue bridge timer when the light is toggled early. Not allowed: reset-at-off OnLevel emulation, HA-side timers. |
+| HA-side help | None. Every feature runs on the device or bridge and never depends on HA staying up: no HA-side hooks, timers or emulation (such as reset-at-off OnLevel). Users who want HA-side behaviour build it with an automation. |
 | Integrations | No forks of integrations. Reuse existing integration services or libraries so connections, queuing and throttling are shared where they exist. |
-| Per-entity results | `unsupported`, `rejected`, `sent`, `confirmed`, plus mode (`native` or `assisted`), adapter used and `clamped_to`. |
+| Per-entity results | `unsupported`, `rejected`, `sent`, `confirmed`, plus adapter used and `clamped_to`. |
 | Service registration | Register in `async_setup`; gate on config toggles inside the handler; do not add or remove services at runtime (see 4.1). |
 
 ## 3. Feature matrix by platform
@@ -142,7 +142,7 @@ Files checked are identical at tag 4.9.0 and HEAD.
 
 - `set_attributes` beat `set_look` in a structured debate. Decisive reasoning: the UI label is decoupled from the slug, so brevity matters little and misreading costs more; consistency with the user's Hue component has real value [I].
 - Domain: `direct_control` was the first verdict; it flipped to `device_side` after the user pointed out that "device-side" means the opposite of "HA-side", which includes the Hue bridge, and that core registers the bridge as a device [V]. The flip came from an inconsistency in my reasoning, not pushback alone. `direct_control` remains a defensible runner-up if call-site readability is valued over precision.
-- Scope limit of the name: it fits narrow, assistive hooks that pass the test "does the feature still work, or fall back to plain device behaviour, if HA stops?". A growing set of HA-dependent features would eventually make the name wrong [I].
+- Scope limit of the name: it fits only features that run on the device or bridge. HA-dependent features would make the name wrong [I].
 - Candidates also considered and not chosen: `on_device`, `device_features`, `native_features`, `device_extras`, `onboard` (prefix of core `onboarding`), `firmware_features`, `passthrough` (misleading) [V on core collisions only].
 - Collision check results: no core domain named `device_side` [V]. HACS default dataset (3,984 integration repos): no hit for `device_side` or `deviceside` [V]. HA brands repo `custom_integrations` (4,025 entries): absent [V]. Web search: nothing relevant [V].
 - The authenticated GitHub code search (`gh search code '"domain": "device_side"' --filename manifest.json`) could not be run in the sandbox. The user reported afterwards that the check came back clean; assumed to include that search, so confirm.
@@ -158,7 +158,7 @@ Files checked are identical at tag 4.9.0 and HEAD.
 - Lead every description with "without changing on/off state" for `set_attributes`, and say that it also works while the light is on.
 - One small adapter file per platform that needs internals (Shelly, Matter, Hue), with guarded imports and a smoke test per HA release [I].
 - Keep your own concurrency low on Hue (1 or 2 lights at a time) so core's light commands interleave. aiohue's cap of 3 is shared with core's commands, and a 30-light call with several requests each can queue ahead of manual commands [I].
-- Hue timer caveats to document: the timer lives on the bridge, so a bulb that is unreachable at expiry stays on; a manual off does not cancel it unless the assisted hook is on; repeat calls would stack unless each timer has a deterministic name that is replaced on each call [I].
+- Hue timer caveats to document: the timer lives on the bridge, so a bulb that is unreachable at expiry stays on; a manual off may not cancel it (to test; a `cancel_delayed_toggle` action covers it if not); repeat calls would stack unless each timer has a deterministic name that is replaced on each call [I].
 - Enforce support in the handler. The UI entity filter is only a convenience.
 
 ## 6. Corrections to earlier claims (do not repeat these errors)
@@ -189,7 +189,7 @@ Files checked are identical at tag 4.9.0 and HEAD.
 
 ## 8. Suggested starting point for planning
 
-1. Define the adapter interface and the per-entity result schema (states, mode, adapter, `clamped_to`) first. Everything else hangs on it.
+1. Define the adapter interface and the per-entity result schema (states, adapter, `clamped_to`) first. Everything else hangs on it.
 2. Build the Matter OnLevel adapter first. It needs only the existing `number` entity, so it is the cheapest end-to-end slice.
 3. Then Z2M and ZHA timed turn-on and OnLevel, which use public services.
 4. Then Shelly, once item 2 above is closed.
