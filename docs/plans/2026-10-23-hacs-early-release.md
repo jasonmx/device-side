@@ -80,8 +80,8 @@ Steps on `release/v0.0.1`:
 5. **README:**
    - Pitch.
    - Install as a HACS custom repository (until the default-store PR merges).
-   - Hand-written support matrix: Shelly `switch` × three actions, inside the
-     `<!-- matrix -->` markers so `gen_docs.py` takes it over later.
+   - Hand-written feature table, without `<!-- matrix -->` markers: slice 8 decides how
+     `gen_docs.py` handles it.
    - Link to the Shelly section of `docs/integrations.md`.
 6. **Contributor docs:** a short `CONTRIBUTING.md` pointing at `docs/contributing/testing.md`. The full
    guides stay in slice 8.
