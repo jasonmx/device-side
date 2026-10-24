@@ -2,8 +2,7 @@
 
 Design and delivery plan: `docs/plans/2026-10-23-device-side-repo-plan.md`.
 
-**This file is public.** Never add secrets, personal details, household devices, entity IDs,
-hostnames or network details to it. Those go in the gitignored `CLAUDE.local.md`.
+**The repo is public:** no household entity IDs, device names, MACs or hostnames anywhere in it, commit messages included.
 
 ## Tiers
 
