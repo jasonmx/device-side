@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from custom_components.device_side.core.registry import AdapterRegistry
-from tests.rig.inventory import Inventory, RigModule, load_env, rig_modules
+from tests.rig.inventory import Inventory, RigModule, load_env, main_checkout, rig_modules
 
 REPO = Path(__file__).parents[2]
 _spec = importlib.util.spec_from_file_location("rig", REPO / "scripts" / "rig.py")
@@ -170,3 +170,35 @@ def test_deploy_state(monkeypatch, kwargs, needed, blocker):
     state = rig.deploy_state("ha")
     assert state.needed is needed
     assert (state.blocker is None) if blocker is None else (blocker in state.blocker)
+
+
+def run_git(*args: str) -> None:
+    rig.subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", *args],
+                       check=True, capture_output=True)
+
+
+def test_main_checkout_from_a_linked_worktree(tmp_path, monkeypatch):
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    main, linked = tmp_path / "main", tmp_path / "linked"
+    run_git("init", "-q", str(main))
+    run_git("-C", str(main), "commit", "-q", "--allow-empty", "-m", "root")
+    run_git("-C", str(main), "worktree", "add", "-q", str(linked))
+    assert main_checkout(linked).resolve() == main.resolve()
+    assert main_checkout(main).resolve() == main.resolve()
+
+
+def test_main_checkout_falls_back_outside_a_repo(tmp_path, monkeypatch):
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    assert main_checkout(tmp_path) == tmp_path
+    monkeypatch.setenv("PATH", "")
+    assert main_checkout(tmp_path) == tmp_path
+
+
+def test_a_held_rig_lock_refuses_a_second_run_naming_the_holder(tmp_path):
+    path = tmp_path / rig.LOCK_NAME
+    held = rig.lock_rig(path, "wt/first")
+    with pytest.raises(SystemExit, match=rf"wt/first \(pid {rig.os.getpid()}\)"):
+        rig.lock_rig(path, "wt/second")
+    held.close()
+    rig.lock_rig(path, "wt/second").close()
+    assert path.read_text().startswith("wt/second ")
