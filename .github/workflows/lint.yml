@@ -28,3 +28,26 @@ jobs:
 
       - name: Run pre-commit
         run: pre-commit run --all-files
+
+  # The pre-commit hook only sees the working tree; this catches a secret committed and later deleted.
+  secrets-history:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        # Same version as the pre-commit hook.
+        env:
+          VERSION: "8.24.2"
+          SHA256: "fa0500f6b7e41d28791ebc680f5dd9899cd42b58629218a5f041efa899151a8e"
+        run: |
+          curl -sSfL -o gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz"
+          echo "${SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          rm gitleaks.tar.gz
+
+      - name: Scan full history
+        run: ./gitleaks git . --log-opts=--all --redact --verbose
