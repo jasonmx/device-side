@@ -38,9 +38,7 @@ class Adapter[RequestT: Request](ABC):
 
     def result(self, target: Target, status: Status, **kwargs) -> EntityResult:
         """Build every result here: it keys on target.reported_id, which the dispatcher matches results by."""
-        return EntityResult(
-            target.reported_id, status, platform=self.platform, mode=self.capabilities.mode, **kwargs
-        )
+        return EntityResult(target.reported_id, status, platform=self.platform, **kwargs)
 
     async def gather(
         self, hass: HomeAssistant, targets: list[Target], send: Callable[[Target], Awaitable[EntityResult]]
