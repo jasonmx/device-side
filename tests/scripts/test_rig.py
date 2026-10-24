@@ -46,19 +46,18 @@ def test_inventory_entity_by_role(inventory):
     assert inventory.entity("zha", "switch_plug") is None
 
 
-def test_load_env_reads_file_and_defaults_ssh(tmp_path, monkeypatch):
+def test_load_env_reads_file_and_env_overrides(tmp_path, monkeypatch):
     monkeypatch.delenv("HA_URL", raising=False)
-    monkeypatch.delenv("RIG_SSH", raising=False)
     monkeypatch.delenv("RIG_SYNC_CMD", raising=False)
     monkeypatch.delenv("RIG_STATUS_CMD", raising=False)
     monkeypatch.delenv("RIG_RESTART_CMD", raising=False)
     monkeypatch.setenv("HA_TOKEN", "from-env")
     env = load_env(write(tmp_path, ".env.rig", "# comment\nHA_URL='http://ha:8123'\nHA_TOKEN=from-file\n"))
-    assert env == {"HA_URL": "http://ha:8123", "HA_TOKEN": "from-env", "RIG_SSH": "ha"}
+    assert env == {"HA_URL": "http://ha:8123", "HA_TOKEN": "from-env"}
 
 
 def test_load_env_reads_command_vars(tmp_path, monkeypatch):
-    for key in ("HA_URL", "HA_TOKEN", "RIG_SSH", "RIG_SYNC_CMD", "RIG_STATUS_CMD", "RIG_RESTART_CMD"):
+    for key in ("HA_URL", "HA_TOKEN", "RIG_SYNC_CMD", "RIG_STATUS_CMD", "RIG_RESTART_CMD"):
         monkeypatch.delenv(key, raising=False)
     env = load_env(
         write(

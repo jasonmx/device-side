@@ -548,7 +548,7 @@ duration and whether a restart is needed, then requires interactive y/N (or
 `DEVICE_SIDE_RIG_APPROVED=1`). `scripts/rig.py` flow:
 
 1. Read-only preflight: load inventory and `.env.rig` (`HA_URL`, `HA_TOKEN` for a non-admin user,
-   `RIG_SSH` default `ha`); `AdapterRegistry.discover()` (no hass) intersected with inventory
+   `RIG_SYNC_CMD`, `RIG_STATUS_CMD`, `RIG_RESTART_CMD`); `AdapterRegistry.discover()` (no hass) intersected with inventory
    integrations -> one line per adapter (`shelly / turn_on_for -> light.office_strip (beta)`); sum each
    test's `RIG_SECONDS` for the estimate; compare `HEAD:custom_components/device_side` with
    `the deploy status command` to decide whether a deploy+restart is needed, and refuse a deploy unless

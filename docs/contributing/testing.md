@@ -21,7 +21,7 @@ Run the action with a short duration (5-8 seconds) and check the device responds
 
 ## Report
 
-[Open a test report issue](https://github.com/jasonmx/device-side/issues/new?template=test-report.yml)
+[Open an issue](https://github.com/jasonmx/device-side/issues/new?title=Test%20report)
 with the Device Side version, the integration (Shelly, ZHA, etc.), the entity type, the fields
 you tested, and whether each action worked. Include any error messages from the logs.
 
