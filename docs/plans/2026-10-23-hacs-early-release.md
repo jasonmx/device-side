@@ -83,7 +83,7 @@ Steps on `release/v0.0.1`:
    - Hand-written support matrix: Shelly `switch` × three actions, inside the
      `<!-- matrix -->` markers so `gen_docs.py` takes it over later.
    - Link to the Shelly section of `docs/integrations.md`.
-6. **Contributor docs:** a short `CONTRIBUTING.md` pointing at `docs/contributing/rig.md`. The full
+6. **Contributor docs:** a short `CONTRIBUTING.md` pointing at `docs/contributing/testing.md`. The full
    guides stay in slice 8.
 7. **Before going public:**
    - Run `gitleaks detect` over the whole history; it must be clean (check that

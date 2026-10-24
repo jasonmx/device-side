@@ -80,7 +80,7 @@ Only refusals that mean "nobody has tested this yet" change; permanent ones keep
   which calls a capability "Shelly dimmer" (a device model).
 - `CLAUDE.md`: tier section ("adapter (action × integration)", scope wording), Releases, Layout paths, one line
   pointing at the glossary. Deletion pass while there.
-- `README.md` ("Supported platforms" → "Supported integrations"), `docs/contributing/rig.md`,
+- `README.md` ("Supported platforms" → "Supported integrations"), `docs/contributing/testing.md`,
   `docs/plans/2026-10-23-hacs-early-release.md`, bench records (the "Backings" row → "Capabilities").
 - Leave dated handoff docs (`docs/device_side_handoff-2026-10-23.md`) as historical.
 - Save this plan as `docs/plans/2026-10-24-terminology.md`.

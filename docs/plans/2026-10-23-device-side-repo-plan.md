@@ -230,7 +230,7 @@ requires it.
   links). Start with a single `docs/integrations.md`, one section per integration on a fixed template
   (what it talks to, how targets resolve, per-action notes, sharp edges, generated scope
   block). `docs/actions/<action>.md` per action. `docs/contributing/add-an-action.md`,
-  `add-an-integration.md`, `rig.md`. MkDocs-ready layout, no site in v1; `integrations.md` splits into
+  `add-an-integration.md`, `testing.md`. MkDocs-ready layout, no site in v1; `integrations.md` splits into
   per-integration pages only if it outgrows one file.
 - **Repo:** private until v0.0.1 ships (slice 5), then public with contributor docs. MIT. American English in
   all user-facing text (matches HA).
@@ -320,7 +320,7 @@ docs/
   _notes.yaml                                note key -> Markdown footnote text
   actions/<action>.md  integrations.md            fixed templates with <!-- generated:start/end --> blocks
                                              (integrations.md: one section + one block each)
-  contributing/add-an-action.md  add-an-integration.md  bench-checklist-template.md  rig.md
+  contributing/add-an-action.md  add-an-integration.md  bench-checklist-template.md  testing.md
   bench/<integration>/<action>.md            per-adapter bench record; gates tier promotion
 tests/
   conftest.py            enable_custom_integrations autouse; setup_integration; fake_registry; call()
@@ -577,10 +577,12 @@ collection; the fixtures skip everything without `DEVICE_SIDE_RIG_APPROVED=1`; `
 registered in pyproject).
 
 `.gitignore`: `tests/rig/inventory.yaml`, `.env.rig` (example at `tests/rig/env.example`).
-`docs/contributing/rig.md` covers the shim deploy path, token creation, inventory format (per
-integration -> entities with role tags `light_dimmable`, `light_ct`, `light_color`, `switch_plug`,
-`group`, `scene`), the first-load checklist and safety notes. **Claude asks before every rig run; the devices
-are in-use household lights.** Rig passes are recorded in `docs/bench/<integration>/<action>.md`
+The maintainer's rig has private setup docs. `docs/contributing/testing.md` covers manual testing
+on any Home Assistant: install, first-load check, and how to file a test report.
+Inventory format (per integration -> entities with role tags `light_dimmable`, `light_ct`,
+`light_color`, `switch_plug`, `group`, `scene`) is in `tests/rig/env.example` and
+`tests/rig/inventory.example.yaml`. **Claude asks before every rig run; the devices are
+in-use household lights.** Rig passes are recorded in `docs/bench/<integration>/<action>.md`
 (date, HA version, device model, firmware, fingerprint, source: rig run or test-report issue).
 
 ## Delivery sequence
@@ -590,7 +592,7 @@ are in-use household lights.** Rig passes are recorded in `docs/bench/<integrati
 | 0 | Scaffold + CI | Plan saved to `docs/plans/`; `git init`, private GitHub repo `jasonmx/device-side`; manifest, config_flow, const, strings, icons, empty services.yaml; pyproject, pre-commit, workflows from hue_dimmer; `test_actions_setup.py` green with zero actions; hassfest + HACS validate green; README skeleton with matrix markers. |
 | 1 | Core + fake integration | `core/*`; `actions/turn_on_for.py`, `turn_off_for.py`; fake integration (with a fake native group and `expand_group` hook); dispatcher/resolver/groups tests green (HA-group expansion for light and switch, native-group pass-through vs expansion, clamp, total-failure raise, response shape, semaphore bound, guarded-import skip). No live load yet: there is no dev HA. |
 | 2 | Shelly `turn_on_for` + `turn_off_for` | one RPC with fields; Gen1 -> unsupported; read-back -> confirmed under mock; Shelly section of `docs/integrations.md` on the template; adapter `experimental=True`. |
-| 3 | Rig harness | `scripts/rig.py`, `deploy.sh`, `tests/rig/conftest.py`, inventory example, `docs/contributing/rig.md`; **first approved deploy is the integration's first load in any HA**: confirm entry adds, actions appear with translated names, the brightness fields hide for a switch-only selection; then Shelly `turn_on_for` passes against the house; bench record written; Shelly `switch` and on/off `light` -> beta (shared on/off: a relay shown as a light sends the same `Switch.Set`); Shelly light fields and the `Light`/`CCT`/`RGB*` components out of scope until a tester reports. |
+| 3 | Rig harness | `scripts/rig.py`, `deploy.sh`, `tests/rig/conftest.py`, inventory example, `docs/contributing/testing.md`; **first approved deploy is the integration's first load in any HA**: confirm entry adds, actions appear with translated names, the brightness fields hide for a switch-only selection; then Shelly `turn_on_for` passes against the house; bench record written; Shelly `switch` and on/off `light` -> beta (shared on/off: a relay shown as a light sends the same `Switch.Set`); Shelly light fields and the `Light`/`CCT`/`RGB*` components out of scope until a tester reports. |
 | 4 | `turn_off_for` rig pass | rig test for `turn_off_for`; bench records written, so both Shelly adapters reach beta. (`toggle_for` was dropped.) |
 | 5 | First release (`v0.0.1`) + HACS submission | Detail in `2026-10-23-hacs-early-release.md`. Scope: Shelly `switch` and on/off `light` (shared on/off) for `turn_on_for` and `turn_off_for`. MIT `LICENSE`; `custom_components/device_side/brand/icon.png` (+ `@2x`); hand-written bench records and README matrix (inside the matrix markers, taken over by `gen_docs.py` later); README install via HACS custom repository; short `CONTRIBUTING.md`; full-history `gitleaks detect` clean; topics added; repo flipped public; `gh workflow enable validate.yml`, nightly schedule restored and private-repo guard removed; PR `release/v0.0.1` -> `main`, `ci-green` on `main` with hassfest + HACS validate green; tag `v0.0.1` and a full (not pre-) GitHub release; PR to `hacs/default` adding `jasonmx/device-side` to `integration`, from a personal fork; issue filed to switch the README install section to a plain HACS search once that PR merges (review takes months); `release/v0.0.2` cut from `main`. **v0.0.1 ships without an RC soak to start the HACS review clock; from v0.0.2 the Releases rules apply in full.** |
 | 6 | Z2M `turn_on_for` | detect, addressing, publish; `light.turn_on` precedes when fields present; group topic when `native_groups`; rig test. |
