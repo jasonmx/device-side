@@ -12,8 +12,9 @@ from ...core.models import EntityResult, LightFields, Status, Target
 
 _LOGGER = logging.getLogger(__name__)
 
-# The API documents toggle_after only as "seconds"; these bounds are ours until the rig confirms the device's.
-TIMER_LIMITS = DurationLimits(min_s=0.1, max_s=86400, resolution_s=0.1)
+# The device's own bounds (Switch.Set error -103: "should be > 0 and <= 604800"); it keeps 0.01 s steps.
+# Durations arrive rounded to 10 ms and floored at 50 ms (core/duration.py), so only the ceiling can bite here.
+TIMER_LIMITS = DurationLimits(min_s=0, max_s=604800)
 
 # Core's floor for an RPC transition (shelly/const.py RPC_MIN_TRANSITION_TIME_SEC).
 _MIN_TRANSITION_S = 0.5

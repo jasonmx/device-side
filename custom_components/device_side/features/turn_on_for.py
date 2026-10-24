@@ -19,11 +19,15 @@ class TurnOnForRequest(TimedRequest):
         return self.light.present()
 
 
+# 10 ms steps; the dispatcher applies the 50 ms floor (core/duration.py) so it can report clamped_to.
+RESOLUTION_DIGITS = 2
+
+
 def parse_duration(call: ServiceCall) -> float:
     seconds = call.data["duration"].total_seconds()
     if seconds <= 0:
         raise ServiceValidationError(translation_domain=DOMAIN, translation_key="invalid_duration")
-    return seconds
+    return round(seconds, RESOLUTION_DIGITS)
 
 
 class TurnOnFor(Feature[TurnOnForRequest]):
