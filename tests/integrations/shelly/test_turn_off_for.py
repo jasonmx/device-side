@@ -5,10 +5,10 @@ from unittest.mock import call as rpc_call
 from ...conftest import call
 from ...fixtures.shelly import add_shelly_entity, shelly_device
 
-CONFIRMED = {"status": "confirmed", "platform": "shelly"}
+CONFIRMED = {"status": "confirmed", "integration": "shelly"}
 
 
-async def test_switch_and_relay_light_each_get_one_set_and_an_unclaimed_component_is_refused(hass, setup_production):
+async def test_switch_and_relay_light_each_get_one_set_and_a_capability_out_of_scope_is_refused(hass, setup_production):
     entry, call_rpc = shelly_device(hass)
     add_shelly_entity(hass, entry, "switch.heater", "switch:0", state="on")
     add_shelly_entity(hass, entry, "light.lamp", "switch:1", state="on")
@@ -21,7 +21,7 @@ async def test_switch_and_relay_light_each_get_one_set_and_an_unclaimed_componen
     assert response == {
         "light.lamp": CONFIRMED,
         "switch.heater": CONFIRMED,
-        "light.strip": {**CONFIRMED, "status": "unsupported", "detail": "component_not_supported"},
+        "light.strip": {**CONFIRMED, "status": "unsupported", "detail": "capability_not_tested"},
     }
     sets = [args for args in call_rpc.await_args_list if args.args[0].endswith(".Set")]
     assert sorted(sets, key=lambda args: args.args[1]["id"]) == [
@@ -40,7 +40,7 @@ async def test_gen1_is_unsupported(hass, setup_production):
 
     assert response["switch.old_relay"] == {
         "status": "unsupported",
-        "platform": "shelly",
+        "integration": "shelly",
         "detail": "gen1_unsupported",
     }
     assert response["switch.heater"] == CONFIRMED

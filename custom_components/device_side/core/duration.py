@@ -1,7 +1,7 @@
 from dataclasses import replace
 
-from .capabilities import DurationLimits
 from .models import TimedRequest
+from .scope import DurationLimits
 
 # Nothing shorter than 50 ms: a relay can't switch faster, and nobody needs more than 10 Hz.
 MIN_DURATION_S = 0.05

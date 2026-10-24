@@ -1,4 +1,4 @@
-"""A scripted adapter shared by the fake platforms: tests set outcomes per entity and read back what was sent."""
+"""A scripted adapter shared by the fake integrations: tests set outcomes per entity and read back what was sent."""
 
 import asyncio
 from dataclasses import dataclass, field
@@ -25,7 +25,7 @@ SCRIPT = Script()
 
 class ScriptedAdapter(Adapter):
     async def execute(self, hass, request, targets: list[Target]) -> list[EntityResult]:
-        SCRIPT.calls.append((self.platform, self.feature, request, [target.entity_id for target in targets]))
+        SCRIPT.calls.append((self.integration, self.action, request, [target.entity_id for target in targets]))
         if SCRIPT.execute_error is not None:
             raise SCRIPT.execute_error
 

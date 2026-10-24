@@ -16,7 +16,7 @@ def resolve(
 ) -> Target | str:
     """The Target for an entity, or the reason key it cannot be served.
 
-    Platforms with a detect hook are tried first, so Z2M claims its MQTT entities before a generic MQTT platform.
+    Integrations with a detect hook are tried first, so Z2M takes its MQTT entities before a generic MQTT integration.
     A switch_as_x wrapper resolves to the switch it wraps: it forwards on/off unchanged, so the switch's call is the
     one that reaches the device.
     """
@@ -25,9 +25,9 @@ def resolve(
         return "not_in_registry"
     if entry.platform == SWITCH_AS_X:
         return _resolve_wrapper(hass, registry, entry, via_group)
-    candidates = [info for info in registry.available_platforms() if info.ha_integration == entry.platform]
+    candidates = [info for info in registry.available_integrations() if info.ha_domain == entry.platform]
     if not candidates:
-        return "no_platform"
+        return "integration_not_supported"
     config_entry = hass.config_entries.async_get_entry(entry.config_entry_id) if entry.config_entry_id else None
     if config_entry is None or config_entry.state is not ConfigEntryState.LOADED:
         return "integration_not_loaded"
@@ -36,20 +36,20 @@ def resolve(
     detected = [info for info in candidates if info.detect is not None and info.detect(hass, entry, device)]
     generic = [info for info in candidates if info.detect is None]
     if not (chosen := (detected or generic)):
-        return "no_platform"
-    platform = chosen[0]
+        return "integration_not_supported"
+    integration = chosen[0]
 
     target = Target(
         entity_id=entity_id,
         domain=split_entity_id(entity_id)[0],
-        platform=platform.key,
+        integration=integration.key,
         entry=entry,
         device=device,
         config_entry=config_entry,
         state=hass.states.get(entity_id),
         via_group=via_group,
     )
-    if platform.is_group is not None and platform.is_group(hass, target):
+    if integration.is_group is not None and integration.is_group(hass, target):
         target = replace(target, is_group=True)
     return target
 

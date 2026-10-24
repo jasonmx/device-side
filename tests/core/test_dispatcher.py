@@ -1,4 +1,4 @@
-"""End-to-end through registered services, against the fake platforms."""
+"""End-to-end through registered services, against the fake integrations."""
 
 import asyncio
 from unittest.mock import patch
@@ -25,9 +25,9 @@ async def test_response_shape(hass, fake, reset_script):
 
     response = await call(hass, "turn_on_for", {"entity_id": "light.desk", "duration": 5})
 
-    assert response == {"light.desk": {"status": "confirmed", "platform": "fake"}}
-    [(platform, feature, request, entity_ids)] = reset_script.calls
-    assert (platform, feature, entity_ids) == ("fake", "turn_on_for", ["light.desk"])
+    assert response == {"light.desk": {"status": "confirmed", "integration": "fake"}}
+    [(integration, action, request, entity_ids)] = reset_script.calls
+    assert (integration, action, entity_ids) == ("fake", "turn_on_for", ["light.desk"])
     assert request.duration_s == 5
 
 
@@ -54,8 +54,8 @@ async def test_mixed_room_reports_each_target_without_raising(hass, fake, reset_
     response = await call(hass, "turn_on_for", {"entity_id": ["light.a", "light.b", "light.ghost"], "duration": 5})
 
     assert response == {
-        "light.a": {"status": "sent", "platform": "fake"},
-        "light.b": {"status": "rejected", "platform": "fake", "detail": "error"},
+        "light.a": {"status": "sent", "integration": "fake"},
+        "light.b": {"status": "rejected", "integration": "fake", "detail": "error"},
         "light.ghost": {"status": "unsupported", "detail": "not_in_registry"},
     }
 
@@ -133,7 +133,7 @@ async def test_native_group_without_expand_hook_is_unsupported(hass, fake, reset
 
     assert response["light.special_group"] == {
         "status": "unsupported",
-        "platform": "fake_special",
+        "integration": "fake_special",
         "detail": "group_not_supported",
     }
     assert reset_script.calls == [("fake_special", "turn_on_for", reset_script.calls[0][2], ["light.lamp"])]
@@ -147,12 +147,12 @@ async def test_unsupported_reasons_from_adapters(hass, fake):
     colored = await call(
         hass, "turn_on_for", {"entity_id": ["light.a", "switch.s"], "duration": 5, "rgb_color": [255, 0, 0]}
     )
-    assert colored["light.a"]["detail"] == "fields_not_supported"
+    assert colored["light.a"]["detail"] == "fields_not_tested"
     assert colored["switch.s"]["detail"] == "light_fields_ignored"
     assert colored["switch.s"]["status"] == "sent"
 
     off = await call(hass, "turn_off_for", {"entity_id": ["light.a", "light.lamp", "switch.s"], "duration": 5})
-    assert off["light.a"]["detail"] == "domain_not_supported"  # the fake adapter claims switches only
+    assert off["light.a"]["detail"] == "domain_not_tested"  # the fake adapter's scope is switches only
     assert off["light.lamp"]["detail"] == "no_adapter"
 
 
@@ -163,7 +163,7 @@ async def test_wrapper_reports_under_the_light_and_refuses_light_fields(hass, fa
 
     response = await call(hass, "turn_on_for", {"entity_id": "light.relay", "duration": 5})
 
-    assert response == {"light.relay": {"status": "confirmed", "platform": "fake"}}
+    assert response == {"light.relay": {"status": "confirmed", "integration": "fake"}}
     assert reset_script.calls[0][3] == ["switch.relay"]
 
     reset_script.calls.clear()
@@ -180,19 +180,19 @@ async def test_wrapper_and_its_switch_each_get_a_result(hass, fake, reset_script
     response = await call(hass, "turn_on_for", {"entity_id": ["light.relay", "switch.relay"], "duration": 5})
 
     assert response == {
-        "light.relay": {"status": "sent", "platform": "fake"},
-        "switch.relay": {"status": "sent", "platform": "fake"},
+        "light.relay": {"status": "sent", "integration": "fake"},
+        "switch.relay": {"status": "sent", "integration": "fake"},
     }
     assert reset_script.calls[0][3] == ["switch.relay", "switch.relay"]  # the same Set twice: idempotent
 
 
-async def test_domain_outside_the_feature_is_unsupported(hass, fake):
+async def test_domain_outside_the_action_is_unsupported(hass, fake):
     add_fake_entity(hass, fake, "light.a")
     add_fake_entity(hass, fake, "cover.blind")
 
     response = await call(hass, "turn_on_for", {"entity_id": ["light.a", "cover.blind"], "duration": 5})
 
-    assert response["cover.blind"] == {"status": "unsupported", "platform": "fake", "detail": "domain_not_supported"}
+    assert response["cover.blind"] == {"status": "unsupported", "integration": "fake", "detail": "domain_not_supported"}
 
 
 async def test_adapter_exception_and_timeout_reject_every_target(hass, fake, reset_script):
@@ -222,25 +222,25 @@ async def test_missing_and_stray_results_are_reconciled(hass, fake):
             self.result(targets[0], Status.SENT).__class__("light.elsewhere", Status.SENT)
         ]
 
-    with patch("tests.fakes.fake_platform.FakeTurnOnFor.execute", execute):
+    with patch("tests.fakes.fake_integration.FakeTurnOnFor.execute", execute):
         response = await call(hass, "turn_on_for", {"entity_id": ["light.a", "light.b"], "duration": 5})
 
     assert response == {
-        "light.a": {"status": "sent", "platform": "fake"},
-        "light.b": {"status": "rejected", "platform": "fake", "detail": "no_result"},
+        "light.a": {"status": "sent", "integration": "fake"},
+        "light.b": {"status": "rejected", "integration": "fake", "detail": "no_result"},
     }
 
 
-async def test_platform_semaphore_bounds_concurrency(hass, fake, reset_script):
+async def test_integration_semaphore_bounds_concurrency(hass, fake, reset_script):
     entity_ids = [add_fake_entity(hass, fake, f"light.l{n}") for n in range(6)]
     reset_script.delay = 0.01
 
     await call(hass, "turn_on_for", {"entity_id": entity_ids, "duration": 5})
 
-    assert reset_script.max_active == 2  # PlatformInfo.max_concurrency, below the adapter's 4
+    assert reset_script.max_active == 2  # IntegrationInfo.max_concurrency, below the adapter's 4
 
 
-async def test_adapters_on_different_platforms_run_concurrently(hass, fake, reset_script):
+async def test_adapters_on_different_integrations_run_concurrently(hass, fake, reset_script):
     add_fake_entity(hass, fake, "light.a")
     add_fake_entity(hass, fake, "light.lamp", identifier="special_1")
     reset_script.delay = 0.05
