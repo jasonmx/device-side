@@ -1,82 +1,106 @@
-# Device Side
+# Device Side - Unlocks On-Device Features
 
-Home Assistant actions for light and switch features your devices already have but Home Assistant
-doesn't expose.
+Device Side exposes popular on-device features like delayed on/off for lights and switches, via the core Matter, Zigbee, Shelly and Hue integrations. On-device features are more reliable than HA automations, as they work even when HA crashes or a network gets congested.
 
-Many devices can run a timer, dim smoothly or store a color while off. Home Assistant Core leaves
-these out because it can't guarantee them: a device may not say whether it supports a command, or
-whether it acted on it. Device Side lets you take that risk, and tells you per entity what
-happened.
+**Disclaimers:**
 
-## Actions
+1. **Device compatibility:** Some device makes and models act on commands but don't acknowledge them, and some acknowledge but don't act. The only way to know whether your devices support a given feature is to try it out.
 
-| Action | What it does |
-|---|---|
-| `device_side.turn_on_for` | Turns on, then the device turns itself off after `duration`. |
-| `device_side.turn_off_for` | Turns off, then the device turns itself back on after `duration`. |
+2. **AI-assisted coding:** I have designed and built products for 35 years, and all released features are tested on real hardware. I also code with AI.
 
-The timer runs on the device, so it still finishes if Home Assistant restarts or goes offline.
+With that out the way, let's dive in.
+
+# Get Started
+
+### Install from HACS
+
+1. Open the Device Side HACS repository
+
+[![Open the Device Side HACS repository in your Home Assistant instance.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jasonmx&repository=device-side&category=integration)
+
+2. Click **Download**
+3. Restart Home Assistant
+4. Add the integration
+
+[![Add Device Side to your Home Assistant instance.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=device_side)
+
+# Feature Availability
+
+|              | Delayed On              | Delayed Off             | Set Turn-On Levels | Hold-to-Dim                                                           | Set Without Turning On                                                |
+|:------------ |:----------------------- |:----------------------- |:------------------ |:--------------------------------------------------------------------- |:--------------------------------------------------------------------- |
+| Shelly Gen2+ | ✅ Switches<br>🙋 Lights | ✅ Switches<br>🙋 Lights | 🗓️                 | 🗓️                                                                    | 🗓️                                                                    |
+| Zigbee2MQTT  | 🗓️                      |                         | 🗓️                 | 🗓️                                                                    | 🗓️                                                                    |
+| ZHA          | 🗓️                      |                         | 🗓️                 | 🗓️                                                                    | 🗓️                                                                    |
+| Matter       | 🗓️                      |                         | 🗓️                 | 🗓️                                                                    | 🗓️                                                                    |
+| Hue          | 🗓️                      | 🗓️                      | 🗓️                 | ✅ [Hue Smooth Dimming](https://github.com/jasonmx/hue-smooth-dimming) | ✅ [Hue Smooth Dimming](https://github.com/jasonmx/hue-smooth-dimming) |
+
+✅ Released, tested on real hardware · 🙋 Built, needs a volunteer with the device to test it ([help test](CONTRIBUTING.md)) · 🗓️ Roadmap · Blank: the devices can't do it
+
+Switches include Shelly relays. Details per integration are in [docs/platforms.md](docs/platforms.md).
+
+# Usage
+
+## Delayed on/off
+
+Timer runs on the device. Use it to:
+
+- Cut power to a heater or ironing station after 4 hours, in case someone forgets to turn it off.
+- Run a bathroom fan for 20 minutes after a shower.
+- Power-cycle your router via a smart plug.
+
+| Action                     | Description                                     |
+|:-------------------------- |:----------------------------------------------- |
+| `device_side.turn_on_for`  | Turns on, then off automatically after a delay. |
+| `device_side.turn_off_for` | Turns off, then on automatically after a delay. |
+
+| Field               | Actions     | Description                                                                                                           |
+|:------------------- |:----------- |:--------------------------------------------------------------------------------------------------------------------- |
+| `target`            | all         | Lights and switches (required)                                                                                        |
+| `duration`          | all         | How long until the device flips back, 50 ms to 7 days (required)                                                      |
+| `brightness`        | turn_on_for | Brightness (1–255). 🔒                                                                                                |
+| `color_temp_kelvin` | turn_on_for | Color temperature (2000–6500 K). 🔒                                                                                   |
+| `rgb_color`         | turn_on_for | Color as `[red, green, blue]` (0–255 each). 🔒                                                                        |
+| `hs_color`          | turn_on_for | Color as `[hue, saturation]` (0–360, 0–100). 🔒                                                                       |
+| `xy_color`          | turn_on_for | Color as `[x, y]`. 🔒                                                                                                 |
+| `transition`        | turn_on_for | Fade time (0–300 s). 🔒                                                                                               |
+| `response_variable` | all         | Name of a variable that receives a result for each entity (optional). In the visual editor it's **Response variable** |
+
+A field marked 🔒 is `unsupported` in the release, as it's awaiting testing on real hardware. You can test it for us by installing the experimental pre-release from HACS.
+
+**Cancel:** to cancel a timer, send a `turn_on`, `turn_off`, `toggle` or new delayed on/off command.
+
+#### Results
+
+Each targeted entity gets a `status` in the response variable:
+
+| Status        | Meaning                                            |
+| ------------- | -------------------------------------------------- |
+| `confirmed`   | Command accepted; device reported a running timer  |
+| `sent`        | Command accepted; timer not confirmed in read-back |
+| `unsupported` | Entity or field not supported; `detail` says why   |
+| `rejected`    | Command failed; `detail` says why                  |
+
+If a requested duration is out of range, `clamped_to` reports the duration the device actually used, in seconds.
+
+The action succeeds if at least one entity returns `confirmed` or `sent`. If every entity returns `unsupported` or `rejected`, the action fails instead: no response is returned, and the automation stops there, like any failed action. The error message lists each entity with its reason.
+
+##### YAML Example: Heater off after 4 hours, with a warning
 
 ```yaml
-action: device_side.turn_on_for
-target:
-  entity_id: switch.porch
-data:
-  duration: "00:05:00"
-response_variable: result
+actions:
+  - action: device_side.turn_on_for
+    target:
+      entity_id: switch.heater
+    data:
+      duration: "04:00:00"
+    response_variable: result
+  - if: "{{ result['switch.heater'].status != 'confirmed' }}"
+    then:
+      - action: notify.notify
+        data:
+          message: "Heater timer not confirmed: {{ result['switch.heater'].status }}"
 ```
 
-## Results
-
-Each targeted entity gets a status in the response:
-
-| Status | Meaning |
-|---|---|
-| `confirmed` | The device accepted the command and reported it running. |
-| `sent` | The device accepted the command but didn't confirm it. |
-| `unsupported` | Not sent: this entity or field isn't supported. `detail` says why. |
-| `rejected` | Sent, but the device or its integration returned an error. |
-
-The action raises an error only when no entity accepted the command.
-
-## Support
-
-<!-- matrix:start -->
-| Platform | Targets | `turn_on_for` | `turn_off_for` |
-|---|---|---|---|
-| Shelly Gen2+ | relays, as a `switch` or an on/off `light` | beta | beta |
-<!-- matrix:end -->
-
-Beta means tested on real hardware. Shelly dimmers and color lights aren't supported yet because
-nobody has tested them. Details per platform are in [docs/platforms.md](docs/platforms.md).
-
-A switch shown as a light with the "Change device type of a switch" helper (`switch_as_x`) is
-served as the switch it wraps. Inverted helpers are not supported.
-
-## Install
-
-1. In HACS, open the menu, choose **Custom repositories**, and add
-   `https://github.com/jasonmx/device-side` as an **Integration**.
-2. Download **Device Side** and restart Home Assistant.
-3. Go to **Settings > Devices & services > Add integration** and add **Device Side**.
-
-## Principles
-
-- **Fill gaps, don't copy Core.** A Core feature is redone only to fix a sharp edge or make it much
-  easier to use.
-- **Popular features only.** A feature needs an integration on over 20% of installs that can back
-  it, and more than one person asking for it.
-- **Built for people, not a passthrough.** Actions take what you think in (a dim speed), not the
-  device's raw parameters (a distance and a duration).
-- **Tested on real hardware.** Mocks miss what devices really do, such as clamping or rounding
-  values. Anyone can test an adapter on their own setup, and a passing report counts.
-- **Open to contributors.** Each feature runs on each platform through its own adapter, so new
-  devices and features can be added one adapter at a time.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## License
+# License
 
 MIT
