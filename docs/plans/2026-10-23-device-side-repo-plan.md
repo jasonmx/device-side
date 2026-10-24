@@ -168,12 +168,13 @@ tuya 29.5%, esphome 27.3%, tplink 13.8%, zwave_js 8.3%, tasmota 7.6%.)
   detail?}`. Tier is not in the response: it is a subjective label about the code, not a fact
   about this call. Raise `HomeAssistantError` only on invalid input or when every target
   failed, so mixed rooms do not abort automations.
-- **Stability tiers** per unit (feature x platform x call class): `experimental | untested |
-  beta | stable`. Rules live in `CLAUDE.md` (Tiers, Releases); summary: only `experimental` is
+- **Stability tiers** per adapter (feature x platform): `experimental | untested | beta |
+  stable`. Rules live in `CLAUDE.md` (Tiers, Releases); summary: only `experimental` is
   declared (`AdapterCapabilities.experimental`), the rest are computed by `gen_docs.py` from
-  coverage and bench records keyed by the adapter's fingerprint; `stable` means on `main`. There is
-  no runtime tier gate and no options flow for it: a class nobody has tested is simply not
-  claimed in `domains`/`supports_fields`, so `supports()` returns `unsupported`. Tier is not
+  coverage and bench records keyed by the adapter's fingerprint; `stable` means on `main`. The
+  claims carry the scope, so a tier covers everything the adapter claims: there is no runtime
+  tier gate and no options flow for it, and a backing or field nobody has tested is simply not
+  claimed in `components`/`supports_fields`, so `supports()` returns `unsupported`. Tier is not
   logged per call and not returned in results. Mode (`native | assisted`) is objective and
   stays in results.
 - **Quality bar:** HA quality scale Gold conventions (config flow, translations, tests,
@@ -419,7 +420,7 @@ class Adapter[RequestT](ABC):
   `supports()` requires the OnOff FeatureMap Lighting bit else `no_lt_feature`. Optional
   `light.turn_on`, then `matter_client.send_device_command(node_id, endpoint_id,
   OnOff.Commands.OnWithTimedOff(onOffControl=0, onTime=tenths, offWaitTime=0))`; optional
-  `read_attribute` OnTime -> `CONFIRMED`. `switch` (plug) class unclaimed until the plug question is settled.
+  `read_attribute` OnTime -> `CONFIRMED`. `switch` domain (plugs) unclaimed until the plug question is settled.
 - **Shelly Gen2+:** `entry.runtime_data.rpc` (`None` -> `gen1_unsupported`); component and id from
   unique_id `{mac}-{light|rgb|rgbw|cct|switch}:{n}`; one `call_rpc("<Component>.Set",
   {id, on: True, toggle_after: s, **fields})` with field translation copied from `shelly/light.py`;
@@ -462,7 +463,7 @@ of an adapter's targets at once so native group commands stay possible. Hue `mov
 ### Docs generation
 
 `scripts/gen_docs.py` imports the registry without `hass`, emits `docs/matrix.yaml` (machine
-readable: per-class tier, fingerprint, mode, domains, duration, supports_fields, confirmable, native_groups, notes,
+readable: per-adapter tier, fingerprint, mode, domains, duration, supports_fields, confirmable, native_groups, notes,
 bench) and `docs/matrix.md`, and rewrites the generated block in README, in each
 `docs/features/*.md`, and in each platform section of `docs/platforms.md` (one marker pair per
 section, `<!-- generated:<platform>:start/end -->`). Matrix adapter text: `tier · best status · duration
@@ -470,20 +471,23 @@ range` with footnotes from `docs/_notes.yaml`. The generator fails on a missing 
 key, a `bench` path that does not exist, or a non-experimental adapter under 95% coverage
 (`coverage.json`). CI runs `--check`. Fingerprint: AST hash of the adapter module, excluding
 docstrings and the `AdapterCapabilities` declaration; bench records carry the fingerprint they
-tested. Proof follows the call: a record covers another class only when that class gets the
-identical call to the same device-side backing. An adapter that sends one call for a switch and an
-on/off light declares `onoff_shared=True`, and a record for its `switch` or field-less `light`
-class promotes both, so a relay reclassed as a light keeps its tier. Untested backings in the same
-domain are left out of `AdapterCapabilities.components` and refused, not claimed on a sibling's proof. Tier ladder: see `CLAUDE.md`. A release-workflow check rejects tags not matching
+tested and list the backings (Shelly: RPC components) and light fields they exercised. Proof
+follows the call: a record proves the device-side call, whatever HA domain the target shows, so a
+relay exposed as a `switch` or as an on/off `light` rides one record. `beta` needs every claimed
+component and field covered by a record with the current fingerprint; the generator fails on a
+claim no such record covers. Untested backings are left out of `AdapterCapabilities.components` and
+refused, not claimed on a sibling's proof. Adding a backing after a tester report is a claims edit
+plus a record listing it; the fingerprint, and so the existing records, survive it. Tier ladder: see `CLAUDE.md`. A release-workflow check rejects tags not matching
 `^v\d+\.\d+\.\d+(rc\d+)?$`.
 
 Tester reports: RC builds raise one fixable Repairs issue ("vX.Y.ZrcN: help test on your
-hardware"). Its repair flow multi-selects the RC's requested units that match the user's own
-entities; each chosen unit becomes a non-fixable Repairs issue ("Test wanted: <platform> ·
-<class>") whose `learn_more_url` opens the `test-report.yml` GitHub issue form prefilled (text
-fields only) with RC, HA version, unit, device model, firmware (`sw_version`) and a per-unit
+hardware"). Its repair flow multi-selects the RC's requested tests (each a feature x platform x
+backing, labelled in device terms, e.g. "Shelly dimmer") that match the user's own entities; each
+chosen test becomes a non-fixable Repairs issue ("Test wanted: <platform> · <device label>") whose
+`learn_more_url` opens the `test-report.yml` GitHub issue form prefilled (text fields only) with
+RC, HA version, feature, backing, device model, firmware (`sw_version`) and a per-test
 checklist. The form says: "Already tested by someone else? Still worth sending: a different model
-or firmware is new evidence." The requested units are fixed per RC (no runtime
+or firmware is new evidence." The requested tests are fixed per RC (no runtime
 fetch); duplicate reports are welcome. New RCs clear and recompute these issues. Passing
 reports become bench records citing the issue.
 
@@ -571,12 +575,12 @@ are in-use household lights.** Rig passes are recorded in `docs/bench/<platform>
 | 6 | Z2M `turn_on_for` | detect, addressing, publish; `light.turn_on` precedes when fields present; group topic when `native_groups`; rig test. |
 | 7 | Hue port | five adapters + bridge/transition_cache/colors; `move` across brightness, color_temp, hue, saturation; `grouped_light` native for move/stop, expanded for set/get_attributes; hue_dimmer tests ported to real-hass fixtures; rig parity with hue_dimmer `tests/RELEASE_CHECKLIST.md`. |
 | 8 | Docs generator + templates | `gen_docs.py --check` in CI; matrix, README block, feature pages, `platforms.md` sections; `_notes.yaml`; contributing guides. Lands before the first v0.0.2 RC. |
-| 9 | Bench + tiers + tester flow | fingerprinting and computed tiers in `gen_docs.py`, including `onoff_shared`; per-adapter coverage check; tag-format check; RC audit gate (`2026-10-23-rc-audit-gate.md`: `cut-rc` workflow, `check_audit.py`, `/rc-audit`); `test-report.yml` issue form; RC-only umbrella Repairs issue with multi-select flow and prefilled per-unit links; bench files filled from rig runs and tester reports. Lands before the first v0.0.2 RC, which is the project's first RC. |
+| 9 | Bench + tiers + tester flow | fingerprinting and computed tiers in `gen_docs.py`, including the claims-coverage check; per-adapter coverage check; tag-format check; RC audit gate (`2026-10-23-rc-audit-gate.md`: `cut-rc` workflow, `check_audit.py`, `/rc-audit`); `test-report.yml` issue form; RC-only umbrella Repairs issue with multi-select flow and prefilled per-test links; bench files filled from rig runs and tester reports. Lands before the first v0.0.2 RC, which is the project's first RC. |
 | 10 | ZHA `turn_on_for` | after Jason has ZHA running on the rig; addressing; admin context passthrough; ValueError -> rejected; rig test. |
 | 11 | Matter `turn_on_for` | after Jason has Matter running on the rig; LT check; `OnWithTimedOff`; optional read-back; rig test on bulb and plug. |
 | 12 | `v0.1.0` ("v1" names the scope, not the version) | feature complete for this plan; third-party tester reports for the hardware the rig lacks; matrix current; release checklist adapted from hue_dimmer. |
 
-`v0.0.x` releases are cut between slices whenever a set of units reaches beta; one release may carry
+`v0.0.x` releases are cut between slices whenever a set of adapters reaches beta; one release may carry
 several platforms or features.
 
 Each slice ends with `/audit-code` on its diff (everything since the previous slice's audit, plus any
