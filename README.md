@@ -4,7 +4,7 @@ Device Side unlocks popular on-device features for lights and switches, like on-
 
 **Disclaimers:**
 
-1. **Device compatibility:** Some device makes and models act on commands but don't acknowledge them, and some acknowledge but don't act. You need to test whether your own devices work with each of Device Side's actions before relying on them.
+1. **Device compatibility:** Some device makes and models act on commands but don't acknowledge them, and some acknowledge but don't act. Test Device Side's actions on your own devices before relying on them.
 
 2. **AI-assisted coding:** I code with AI. I've designed, coded and built products for 35 years, so have a rough idea what I'm doing. Every feature is only released after testing on real hardware.
 
