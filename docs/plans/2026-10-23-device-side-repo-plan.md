@@ -335,7 +335,7 @@ class EntityResult: entity_id, status, platform, mode, clamped_to, detail, data
     def as_response(self) -> dict   # drops None; data under "attributes"; no tier
 
 # core/capabilities.py
-@dataclass(frozen=True) class DurationLimits: min_s, max_s, resolution_s
+@dataclass(frozen=True) class DurationLimits: min_s, max_s
 @dataclass(frozen=True) class AdapterCapabilities:
     experimental: bool = False; mode = NATIVE; domains = {"light"}; duration: DurationLimits | None
     supports_fields: frozenset[str]; confirmable: bool; native_groups: bool

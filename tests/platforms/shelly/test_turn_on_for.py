@@ -183,7 +183,27 @@ async def test_duration_beyond_the_limit_is_clamped(hass, setup_production):
     entry, call_rpc = shelly_device(hass)
     add_shelly_entity(hass, entry, "switch.porch", "switch:0")
 
-    response = await call(hass, "turn_on_for", {"entity_id": "switch.porch", "duration": {"days": 2}})
+    response = await call(hass, "turn_on_for", {"entity_id": "switch.porch", "duration": {"days": 8}})
 
-    assert response == {"switch.porch": {**CONFIRMED, "clamped_to": 86400}}
-    assert call_rpc.await_args_list[0].args[1]["toggle_after"] == 86400
+    assert response == {"switch.porch": {**CONFIRMED, "clamped_to": 604800}}
+    assert call_rpc.await_args_list[0].args[1]["toggle_after"] == 604800
+
+
+async def test_fractional_duration_passes_through_unrounded(hass, setup_production):
+    entry, call_rpc = shelly_device(hass)
+    add_shelly_entity(hass, entry, "switch.porch", "switch:0")
+
+    response = await call(hass, "turn_on_for", {"entity_id": "switch.porch", "duration": {"milliseconds": 50}})
+
+    assert response == {"switch.porch": CONFIRMED}
+    assert call_rpc.await_args_list[0].args[1]["toggle_after"] == 0.05
+
+
+async def test_duration_under_50ms_is_floored_and_reported(hass, setup_production):
+    entry, call_rpc = shelly_device(hass)
+    add_shelly_entity(hass, entry, "switch.porch", "switch:0")
+
+    response = await call(hass, "turn_on_for", {"entity_id": "switch.porch", "duration": {"milliseconds": 20}})
+
+    assert response == {"switch.porch": {**CONFIRMED, "clamped_to": 0.05}}
+    assert call_rpc.await_args_list[0].args[1]["toggle_after"] == 0.05

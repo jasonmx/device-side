@@ -5,7 +5,7 @@ from custom_components.device_side.core.resolver import resolve
 
 from ..scripted import ScriptedAdapter
 
-LIMITS = DurationLimits(min_s=1, max_s=100, resolution_s=0.1)
+LIMITS = DurationLimits(min_s=1, max_s=100)
 
 
 def is_group(hass, target) -> bool:
