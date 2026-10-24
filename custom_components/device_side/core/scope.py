@@ -15,18 +15,18 @@ class DurationLimits:
 
 
 @dataclass(frozen=True, slots=True)
-class AdapterCapabilities:
-    """What an adapter claims. A backing or field nobody has tested is left out of components/supports_fields,
-    not gated at runtime.
+class AdapterScope:
+    """The entity domains, capabilities and fields an adapter is known to work with, plus its settings. A capability
+    or field nobody has tested is left out of scope and refused, not gated at runtime.
     """
 
     experimental: bool = False
     domains: frozenset[str] = frozenset({"light"})
     duration: DurationLimits | None = None
-    supports_fields: frozenset[str] = frozenset()
-    # Device-side backings the adapter has proven (Shelly: RPC component names); None claims all it can address.
-    # Proof covers only the backing the call reaches, so a sibling's untested backing is left out here.
-    components: frozenset[str] | None = None
+    fields: frozenset[str] = frozenset()
+    # Device-side capabilities tested on hardware (Shelly: RPC component names); None covers all it can address.
+    # A record proves only the capability the call reaches, so a sibling's untested capability is left out here.
+    capabilities: frozenset[str] | None = None
     confirmable: bool = False
     native_groups: bool = False
     max_concurrency: int = 4
@@ -35,11 +35,11 @@ class AdapterCapabilities:
 
 
 @dataclass(slots=True)
-class PlatformInfo:
+class IntegrationInfo:
     key: str
     title: str
-    ha_integration: str
-    # Picks this platform over a generic sibling on the same ha_integration (Z2M over plain mqtt).
+    ha_domain: str
+    # Picks this integration over a generic sibling on the same ha_domain (Z2M over plain mqtt).
     detect: Callable[[HomeAssistant, er.RegistryEntry, dr.DeviceEntry | None], bool] | None = None
     # True for an integration-native group (Hue grouped_light, a Z2M or ZHA group entity).
     is_group: Callable[[HomeAssistant, Target], bool] | None = None

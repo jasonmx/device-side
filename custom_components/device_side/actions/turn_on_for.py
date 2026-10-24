@@ -7,8 +7,8 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 
 from ..const import DOMAIN
-from ..core.feature import Feature
-from ..core.models import LIGHT_FIELD_SCHEMA, FeatureKind, LightFields, TimedRequest
+from ..core.action import Action
+from ..core.models import LIGHT_FIELD_SCHEMA, ActionKind, LightFields, TimedRequest
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,11 +30,11 @@ def parse_duration(call: ServiceCall) -> float:
     return round(seconds, RESOLUTION_DIGITS)
 
 
-class TurnOnFor(Feature[TurnOnForRequest]):
+class TurnOnFor(Action[TurnOnForRequest]):
     """Turn on now; the device turns itself off after the duration."""
 
     key: ClassVar[str] = "turn_on_for"
-    kind: ClassVar[FeatureKind] = FeatureKind.COMMAND
+    kind: ClassVar[ActionKind] = ActionKind.COMMAND
     domains: ClassVar[frozenset[str]] = frozenset({"light", "switch"})
     fields: ClassVar[dict] = {probatio.Required("duration"): cv.positive_time_period, **LIGHT_FIELD_SCHEMA}
 
@@ -43,4 +43,4 @@ class TurnOnFor(Feature[TurnOnForRequest]):
         return TurnOnForRequest(duration_s=parse_duration(call), light=LightFields.from_data(call.data))
 
 
-FEATURE = TurnOnFor
+ACTION = TurnOnFor

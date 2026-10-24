@@ -1,7 +1,7 @@
 """Which RPC component instance a Shelly entity drives, and the device that serves it.
 
 Read from the registry and the Shelly config entry only, never from aioshelly: importing it (or
-homeassistant.components.shelly, which does) would make this platform unavailable wherever Shelly isn't installed.
+homeassistant.components.shelly, which does) would make this adapter module unavailable wherever Shelly isn't installed.
 """
 
 import re
@@ -49,15 +49,15 @@ def address(target: Target) -> RpcAddress | None:
 
 
 def unsupported_reason(
-    target: Target, fields: frozenset[str] = frozenset(), components: frozenset[str] | None = None
+    target: Target, fields: frozenset[str] = frozenset(), capabilities: frozenset[str] | None = None
 ) -> str | None:
-    """Why this entity can't take a timed Set with these light fields on the claimed components, or None."""
+    """Why this entity can't take a timed Set with these light fields within the capabilities in scope, or None."""
     if rpc_device(target) is None:
         return "gen1_unsupported"
     if (rpc := address(target)) is None:
         return "not_addressable"
-    if components is not None and rpc.component not in components:
-        return "component_not_supported"
+    if capabilities is not None and rpc.component not in capabilities:
+        return "capability_not_tested"
     if target.domain == "light" and fields - COMPONENT_FIELDS[rpc.component]:
         return "fields_not_supported"
     return None

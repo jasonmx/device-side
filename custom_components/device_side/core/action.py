@@ -5,17 +5,17 @@ import probatio
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.helpers import config_validation as cv
 
-from .models import EntityResult, FeatureKind, Request, Target
+from .models import ActionKind, EntityResult, Request, Target
 
 if TYPE_CHECKING:
     from .dispatcher import Dispatcher
 
 
-class Feature[RequestT: Request](ABC):
-    """One action. Subclasses are classes, never instantiated: a module exports FEATURE = <the class>."""
+class Action[RequestT: Request](ABC):
+    """One action. Subclasses are classes, never instantiated: a module exports ACTION = <the class>."""
 
     key: ClassVar[str]
-    kind: ClassVar[FeatureKind]
+    kind: ClassVar[ActionKind]
     domains: ClassVar[frozenset[str]]
     supports_response: ClassVar[SupportsResponse] = SupportsResponse.OPTIONAL
     fields: ClassVar[dict[probatio.Marker, Any]] = {}
@@ -33,5 +33,5 @@ class Feature[RequestT: Request](ABC):
     async def run(
         cls, hass: HomeAssistant, request: RequestT, targets: list[Target], dispatcher: Dispatcher
     ) -> list[EntityResult]:
-        """Run this feature's adapters; a feature that routes targets elsewhere overrides this."""
+        """Run this action's adapters; a action that routes targets elsewhere overrides this."""
         return await dispatcher.run_adapters(cls.key, request, targets)

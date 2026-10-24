@@ -1,7 +1,7 @@
-# Platforms
+# Integrations
 
-One section per platform, each on the same template: what Device Side talks to, how a target
-entity becomes a device address, notes per feature, sharp edges, and a capability block generated
+One section per integration, each on the same template: what Device Side talks to, how a target
+entity becomes a device address, notes per action, sharp edges, and a scope block generated
 from the code. The generated blocks are rewritten by `scripts/gen_docs.py`; edit the prose around
 them, never inside them.
 
@@ -17,11 +17,11 @@ flip-back timer in the API Device Side uses, and are reported `unsupported` with
 
 ### How targets resolve
 
-An entity belongs to this platform when its registry platform is `shelly`. The RPC component and
+An entity belongs to this integration when its entity registry entry comes from `shelly`. The RPC component and
 instance come from the entity's unique ID, which the Shelly integration writes as
 `<mac>-<key>`:
 
-| Key | RPC component | Entity domains | Claimed | `light.turn_on` fields it can take |
+| Key | RPC component (capability) | Entity domains | In scope | `light.turn_on` fields it can take |
 |---|---|---|---|---|
 | `switch:N` | `Switch` | `switch`, or `light` for a relay set to "light" | yes | none |
 | `light:N` | `Light` | `light` | not yet | `brightness`, `transition` |
@@ -38,7 +38,7 @@ A `switch_as_x` light over a Shelly switch is served as that switch: the helper 
 unchanged, so the device receives the switch's own `Switch.Set`, and the result is keyed on the
 light's entity ID. Light fields sent to such a light return `unsupported` with detail
 `fields_not_supported`. An inverted helper returns `inverted_wrapper`, and a helper wrapping
-another helper returns `not_addressable`. This holds on every platform, not only Shelly.
+another helper returns `not_addressable`. This holds on every integration, not only Shelly.
 
 ### `turn_on_for`
 
@@ -54,10 +54,11 @@ reports a running timer (`timer_duration`), the result is `confirmed`. Otherwise
 detail `timer_not_reported` (the device answered without a timer) or `readback_failed` (the
 read-back call itself failed). Either way the `Set` was accepted.
 
-Only relays are claimed so far, whether HA shows them as a switch or a light. A dimmer, CCT or RGB
-light returns `unsupported` with detail `component_not_supported` until someone tests one. A light
+Only relays are in scope so far, whether HA shows them as a switch or a light. A dimmer, CCT or RGB
+light returns `unsupported` with detail `capability_not_tested` until someone tests one. A light
 field (brightness, color, transition) on a light returns `unsupported` with detail
-`fields_not_supported` rather than being dropped silently. Fields sent to a `switch` entity are
+`fields_not_tested` rather than being dropped silently; a field the component can't take at all
+returns `fields_not_supported`. Fields sent to a `switch` entity are
 ignored and the result says so with detail `light_fields_ignored`.
 
 ### `turn_off_for`
@@ -77,13 +78,13 @@ input was not tested, and what it does may depend on the input mode.
 
 - **Timer limits are the device's.** The device accepts any duration over 0 s up to 7 days
   (604800 s) and keeps it to 0.01 s. Device Side rounds every duration to 10 ms with a 50 ms
-  floor, for all platforms; a duration under 50 ms or over 7 days is clamped and the result
+  floor, for all integrations; a duration under 50 ms or over 7 days is clamped and the result
   carries `clamped_to`.
 - **The timer is the device's, not Home Assistant's.** Any on or off command cancels it, whatever
   sent it: Home Assistant, the Shelly app or another integration (see Cancelling).
 - **Colors other than RGB.** `hs_color` and `xy_color` are refused rather than converted, because
   the conversion depends on the component's color mode. Send `rgb_color` or `color_temp_kelvin`.
-- **Only relays are claimed.** `Light`, `CCT`, `RGB`, `RGBW` and `RGBCCT` document `toggle_after`
+- **Only relays are in scope.** `Light`, `CCT`, `RGB`, `RGBW` and `RGBCCT` document `toggle_after`
   the same way as `Switch`, but they are different firmware and no hardware run has covered them,
   so they are refused until a tester reports one.
 
