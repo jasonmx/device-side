@@ -5,26 +5,26 @@ from homeassistant.core import HomeAssistant
 from .addressing import unsupported_reason
 from .rpc import TIMER_LIMITS, set_with_timer
 from ...core.adapter import Adapter
-from ...core.capabilities import AdapterCapabilities
 from ...core.models import EntityResult, Target, TimedRequest
+from ...core.scope import AdapterScope
 
 
 class ShellyTurnOffFor(Adapter[TimedRequest]):
     """One <Component>.Set carrying on=False and toggle_after; the device turns itself back on."""
 
-    feature: ClassVar[str] = "turn_off_for"
-    platform: ClassVar[str] = "shelly"
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
+    action: ClassVar[str] = "turn_off_for"
+    integration: ClassVar[str] = "shelly"
+    scope: ClassVar[AdapterScope] = AdapterScope(
         domains=frozenset({"light", "switch"}),
         duration=TIMER_LIMITS,
         confirmable=True,
         # A relay shown as a light sends the same Switch.Set; Light, CCT and RGB* wait for a tester's report.
-        components=frozenset({"Switch"}),
+        capabilities=frozenset({"Switch"}),
     )
 
     def supports(self, hass: HomeAssistant, request: TimedRequest, target: Target) -> str | None:
-        components = self.capabilities.components
-        return super().supports(hass, request, target) or unsupported_reason(target, components=components)
+        capabilities = self.scope.capabilities
+        return super().supports(hass, request, target) or unsupported_reason(target, capabilities=capabilities)
 
     async def execute(self, hass: HomeAssistant, request: TimedRequest, targets: list[Target]) -> list[EntityResult]:
         async def send(target: Target) -> EntityResult:

@@ -6,21 +6,21 @@ from unittest.mock import call as rpc_call
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 
-from custom_components.device_side.platforms.shelly.turn_on_for import ShellyTurnOnFor
+from custom_components.device_side.integrations.shelly.turn_on_for import ShellyTurnOnFor
 
 from ...conftest import call
 from ...fixtures.fake import add_switch_as_x
 from ...fixtures.shelly import add_shelly_entity, shelly_device
 
-CONFIRMED = {"status": "confirmed", "platform": "shelly"}
+CONFIRMED = {"status": "confirmed", "integration": "shelly"}
 
 
 @pytest.fixture
-def claim_every_light(monkeypatch):
-    """Light fields and components as testers' reports would re-claim them; until then they are refused first."""
+def every_light_in_scope(monkeypatch):
+    """Light fields and capabilities as testers' reports would add them; until then they are refused first."""
     fields = frozenset({"brightness", "transition", "color_temp_kelvin", "rgb_color"})
-    claimed = dataclasses.replace(ShellyTurnOnFor.capabilities, supports_fields=fields, components=None)
-    monkeypatch.setattr(ShellyTurnOnFor, "capabilities", claimed)
+    scope = dataclasses.replace(ShellyTurnOnFor.scope, fields=fields, capabilities=None)
+    monkeypatch.setattr(ShellyTurnOnFor, "scope", scope)
 
 
 async def test_switch_one_set_then_read_back(hass, setup_production):
@@ -36,7 +36,7 @@ async def test_switch_one_set_then_read_back(hass, setup_production):
     ]
 
 
-async def test_light_fields_ride_in_the_same_set(hass, setup_production, claim_every_light):
+async def test_light_fields_ride_in_the_same_set(hass, setup_production, every_light_in_scope):
     entry, call_rpc = shelly_device(hass)
     add_shelly_entity(hass, entry, "light.desk", "light:0")
 
@@ -60,7 +60,7 @@ async def test_light_fields_ride_in_the_same_set(hass, setup_production, claim_e
     ],
 )
 async def test_rgbcct_sets_mode_and_clamps_kelvin_to_the_entity_range(
-    hass, setup_production, claim_every_light, data, expected
+    hass, setup_production, every_light_in_scope, data, expected
 ):
     entry, call_rpc = shelly_device(hass)
     kelvin_range = {"min_color_temp_kelvin": 2700, "max_color_temp_kelvin": 6500}
@@ -93,16 +93,16 @@ async def test_switch_as_x_light_sends_the_switch_call(hass, setup_production):
 
 
 @pytest.mark.parametrize(
-    ("entity_id", "key", "data"),
+    ("entity_id", "key", "data", "detail"),
     [
-        ("light.relay", "switch:0", {"brightness": 10}),  # a relay shown as a light is on/off only
-        ("light.dimmer", "light:0", {"color_temp_kelvin": 3000}),
-        ("light.cct", "cct:0", {"rgb_color": [1, 2, 3]}),
-        ("light.rgb", "rgb:0", {"hs_color": [30, 50]}),  # not claimed on any component
+        ("light.relay", "switch:0", {"brightness": 10}, "fields_not_supported"),  # a relay shown as a light is on/off
+        ("light.dimmer", "light:0", {"color_temp_kelvin": 3000}, "fields_not_supported"),
+        ("light.cct", "cct:0", {"rgb_color": [1, 2, 3]}, "fields_not_supported"),
+        ("light.rgb", "rgb:0", {"hs_color": [30, 50]}, "fields_not_tested"),  # in no component's scope
     ],
 )
-async def test_fields_the_component_cannot_take_are_refused(
-    hass, setup_production, claim_every_light, entity_id, key, data
+async def test_fields_outside_the_component_or_scope_are_refused(
+    hass, setup_production, every_light_in_scope, entity_id, key, data, detail
 ):
     entry, call_rpc = shelly_device(hass)
     add_shelly_entity(hass, entry, entity_id, key)
@@ -112,23 +112,23 @@ async def test_fields_the_component_cannot_take_are_refused(
 
     assert response[entity_id] == {
         "status": "unsupported",
-        "platform": "shelly",
-        "detail": "fields_not_supported",
+        "integration": "shelly",
+        "detail": detail,
     }
     assert [args.args[0] for args in call_rpc.await_args_list] == ["Switch.Set", "Switch.GetStatus"]
 
 
-async def test_relay_lights_run_but_unclaimed_fields_and_components_are_refused(hass, setup_production):
+async def test_relay_lights_run_but_fields_and_capabilities_out_of_scope_are_refused(hass, setup_production):
     entry, call_rpc = shelly_device(hass)
     add_shelly_entity(hass, entry, "light.dimmer", "light:0")
     add_shelly_entity(hass, entry, "light.relay", "switch:0")
 
-    with pytest.raises(HomeAssistantError, match="light.relay: fields_not_supported"):
+    with pytest.raises(HomeAssistantError, match="light.relay: fields_not_tested"):
         await call(hass, "turn_on_for", {"entity_id": "light.relay", "duration": 5, "brightness": 10})
     response = await call(hass, "turn_on_for", {"entity_id": ["light.dimmer", "light.relay"], "duration": 5})
 
     assert response["light.relay"] == CONFIRMED
-    assert response["light.dimmer"] == {**CONFIRMED, "status": "unsupported", "detail": "component_not_supported"}
+    assert response["light.dimmer"] == {**CONFIRMED, "status": "unsupported", "detail": "capability_not_tested"}
     assert [args.args[0] for args in call_rpc.await_args_list] == ["Switch.Set", "Switch.GetStatus"]
 
 
@@ -175,7 +175,7 @@ async def test_inconclusive_read_back_reports_sent(hass, setup_production, statu
 
     response = await call(hass, "turn_on_for", {"entity_id": "switch.porch", "duration": 5})
 
-    assert response == {"switch.porch": {"status": "sent", "platform": "shelly", "detail": detail}}
+    assert response == {"switch.porch": {"status": "sent", "integration": "shelly", "detail": detail}}
 
 
 async def test_duration_beyond_the_limit_is_clamped(hass, setup_production):

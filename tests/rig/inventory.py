@@ -47,23 +47,23 @@ class RigEntity:
 
 @dataclass(slots=True)
 class Inventory:
-    platforms: dict[str, list[RigEntity]] = field(default_factory=dict)
+    integrations: dict[str, list[RigEntity]] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path = INVENTORY) -> Inventory:
         raw = yaml.safe_load(path.read_text()) or {}
         inventory = cls()
-        for platform, entities in raw.items():
-            inventory.platforms[platform] = []
+        for integration, entities in raw.items():
+            inventory.integrations[integration] = []
             for item in entities or []:
                 roles = frozenset(item.get("roles", ()))
                 if unknown := roles - ROLES:
                     raise ValueError(f"{path.name}: {item['entity_id']} has unknown roles {sorted(unknown)}")
-                inventory.platforms[platform].append(RigEntity(item["entity_id"], roles))
+                inventory.integrations[integration].append(RigEntity(item["entity_id"], roles))
         return inventory
 
-    def entity(self, platform: str, role: str) -> str | None:
-        return next((e.entity_id for e in self.platforms.get(platform, ()) if role in e.roles), None)
+    def entity(self, integration: str, role: str) -> str | None:
+        return next((e.entity_id for e in self.integrations.get(integration, ()) if role in e.roles), None)
 
 
 def load_env(path: Path = ENV_FILE) -> dict[str, str]:
@@ -83,11 +83,11 @@ def load_env(path: Path = ENV_FILE) -> dict[str, str]:
 
 @dataclass(frozen=True, slots=True)
 class RigModule:
-    """One rig test module, read without importing it: test_<platform>_<feature>.py with literal constants."""
+    """One rig test module, read without importing it: test_<integration>_<action>.py with literal constants."""
 
     path: Path
-    platform: str
-    feature: str
+    integration: str
+    action: str
     roles: tuple[str, ...]
     seconds: int
 
@@ -96,7 +96,7 @@ def rig_modules(rig_dir: Path = RIG_DIR) -> list[RigModule]:
     # Only plain module-level `NAME = <literal>` assignments count; `ROLES += [...]` is not read.
     modules = []
     for path in sorted(rig_dir.glob("test_*.py")):
-        platform, _, feature = path.stem.removeprefix("test_").partition("_")
+        integration, _, action = path.stem.removeprefix("test_").partition("_")
         constants = {
             node.targets[0].id: ast.literal_eval(node.value)
             for node in ast.parse(path.read_text()).body
@@ -105,5 +105,5 @@ def rig_modules(rig_dir: Path = RIG_DIR) -> list[RigModule]:
         }
         if missing := {"ROLES", "RIG_SECONDS"} - constants.keys():
             raise ValueError(f"{path.name}: missing module-level constant(s) {sorted(missing)}")
-        modules.append(RigModule(path, platform, feature, tuple(constants["ROLES"]), constants["RIG_SECONDS"]))
+        modules.append(RigModule(path, integration, action, tuple(constants["ROLES"]), constants["RIG_SECONDS"]))
     return modules

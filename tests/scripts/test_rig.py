@@ -56,7 +56,7 @@ def test_load_env_reads_file_and_defaults_ssh(tmp_path, monkeypatch):
 
 def test_rig_modules_read_constants_without_importing():
     shelly = next(module for module in rig_modules() if module.path.name == "test_shelly_turn_on_for.py")
-    assert (shelly.platform, shelly.feature) == ("shelly", "turn_on_for")
+    assert (shelly.integration, shelly.action) == ("shelly", "turn_on_for")
     assert shelly.roles == ("switch_plug", "light_onoff", "light_wrapped")
     assert shelly.seconds > 0
 
@@ -68,7 +68,7 @@ def test_select_and_plan_lines(inventory):
         RigModule(Path("test_zha_turn_on_for.py"), "zha", "turn_on_for", ("switch_plug",), 10),
     ]
     selected = rig.select(modules, inventory, None)
-    assert [module.platform for module in selected] == ["shelly", "hue"]
+    assert [module.integration for module in selected] == ["shelly", "hue"]
     assert rig.select(modules, inventory, ["hue"]) == [modules[1]]
 
     lines = rig.plan_lines(selected, inventory, AdapterRegistry.discover())

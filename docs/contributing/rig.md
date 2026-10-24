@@ -23,7 +23,7 @@ test. The gate exists so occupants aren't startled by devices switching on and o
 3. **`.env.rig`** at the repo root (gitignored), from `tests/rig/env.example`: `HA_URL`, `HA_TOKEN`, and
    `RIG_SSH` (default `ha`).
 4. **Inventory.** Copy `tests/rig/inventory.example.yaml` to `tests/rig/inventory.yaml` (gitignored) and list
-   the rig's entities per platform, each with role tags: `switch_plug`, `light_onoff` (a relay shown as a light),
+   the rig's entities per integration, each with role tags: `switch_plug`, `light_onoff` (a relay shown as a light),
    `light_wrapped` (a `switch_as_x` light over a switch), `light_dimmable`, `light_ct`,
    `light_color`, `group`, `scene`. A test that needs a role the inventory lacks skips.
 
@@ -33,7 +33,7 @@ test. The gate exists so occupants aren't startled by devices switching on and o
 scripts/rig.py --dry-run          # preflight only: reads, prints the plan, changes nothing
 scripts/rig.py                    # preflight, y/N gate, deploy + restart if needed, tests
 scripts/rig.py --no-deploy        # test whatever HA already runs
-scripts/rig.py --platform shelly -k switch
+scripts/rig.py --integration shelly -k switch
 ```
 
 Preflight is read-only. It prints the inventory, one line per adapter (`shelly / turn_on_for -> switch.plug
@@ -64,20 +64,20 @@ The first approved deploy is the integration's first load in any HA. After it, c
 
 ## Writing a rig test
 
-One module per adapter, `tests/rig/test_<platform>_<feature>.py`, with two literal constants the runner reads
+One module per adapter, `tests/rig/test_<integration>_<action>.py`, with two literal constants the runner reads
 without importing the module: `ROLES` (the inventory roles it uses) and `RIG_SECONDS` (its estimated run
 time). Cover one happy path and one `unsupported` path; branches belong in unit tests.
 
-- `require_adapter(platform, feature, role)` returns the inventory entity, or skips.
+- `require_adapter(integration, action, role)` returns the inventory entity, or skips.
 - `snapshot.take(entity_id)` before touching an entity. Teardown restores its state, brightness and color
   temperature or color, and logs rather than fails if a restore doesn't take.
-- `timing(platform)` is the tolerance: Shelly and Hue 2 s, Zigbee and Matter 3 s. Assert windows, not
+- `timing(integration)` is the tolerance: Shelly and Hue 2 s, Zigbee and Matter 3 s. Assert windows, not
   instants: still on at `duration - tolerance`, off by `duration + tolerance`. Keep durations to 5-8 s.
 - `ha.call_service(..., return_response=True)` returns the per-entity response. A call where every target
   fails raises `HAError` with `translation_key == "all_targets_failed"`.
 
 ## Recording a pass
 
-A rig pass that promotes an adapter becomes `docs/bench/<platform>/<feature>.md`: date, HA version, device model
+A rig pass that promotes an adapter becomes `docs/bench/<integration>/<action>.md`: date, HA version, device model
 and firmware (from the device page), the adapter's fingerprint, and the source (`rig run` or the test-report
 issue).

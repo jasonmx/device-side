@@ -29,7 +29,7 @@ def private_terms(
     """Lowercased term -> label to report. Secrets are reported by label, never echoed."""
     terms: dict[str, str] = {}
     if inventory.exists():
-        for entities in Inventory.load(inventory).platforms.values():
+        for entities in Inventory.load(inventory).integrations.values():
             terms.update((e.entity_id.lower(), e.entity_id) for e in entities)
     if env_file.exists():
         env = load_env(env_file)
