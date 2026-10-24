@@ -65,7 +65,12 @@ def plan_lines(modules: list[RigModule], inventory: Inventory, registry: Adapter
         if adapter is None:
             tier = "no adapter, will skip"
         else:
-            tier = "experimental" if adapter.capabilities.experimental else "untested"
+            # A hand-written bench record counts as beta; slice 9 checks it against the adapter's fingerprint.
+            bench = REPO / "docs" / "bench" / module.platform / f"{module.feature}.md"
+            if adapter.capabilities.experimental:
+                tier = "experimental"
+            else:
+                tier = "beta" if bench.exists() else "untested"
         entities = [entity for role in module.roles if (entity := inventory.entity(module.platform, role))]
         targets = ", ".join(entities) or "no entity, will skip"
         lines.append(f"{module.platform} / {module.feature} -> {targets} ({tier})")
