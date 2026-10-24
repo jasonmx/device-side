@@ -35,3 +35,6 @@ CLAUDE.local.md
 
 # Worktrees (claude --worktree, EnterWorktree)
 .claude/worktrees/
+
+# Working notes (interviews, scratch)
+/notes/
