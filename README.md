@@ -1,6 +1,6 @@
 # Device Side - Unlocks On-Device Features
 
-Device Side exposes popular on-device features like delayed on/off for lights and switches, via the core Matter, Zigbee, Shelly and Hue integrations. On-device features are more reliable than HA automations, as they work even when HA crashes or a network gets congested.
+Device Side exposes popular on-device features like timed on/off for lights and switches, via the core Matter, Zigbee, Shelly and Hue integrations. On-device features are more reliable than HA automations, as they work even when HA crashes or a network gets congested.
 
 **Disclaimers:**
 
@@ -26,21 +26,24 @@ With that out the way, let's dive in.
 
 # Feature Availability
 
-|              | Delayed On              | Delayed Off             | Set Turn-On Levels | Hold-to-Dim                                                           | Set Without Turning On                                                |
-|:------------ |:----------------------- |:----------------------- |:------------------ |:--------------------------------------------------------------------- |:--------------------------------------------------------------------- |
-| Shelly Gen2+ | ✅ Switches<br>🙋 Lights | ✅ Switches<br>🙋 Lights | 🗓️                 | 🗓️                                                                    | 🗓️                                                                    |
-| Zigbee2MQTT  | 🗓️                      |                         | 🗓️                 | 🗓️                                                                    | 🗓️                                                                    |
-| ZHA          | 🗓️                      |                         | 🗓️                 | 🗓️                                                                    | 🗓️                                                                    |
-| Matter       | 🗓️                      |                         | 🗓️                 | 🗓️                                                                    | 🗓️                                                                    |
-| Hue          | 🗓️                      | 🗓️                      | 🗓️                 | ✅ [Hue Smooth Dimming](https://github.com/jasonmx/hue-smooth-dimming) | ✅ [Hue Smooth Dimming](https://github.com/jasonmx/hue-smooth-dimming) |
+|                        |         Shelly          | Zigbee2MQTT | ZHA | Matter | Hue |
+|:---------------------- |:-----------------------:|:-----------:|:---:|:------:|:---:|
+| On With Timed Off      | ✨ switches<br>🙋 lights |     🔵      | 🔵  |   🔵   | 🔵  |
+| Off With Timed On      | ✨ switches<br>🙋 lights |     ❌      | ❌  |   ❌   | 🔵  |
+| Set Turn-On Levels     |           🔵            |     🔵      | 🔵  |   🔵   | 🔵  |
+| Hold-to-Dim            |           🔵            |     🔵      | 🔵  |   🔵   | ✅¹ |
+| Set Without Turning On |           🔵            |     🔵      | 🔵  |   🔵   | ✅¹ |
 
-✅ Released, tested on real hardware · 🙋 Built, needs a volunteer with the device to test it ([help test](CONTRIBUTING.md)) · 🗓️ Roadmap · Blank: the devices can't do it
+✨ New, tested on real hardware · ✅ Released, tested on real hardware · 🙋 Built, needs a volunteer with the device to test it
+([help test](CONTRIBUTING.md)) · 🔵 Roadmap · ❌ The devices can't do it
 
-Switches include Shelly relays. Details per integration are in [docs/integrations.md](docs/integrations.md).
+¹ Available now in [Hue Smooth Dimming](https://github.com/jasonmx/hue-smooth-dimming), and moving into Device Side.
+
+Details per integration are in [docs/integrations.md](docs/integrations.md).
 
 # Usage
 
-## Delayed on/off
+## Timed on/off
 
 Timer runs on the device. Use it to:
 
@@ -65,9 +68,9 @@ Timer runs on the device. Use it to:
 | `transition`        | turn_on_for | Fade time (0–300 s). 🔒                                                                                               |
 | `response_variable` | all         | Name of a variable that receives a result for each entity (optional). In the visual editor it's **Response variable** |
 
-A field marked 🔒 is `unsupported` in the release, as it's awaiting testing on real hardware. You can test it for us by installing the experimental pre-release from HACS.
+A field marked 🔒 is `unsupported` in the release, as it's awaiting testing on real hardware. You can test it for us: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-**Cancel:** to cancel a timer, send a `turn_on`, `turn_off`, `toggle` or new delayed on/off command.
+**Cancel:** to cancel a timer, send a `turn_on`, `turn_off`, `toggle` or new timed on/off command.
 
 #### Results
 
