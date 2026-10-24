@@ -1,3 +1,5 @@
+default_install_hook_types: [pre-commit, commit-msg]
+
 repos:
   # -------------------------
   # General file hygiene
@@ -43,3 +45,15 @@ repos:
     rev: v8.24.2
     hooks:
       - id: gitleaks
+
+  # -------------------------
+  # Household details (terms from gitignored files; a no-op without them)
+  # -------------------------
+  - repo: local
+    hooks:
+      - id: check-private
+        name: check private details
+        entry: python scripts/check_private.py
+        language: python
+        additional_dependencies: [pyyaml]
+        stages: [pre-commit, commit-msg]

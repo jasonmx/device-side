@@ -7,8 +7,9 @@ __pycache__/
 .env
 .env.rig
 
-# Rig inventory (household entities)
+# Household details (also check-private's blocklist)
 tests/rig/inventory.yaml
+.private-terms
 
 # Virtual environments
 .venv/
