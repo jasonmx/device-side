@@ -3,15 +3,19 @@ from dataclasses import replace
 from .capabilities import DurationLimits
 from .models import TimedRequest
 
+# Nothing shorter than 50 ms: a relay can't switch faster, and nobody needs more than 10 Hz.
+MIN_DURATION_S = 0.05
 
-def clamp[RequestT: TimedRequest](request: RequestT, limits: DurationLimits) -> tuple[RequestT, float | None]:
-    """Fit a request's duration to an adapter's limits.
 
-    Rounding to the device's resolution is silent; clamped_to is set only when the requested value lay outside the
-    range, since that is the case a caller needs to know about.
+def clamp[RequestT: TimedRequest](request: RequestT, limits: DurationLimits | None) -> tuple[RequestT, float | None]:
+    """Fit a request's duration to the 50 ms floor and an adapter's limits; a duration in range passes through.
+
+    clamped_to is set only when the requested value lay outside the range, since that is the case a caller needs
+    to know about.
     """
-    steps = round(request.duration_s / limits.resolution_s)
-    rounded = round(steps * limits.resolution_s, 6)
-    fitted = min(max(rounded, limits.min_s), limits.max_s)
-    clamped_to = fitted if not limits.min_s <= request.duration_s <= limits.max_s else None
+    low = max(limits.min_s, MIN_DURATION_S) if limits else MIN_DURATION_S
+    fitted = max(request.duration_s, low)
+    if limits:
+        fitted = min(fitted, limits.max_s)
+    clamped_to = fitted if fitted != request.duration_s else None
     return replace(request, duration_s=fitted), clamped_to

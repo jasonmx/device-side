@@ -19,6 +19,12 @@ async def test_duration_accepts_seconds_and_selector_dict(hass):
     assert request.duration_s == 60.5
 
 
+@pytest.mark.parametrize(("milliseconds", "seconds"), [(123, 0.12), (126, 0.13), (20, 0.02), (1, 0.0)])
+async def test_duration_rounds_to_10ms(hass, milliseconds, seconds):
+    request = _parse(hass, TurnOnFor, {"entity_id": "light.a", "duration": {"milliseconds": milliseconds}})
+    assert request.duration_s == pytest.approx(seconds)
+
+
 async def test_light_fields_are_parsed_with_core_validators(hass):
     request = _parse(
         hass,
