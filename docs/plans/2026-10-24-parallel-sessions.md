@@ -13,6 +13,9 @@ Agreed 2026-10-24. Implement in a fresh session, in its own worktree on `wt/para
   release branch moved meanwhile, rebase, push, `ci-green` again, then merge. PRs here isolate sessions and
   give rollback, not review; nothing reaches the live system until a tag. This replaces the repo plan's
   "no per-slice PRs" rule, which only held while sessions ran one at a time.
+- **Local checks before every push.** `.venv/bin/pytest` and `pre-commit run --all-files` in the worktree, so
+  failures surface in seconds and GitHub CI, which stays the merge gate (clean checkout, hassfest, HACS
+  validate), usually goes green first time.
 - **Jason's calls stay his**: the release PR into `main`, and every tag (RC or release).
 - **No GitHub auto-merge.** `gh pr merge --auto` waits only on *required* checks; with none configured on
   `release/**` it merges at once. `ci-green` then a plain merge needs no repo settings.
@@ -34,18 +37,21 @@ Agreed 2026-10-24. Implement in a fresh session, in its own worktree on `wt/para
 3. **CI on `wt/**` pushes.** `lint.yml` and `tests.yml` run on push only for `main` and `release/**`, so a
    `wt/` push gets only hassfest and validate until the PR's `pull_request` runs attach, and a `ci-green` racing
    them passes on two of four workflows. Add `"wt/**"` to both push filters so the pushed sha carries all four.
-4. **`.gitignore`**: add `.claude/worktrees/` (where `claude --worktree` and EnterWorktree put them).
-5. **`uv.lock` and the `pyproject.toml` ruff dev group** (committed with this plan). Each worktree runs
+4. **Faster CI installs.** In `tests.yml` and `lint.yml`, replace `setup-python`'s pip cache and `pip install`
+   with `astral-sh/setup-uv` (pinned, cache on) and `uv pip install --system`, keeping `requirements_test.txt`
+   as the tests' source. Compare install-step times on the PR against a prior run, and say so in its body.
+5. **`.gitignore`**: add `.claude/worktrees/` (where `claude --worktree` and EnterWorktree put them).
+6. **`uv.lock` and the `pyproject.toml` ruff dev group** (committed with this plan). Each worktree runs
    `uv sync` for its own `.venv`.
-6. **Committed `.claude/settings.json`** for the allow rules every worktree needs: the two `WebFetch` domains
+7. **Committed `.claude/settings.json`** for the allow rules every worktree needs: the two `WebFetch` domains
    now in `settings.local.json`, and relative `Bash(.venv/bin/pytest *)`. Drop the absolute-path pytest rules
    from `settings.local.json`: from a worktree they test the main checkout's code.
-7. **Repo plan** (`docs/plans/2026-10-23-device-side-repo-plan.md`, the "Each slice is a commit…" paragraph):
+8. **Repo plan** (`docs/plans/2026-10-23-device-side-repo-plan.md`, the "Each slice is a commit…" paragraph):
    slices land by PR into the release branch, one per session; drop "no per-slice PRs" and the
    rule-evidence-points-at-a-sha workaround, since PR bodies now exist to hold it.
-8. **CLAUDE.md**, within its editing rules (rule in the file, evidence in this PR):
-   - **Parallel sessions**: worktree per session; main checkout clean on the release branch; `wt/<topic>`
-     branch, PR into `release/vX.Y.Z`, merged by the session (squash) once `ci-green` passes, rebasing first
+9. **CLAUDE.md**, within its editing rules (rule in the file, evidence in this PR):
+   - **Parallel sessions**: worktree per session; main checkout clean on the release branch; pytest and
+     `pre-commit run --all-files` locally before each push; `wt/<topic>` branch, PR into `release/vX.Y.Z`, merged by the session (squash) once `ci-green` passes, rebasing first
      if the base moved; release PRs into `main` and all tags are Jason's; `uv sync` in a new worktree; household files are read
      from the main checkout, never copied into a worktree; one rig run at a time (the lock refuses a second);
      remove the worktree and its branch once the PR merges.
