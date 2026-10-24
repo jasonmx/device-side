@@ -46,12 +46,29 @@ def test_inventory_entity_by_role(inventory):
     assert inventory.entity("zha", "switch_plug") is None
 
 
-def test_load_env_reads_file_and_defaults_ssh(tmp_path, monkeypatch):
+def test_load_env_reads_file_and_env_overrides(tmp_path, monkeypatch):
     monkeypatch.delenv("HA_URL", raising=False)
-    monkeypatch.delenv("RIG_SSH", raising=False)
+    monkeypatch.delenv("RIG_SYNC_CMD", raising=False)
+    monkeypatch.delenv("RIG_STATUS_CMD", raising=False)
+    monkeypatch.delenv("RIG_RESTART_CMD", raising=False)
     monkeypatch.setenv("HA_TOKEN", "from-env")
     env = load_env(write(tmp_path, ".env.rig", "# comment\nHA_URL='http://ha:8123'\nHA_TOKEN=from-file\n"))
-    assert env == {"HA_URL": "http://ha:8123", "HA_TOKEN": "from-env", "RIG_SSH": "ha"}
+    assert env == {"HA_URL": "http://ha:8123", "HA_TOKEN": "from-env"}
+
+
+def test_load_env_reads_command_vars(tmp_path, monkeypatch):
+    for key in ("HA_URL", "HA_TOKEN", "RIG_SYNC_CMD", "RIG_STATUS_CMD", "RIG_RESTART_CMD"):
+        monkeypatch.delenv(key, raising=False)
+    env = load_env(
+        write(
+            tmp_path,
+            ".env.rig",
+            "HA_URL=http://ha:8123\nHA_TOKEN=tok\nRIG_SYNC_CMD=ssh myhost sync\nRIG_STATUS_CMD=ssh myhost status\n",
+        )
+    )
+    assert env["RIG_SYNC_CMD"] == "ssh myhost sync"
+    assert env["RIG_STATUS_CMD"] == "ssh myhost status"
+    assert "RIG_RESTART_CMD" not in env
 
 
 def test_rig_modules_read_constants_without_importing():
@@ -152,7 +169,7 @@ def fake_git(monkeypatch, *, dirty="", remote="abc refs/heads/b", remote_tree="t
         f"rev-parse --quiet --verify abc:{rig.COMPONENT}": remote_tree,
     }
     monkeypatch.setattr(rig, "git", lambda *args, check=True: replies[" ".join(args)])
-    monkeypatch.setattr(rig, "deployed_tree", lambda ssh: deployed)
+    monkeypatch.setattr(rig, "deployed_tree", lambda status_cmd: deployed)
 
 
 @pytest.mark.parametrize(
@@ -167,7 +184,7 @@ def fake_git(monkeypatch, *, dirty="", remote="abc refs/heads/b", remote_tree="t
 )
 def test_deploy_state(monkeypatch, kwargs, needed, blocker):
     fake_git(monkeypatch, **kwargs)
-    state = rig.deploy_state("ha")
+    state = rig.deploy_state("ssh myhost status")
     assert state.needed is needed
     assert (state.blocker is None) if blocker is None else (blocker in state.blocker)
 

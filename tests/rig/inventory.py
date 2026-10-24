@@ -74,10 +74,9 @@ def load_env(path: Path = ENV_FILE) -> dict[str, str]:
             if (line := line.strip()) and not line.startswith("#") and "=" in line:
                 key, _, value = line.partition("=")
                 env[key.strip()] = value.strip().strip("\"'")
-    for key in ("HA_URL", "HA_TOKEN", "RIG_SSH"):
+    for key in ("HA_URL", "HA_TOKEN", "RIG_SYNC_CMD", "RIG_STATUS_CMD", "RIG_RESTART_CMD"):
         if key in os.environ:
             env[key] = os.environ[key]
-    env.setdefault("RIG_SSH", "ha")
     return env
 
 
