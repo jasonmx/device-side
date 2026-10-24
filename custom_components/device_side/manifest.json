@@ -2,7 +2,6 @@
   "domain": "device_side",
   "name": "Device Side",
   "after_dependencies": ["hue", "matter", "mqtt", "shelly", "zha"],
-  "categories": ["lighting", "plugs_switches"],
   "codeowners": ["@jasonmx"],
   "config_flow": true,
   "documentation": "https://github.com/jasonmx/device-side",
