@@ -33,7 +33,8 @@ existing records survive because the fingerprint excludes the declaration.
 
 ## Releases
 
-- Work happens on `release/vX.Y.Z`; RCs are tagged `vX.Y.ZrcN` from it and run every tier.
+- Work lands on `release/vX.Y.Z` by self-merged PR; RCs are tagged `vX.Y.ZrcN` from it and run every tier.
+- Before any RC tag, point Jason at a rig run (`scripts/rig.py`) and don't tag until he confirms it passed.
 - Merge to `main` and tag `vX.Y.Z` only when every adapter is `beta` and the latest RC has
   soaked 7+ days with no open `regression` issue. A new RC restarts the soak.
 - A backing or field nobody can test is not claimed: leave it out of `components`/`supports_fields`,
@@ -42,3 +43,34 @@ existing records survive because the fingerprint excludes the declaration.
   ride the next release branch and re-climb.
 - Passing tester reports (GitHub "Test report" issues) become `docs/bench/<platform>/<feature>.md`
   records citing the issue.
+
+## Parallel sessions
+
+- Every session works in its own worktree, branch `wt/<topic>` off `release/vX.Y.Z`. The main checkout stays clean
+  on the release branch and is never edited.
+- New worktree: `uv sync`, then `uv pip install -r requirements_test.txt`.
+- Household files (`inventory.yaml`, `.env.rig`, `.private-terms`) are read from the main checkout; never copy them
+  into a worktree.
+- Before each push: `.venv/bin/pytest` and `pre-commit run --all-files`.
+- PR into `release/vX.Y.Z`; once `ci-green` passes, merge it yourself with `gh pr merge --squash --delete-branch`.
+  If the base moved, rebase, push and `ci-green` again first. Then remove the worktree and its local branch.
+- Release PRs into `main` and every tag (RC or release) are Jason's.
+- One rig run at a time: `scripts/rig.py` takes a lock and refuses a second run.
+
+## Layout
+
+- `custom_components/device_side/core/`: registry, resolver, dispatcher, services
+- `custom_components/device_side/features/`: one module per action
+- `custom_components/device_side/platforms/<platform>/`: one adapter module per feature
+- `tests/{core,features,platforms,rig}`: mirror the above; `rig/` drives the live HA, only via `scripts/rig.py`
+- `scripts/`: rig runner, household check, deploy
+- `docs/bench/<platform>/`: bench records. Design detail lives in the repo plan.
+
+## Conventions
+
+- Async throughout; `_LOGGER = logging.getLogger(__name__)`; services registered once in `async_setup`.
+- American English, matching HA. The version lives in `manifest.json`.
+
+## Development
+
+- pre-commit runs ruff and the household check. Wait on CI with `ci-green`.

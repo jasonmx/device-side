@@ -3,7 +3,8 @@
 
 The repo is public, so the blocklist cannot live in it. Terms come from the gitignored files that already hold them:
 the rig inventory's entity IDs, .env.rig's HA host and token, and .private-terms (one term per line, for names,
-hostnames and anything else). Where none of those exist (CI, a contributor's clone) the check passes.
+hostnames and anything else), all read from the main checkout so a linked worktree is checked too.
+Where none of those exist (CI, a contributor's clone) the check passes.
 
 Usage: scripts/check_private.py FILE ...   (pre-commit passes staged files, or the message file at commit-msg)
 """
@@ -15,9 +16,9 @@ from urllib.parse import urlparse
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
-from tests.rig.inventory import ENV_FILE, INVENTORY, Inventory, load_env  # noqa: E402
+from tests.rig.inventory import ENV_FILE, INVENTORY, MAIN_CHECKOUT, Inventory, load_env  # noqa: E402
 
-PRIVATE_TERMS = REPO / ".private-terms"
+PRIVATE_TERMS = MAIN_CHECKOUT / ".private-terms"
 # Hosts the docs and examples name on purpose.
 GENERIC_HOSTS = frozenset({"homeassistant.local", "localhost", "127.0.0.1"})
 
