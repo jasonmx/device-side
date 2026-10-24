@@ -36,7 +36,7 @@ With that out the way, let's dive in.
 
 ✅ Released, tested on real hardware · 🙋 Built, needs a volunteer with the device to test it ([help test](CONTRIBUTING.md)) · 🗓️ Roadmap · Blank: the devices can't do it
 
-Switches include Shelly relays. Details per integration are in [docs/platforms.md](docs/platforms.md).
+Switches include Shelly relays. Details per integration are in [docs/integrations.md](docs/integrations.md).
 
 # Usage
 
