@@ -60,9 +60,9 @@ Other edits in the same file:
 - **Versions:** add the `v0.0.x` / `v0.1.0` rule above.
 - **Delivery-sequence paragraph:** "the v0.0.1 merge to `main` is the only PR" becomes "each
   release's merge to `main` is its only PR".
-- **Old slice 12:** delete it. Its leftover step (the README install section switches to a HACS
-  search once the `hacs/default` PR merges) becomes a GitHub issue, since the merge date isn't
-  under our control.
+- **Old slice 12:** delete it. Its leftover step (switching the README install section once the
+  `hacs/default` PR merges) is dropped: the my.home-assistant `hacs_repository` badge opens the
+  repo in HACS whether or not it's in the default store.
 - **Slice 10 note added earlier today** (re-enable `validate.yml`): move it into the new slice 5.
 
 ### 2. New slice 5: v0.0.1 release + HACS submission
@@ -103,8 +103,6 @@ Steps on `release/v0.0.1`:
     - Add `jasonmx/device-side` alphabetically to `integration`.
     - Open the PR with the template filled in completely and all checks passing.
 11. **After filing:**
-    - File the README-switch issue (with a comment recommending the fix shape and the agent
-      model, per the issue rule).
     - Cut `release/v0.0.2` from `main` for slice 6 onward.
 
 Soak waiver: add a single line under slice 5 in the repo plan ("v0.0.1 ships without an RC soak

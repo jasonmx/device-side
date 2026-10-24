@@ -31,7 +31,7 @@
   "services": {
     "turn_off_for": {
       "name": "Turn off for",
-      "description": "Devices turn off, then on again after a delay. To cancel the delayed on, send a regular turn off.",
+      "description": "Devices turn off, then on again after a delay. To cancel the timed on, send a regular turn off.",
       "fields": {
         "duration": {
           "name": "Duration",
@@ -41,7 +41,7 @@
     },
     "turn_on_for": {
       "name": "Turn on for",
-      "description": "Devices turn on, then off again after a delay. To cancel the delayed off, send a regular turn on.",
+      "description": "Devices turn on, then off again after a delay. To cancel the timed off, send a regular turn on.",
       "fields": {
         "duration": {
           "name": "Duration",
