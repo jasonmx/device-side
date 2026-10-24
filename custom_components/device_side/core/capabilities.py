@@ -12,7 +12,6 @@ from .models import Mode, Target
 class DurationLimits:
     min_s: float
     max_s: float
-    resolution_s: float
 
 
 @dataclass(frozen=True, slots=True)

@@ -114,7 +114,7 @@ class Dispatcher:
 
     async def _run_adapter(self, adapter: Adapter, request: Request, targets: list[Target]) -> list[EntityResult]:
         clamped_to = None
-        if isinstance(request, TimedRequest) and adapter.capabilities.duration is not None:
+        if isinstance(request, TimedRequest):
             request, clamped_to = duration.clamp(request, adapter.capabilities.duration)
         try:
             async with asyncio.timeout(ADAPTER_TIMEOUT_S):
