@@ -16,7 +16,7 @@ class DurationLimits:
 
 @dataclass(frozen=True, slots=True)
 class AdapterCapabilities:
-    """What an adapter claims. A class nobody has tested is left out of domains/supports_fields,
+    """What an adapter claims. A backing or field nobody has tested is left out of components/supports_fields,
     not gated at runtime.
     """
 

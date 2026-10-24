@@ -25,7 +25,7 @@ shipping the smallest release HACS will accept.
   scaffold only, and there are no `docs/bench/` records yet.
 
 **What you decided:**
-- v0.0.1 claims Shelly **`switch`** and on/off **`light`** (shared on/off, `onoff_shared`) for `turn_on_for` and `turn_off_for`.
+- v0.0.1 claims Shelly **`switch`** and on/off **`light`** (both the same `Switch.Set` on the `Switch` backing) for `turn_on_for` and `turn_off_for`.
 - `toggle_for` is dropped (no use case: HA's `flash` covers a short toggle).
 - The 7-day RC soak is **waived for v0.0.1 only**.
 - After v0.0.1, releases go incrementally (`v0.0.x`), and one release can carry several platforms
@@ -52,7 +52,7 @@ New delivery sequence:
 | 11 | Matter `turn_on_for` | Was 8. Still waits for Matter on the rig. |
 | 12 | `v0.1.0` | Replaces old slice 11. Feature complete for this plan, third-party tester reports for the hardware the rig lacks, matrix current. |
 
-`v0.0.x` releases are cut between slices whenever a set of units reaches beta. From `v0.0.2`
+`v0.0.x` releases are cut between slices whenever a set of adapters reaches beta. From `v0.0.2`
 onward each one goes through the normal rules: RC, 7-day soak, merge.
 
 Other edits in the same file:

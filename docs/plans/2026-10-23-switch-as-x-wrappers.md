@@ -8,7 +8,7 @@ Agreed 2026-10-23. Implement in a fresh session; end with `/audit-code` by a fre
 The first rig run (2026-10-23) found both of Jason's `light_onoff` entities are `switch_as_x` helpers
 over Shelly switches, so `core/resolver.py` returns `no_platform`. Wrapping a relay as a light this way
 is common. The wrapper forwards plain on/off to the wrapped switch, so the call that reaches the device
-is the switch's call: by **proof follows the call**, the wrapped target rides the switch unit's proof.
+is the switch's call: by **proof follows the call**, the wrapped target rides the switch's bench record.
 
 ## Decisions
 
@@ -21,7 +21,7 @@ is the switch's call: by **proof follows the call**, the wrapped target rides th
 - **Reported under the name the user used.** Target gains `via_wrapper: str | None` (the light's
   entity_id), like `via_group`. Responses and summaries key on the wrapper's entity_id, so a caller
   that targeted `light.x` gets `light.x` back.
-- **Class is `switch`.** The adapter sees the wrapped `switch.*` target. Light fields sent to a wrapper
+- **Seen as a `switch`.** The adapter sees the wrapped `switch.*` target. Light fields sent to a wrapper
   are refused with `fields_not_supported` (the user addressed a light, so dropping them silently as
   `light_fields_ignored` would mislead). The UI already hides them: a wrapper light is `onoff`.
 - **No chains.** A wrapper whose wrapped entity is itself a wrapper returns `"not_addressable"`.
