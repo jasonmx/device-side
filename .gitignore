@@ -25,8 +25,8 @@ env/
 *.log
 
 # Claude Code
-CLAUDE.md
-.claude/
+CLAUDE.local.md
+.claude/settings.local.json
 
 # pytest-cov data
 .coverage
