@@ -16,7 +16,6 @@ class ShellyTurnOnFor(Adapter[TurnOnForRequest]):
     feature: ClassVar[str] = "turn_on_for"
     platform: ClassVar[str] = "shelly"
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        experimental=True,
         domains=frozenset({"light", "switch"}),
         duration=TIMER_LIMITS,
         # Light fields stay unclaimed until a tester with a Shelly dimmer or RGB light reports.
