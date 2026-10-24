@@ -24,3 +24,6 @@ Run the action with a short duration (5-8 seconds) and check the device responds
 [Open a test report issue](https://github.com/jasonmx/device-side/issues/new?template=test-report.yml)
 with the Device Side version, the integration (Shelly, ZHA, etc.), the entity type, the fields
 you tested, and whether each action worked. Include any error messages from the logs.
+
+An automated runner that connects to your HA, executes the steps and prefills the issue body is
+planned for a future release.
