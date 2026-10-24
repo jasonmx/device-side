@@ -28,13 +28,13 @@ With that out the way, let's dive in.
 
 |                        |         Shelly          | Zigbee2MQTT | ZHA | Matter | Hue |
 |:---------------------- |:-----------------------:|:-----------:|:---:|:------:|:---:|
-| On With Timed Off      | 🚀 switches<br>🙋 lights |     🔵      | 🔵  |   🔵   | 🔵  |
-| Off With Timed On      | 🚀 switches<br>🙋 lights |     ❌      | ❌  |   ❌   | 🔵  |
+| On With Timed Off      | ✨ switches<br>🙋 lights |     🔵      | 🔵  |   🔵   | 🔵  |
+| Off With Timed On      | ✨ switches<br>🙋 lights |     ❌      | ❌  |   ❌   | 🔵  |
 | Set Turn-On Levels     |           🔵            |     🔵      | 🔵  |   🔵   | 🔵  |
 | Hold-to-Dim            |           🔵            |     🔵      | 🔵  |   🔵   | ✅¹ |
 | Set Without Turning On |           🔵            |     🔵      | 🔵  |   🔵   | ✅¹ |
 
-🚀 Just launched, tested on real hardware · ✅ Released, tested on real hardware · 🙋 Built, needs a volunteer with the device to test it
+✨ New, tested on real hardware · ✅ Released, tested on real hardware · 🙋 Built, needs a volunteer with the device to test it
 ([help test](CONTRIBUTING.md)) · 🔵 Roadmap · ❌ The devices can't do it
 
 ¹ Available now in [Hue Smooth Dimming](https://github.com/jasonmx/hue-smooth-dimming), and moving into Device Side.
