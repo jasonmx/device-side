@@ -25,7 +25,7 @@ async def test_response_shape(hass, fake, reset_script):
 
     response = await call(hass, "turn_on_for", {"entity_id": "light.desk", "duration": 5})
 
-    assert response == {"light.desk": {"status": "confirmed", "mode": "native", "platform": "fake"}}
+    assert response == {"light.desk": {"status": "confirmed", "platform": "fake"}}
     [(platform, feature, request, entity_ids)] = reset_script.calls
     assert (platform, feature, entity_ids) == ("fake", "turn_on_for", ["light.desk"])
     assert request.duration_s == 5
@@ -54,8 +54,8 @@ async def test_mixed_room_reports_each_target_without_raising(hass, fake, reset_
     response = await call(hass, "turn_on_for", {"entity_id": ["light.a", "light.b", "light.ghost"], "duration": 5})
 
     assert response == {
-        "light.a": {"status": "sent", "mode": "native", "platform": "fake"},
-        "light.b": {"status": "rejected", "mode": "native", "platform": "fake", "detail": "error"},
+        "light.a": {"status": "sent", "platform": "fake"},
+        "light.b": {"status": "rejected", "platform": "fake", "detail": "error"},
         "light.ghost": {"status": "unsupported", "detail": "not_in_registry"},
     }
 
@@ -133,7 +133,6 @@ async def test_native_group_without_expand_hook_is_unsupported(hass, fake, reset
 
     assert response["light.special_group"] == {
         "status": "unsupported",
-        "mode": "native",
         "platform": "fake_special",
         "detail": "group_not_supported",
     }
@@ -164,7 +163,7 @@ async def test_wrapper_reports_under_the_light_and_refuses_light_fields(hass, fa
 
     response = await call(hass, "turn_on_for", {"entity_id": "light.relay", "duration": 5})
 
-    assert response == {"light.relay": {"status": "confirmed", "mode": "native", "platform": "fake"}}
+    assert response == {"light.relay": {"status": "confirmed", "platform": "fake"}}
     assert reset_script.calls[0][3] == ["switch.relay"]
 
     reset_script.calls.clear()
@@ -181,8 +180,8 @@ async def test_wrapper_and_its_switch_each_get_a_result(hass, fake, reset_script
     response = await call(hass, "turn_on_for", {"entity_id": ["light.relay", "switch.relay"], "duration": 5})
 
     assert response == {
-        "light.relay": {"status": "sent", "mode": "native", "platform": "fake"},
-        "switch.relay": {"status": "sent", "mode": "native", "platform": "fake"},
+        "light.relay": {"status": "sent", "platform": "fake"},
+        "switch.relay": {"status": "sent", "platform": "fake"},
     }
     assert reset_script.calls[0][3] == ["switch.relay", "switch.relay"]  # the same Set twice: idempotent
 
@@ -227,8 +226,8 @@ async def test_missing_and_stray_results_are_reconciled(hass, fake):
         response = await call(hass, "turn_on_for", {"entity_id": ["light.a", "light.b"], "duration": 5})
 
     assert response == {
-        "light.a": {"status": "sent", "mode": "native", "platform": "fake"},
-        "light.b": {"status": "rejected", "mode": "native", "platform": "fake", "detail": "no_result"},
+        "light.a": {"status": "sent", "platform": "fake"},
+        "light.b": {"status": "rejected", "platform": "fake", "detail": "no_result"},
     }
 
 

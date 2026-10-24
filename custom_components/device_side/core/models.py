@@ -23,11 +23,6 @@ class Status(StrEnum):
 FAILED = frozenset({Status.UNSUPPORTED, Status.REJECTED})
 
 
-class Mode(StrEnum):
-    NATIVE = "native"
-    ASSISTED = "assisted"
-
-
 class Tier(StrEnum):
     """Computed by gen_docs.py from coverage and bench records; never stored on an adapter."""
 
@@ -113,15 +108,12 @@ class EntityResult:
     entity_id: str
     status: Status
     platform: str | None = None
-    mode: Mode | None = None
     clamped_to: float | None = None
     detail: str | None = None
     data: dict | None = None
 
     def as_response(self) -> dict:
         response: dict[str, Any] = {"status": self.status.value}
-        if self.mode is not None:
-            response["mode"] = self.mode.value
         for name in ("platform", "clamped_to", "detail"):
             if (value := getattr(self, name)) is not None:
                 response[name] = value
