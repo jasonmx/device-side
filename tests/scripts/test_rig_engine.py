@@ -524,6 +524,26 @@ async def test_set_activates_a_scene_without_waiting_on_its_state(tmp_path):
     assert ("scene", "turn_on", {"entity_id": "scene.evening"}) in ha.calls
 
 
+async def test_set_waits_for_every_member_to_reach_the_brightness(tmp_path):
+    ha = FakeHA(
+        {
+            "light.room": {"state": "on", "attributes": {"entity_id": ["light.a"], "brightness": 255}},
+            "light.a": {"state": "on", "attributes": {"brightness": 255}},
+        }
+    )
+
+    async def slow_member(domain, service, data=None, return_response=False):
+        """The group reads the new brightness at once, its member only a moment later."""
+        ha.calls.append((domain, service, dict(data or {})))
+        ha.states["light.room"]["attributes"]["brightness"] = 51
+        PENDING.append(asyncio.get_running_loop().call_later(0.05, lambda: ha.set("light.a", "on", brightness=51)))
+
+    ha.call_service = slow_member
+    text = header("group") + "      - set: {state: on, brightness_pct: 20}\n      - expect_state: {brightness: 51}\n"
+    result = await run_one(ha, suite(tmp_path, text), inventory(group="light.room"))
+    assert outcomes(result)["t[group]"] == (Outcome.PASS, "")
+
+
 async def test_admin_integrations_run_on_the_admin_connection(tmp_path):
     ha, admin = FakeHA({"switch.plug": {}}), FakeHA({"switch.plug": {}}, timer_on)
     await run_one(ha, suite(tmp_path, ON_THEN_OFF, "zha"), inventory("zha", switch_plug="switch.plug"), admin=admin)

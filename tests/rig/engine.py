@@ -612,7 +612,13 @@ class _CaseRun:
             return
         service = "turn_on" if args["state"] == "on" else "turn_off"
         await self.ha.call_service(domain, service, {"entity_id": entity_id, **data})
-        await self.await_state(entity_id, {"state": args["state"]}, self.names["tol"])
+        want: dict[str, Any] = {"state": args["state"]}
+        if "brightness_pct" in data:
+            # A light already on reads "on" at once; wait for the brightness, so the bridge state the next call
+            # reads is the one just set. Hue rounds to its own 0-100 scale, so allow a step either side.
+            brightness = round(data["brightness_pct"] * 255 / 100)
+            want["brightness"] = {"min": brightness - 2, "max": brightness + 2}
+        await self.await_state(entity_id, want, self.names["tol"])
 
     async def _call(self, args: dict, following: str | None) -> None:
         action = args.get("action", self.case.suite.action)
