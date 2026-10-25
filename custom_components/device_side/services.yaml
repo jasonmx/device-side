@@ -9,6 +9,8 @@ turn_on_for:
     entity:
       - domain: [light, switch]
         integration: shelly
+      - domain: [light, switch]
+        integration: mqtt
   fields:
     duration: &duration
       required: true
