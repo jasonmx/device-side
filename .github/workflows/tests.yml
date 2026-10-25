@@ -27,4 +27,7 @@ jobs:
         run: uv sync --locked
 
       - name: Run tests
-        run: .venv/bin/pytest -q tests/
+        run: .venv/bin/pytest -q tests/ --cov=custom_components/device_side --cov-report=json
+
+      - name: Check tiers
+        run: .venv/bin/python scripts/check_tiers.py --coverage coverage.json

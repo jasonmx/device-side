@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from custom_components.device_side.core.registry import AdapterRegistry
+from scripts.fingerprint import adapter_path, fingerprint
 from tests.rig.engine import load_step_files
 from tests.rig.inventory import Inventory, load_env, main_checkout
 
@@ -78,7 +79,7 @@ def test_load_env_reads_command_vars(tmp_path, monkeypatch):
     assert "RIG_RESTART_CMD" not in env
 
 
-def test_select_plan_lines_and_estimate(inventory):
+def test_select_plan_lines_and_estimate(inventory, tmp_path):
     step_files = load_step_files()
     suites = rig.select(step_files, inventory, None)
     assert [(suite.integration, suite.action) for suite in suites] == [
@@ -88,7 +89,15 @@ def test_select_plan_lines_and_estimate(inventory):
 
     registry = AdapterRegistry.discover()
     shelly_on = [suite for suite in suites if suite.integration == "shelly" and suite.action == "turn_on_for"]
-    assert rig.plan_lines(shelly_on + suites[1:2], inventory, registry) == [
+    bench = tmp_path / "bench"
+    (bench / "shelly").mkdir(parents=True)
+    current = fingerprint(adapter_path(registry.adapter("turn_on_for", "shelly")))
+    write(
+        bench / "shelly",
+        "turn_on_for.md",
+        f"| Result | pass |\n| Fingerprint | `{current}` |\n| Capabilities | `Switch` |\n| Fields | none |\n",
+    )
+    assert rig.plan_lines(shelly_on + suites[1:2], inventory, registry, bench_dir=bench) == [
         "shelly / turn_on_for -> switch.plug (beta)",
         "    on_then_off[switch_plug]: switch.plug",
         "    on_then_off[light_onoff]: no light_onoff entity in inventory",
@@ -98,8 +107,9 @@ def test_select_plan_lines_and_estimate(inventory):
         "    bulb_on_then_off[light_dimmable]: no light_dimmable entity in inventory",
         "hue / turn_off_for (no adapter, will skip)",
     ]
-    assert rig.plan_lines(shelly_on, inventory, registry, "on_then") == [
-        "shelly / turn_on_for -> switch.plug (beta)",
+    # The tier is check_tiers': with no records, nothing is proven.
+    assert rig.plan_lines(shelly_on, inventory, registry, "on_then", bench_dir=tmp_path) == [
+        "shelly / turn_on_for -> switch.plug (untested)",
         "    on_then_off[switch_plug]: switch.plug",
         "    on_then_off[light_onoff]: no light_onoff entity in inventory",
         "    on_then_off[light_wrapped]: no light_wrapped entity in inventory",

@@ -32,6 +32,7 @@ CLAUDE.local.md
 # pytest-cov data
 .coverage
 .coverage.*
+coverage.json
 
 # Worktrees (claude --worktree, EnterWorktree)
 .claude/worktrees/

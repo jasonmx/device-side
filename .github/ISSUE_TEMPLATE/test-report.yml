@@ -1,0 +1,82 @@
+name: Test report
+description: Report a test of a release candidate on your own hardware.
+title: "Test report: "
+labels: ["test-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing. A passing report becomes a bench record, which is what lets a capability or field
+        ship in a release.
+
+        **Already tested by someone else? Still worth sending:** a different model or firmware is new evidence.
+  - type: input
+    id: rc
+    attributes:
+      label: Release candidate
+      placeholder: v0.0.2rc1
+    validations:
+      required: true
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant version
+      placeholder: "2026.10.2"
+    validations:
+      required: true
+  - type: input
+    id: integration
+    attributes:
+      label: Integration
+      placeholder: shelly
+    validations:
+      required: true
+  - type: input
+    id: action
+    attributes:
+      label: Action
+      placeholder: turn_on_for
+    validations:
+      required: true
+  - type: input
+    id: capability
+    attributes:
+      label: Capability
+      description: What the call reaches on the device, such as a Shelly RPC component (`Switch`, `Light`).
+  - type: input
+    id: device_model
+    attributes:
+      label: Device model
+      description: The model shown on the device's page in Home Assistant.
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware
+      description: The firmware version shown on the device's page in Home Assistant.
+    validations:
+      required: true
+  - type: textarea
+    id: tests
+    attributes:
+      label: Tests
+      description: One line per test, ticked if it behaved as described.
+      placeholder: |
+        - [ ] Turns on, then off after the duration
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - pass
+        - fail
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Anything odd you saw, even on a pass.

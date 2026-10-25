@@ -319,7 +319,7 @@ docs/
   plans/2026-10-23-device-side-repo-plan.md  this plan, saved in slice 0
   integrations.md                            one section per integration, fixed template
   contributing/testing.md
-  bench/<integration>/<action>.md            per-adapter bench record; gates tier promotion
+  bench/<integration>/<action>*.md           bench records (rig run, or -issue-<N> per tester report)
 tests/
   conftest.py            enable_custom_integrations autouse; setup_integration; fake_registry; call()
   fakes/fake_integration/ INTEGRATION "fake" + scripted adapters for dispatcher tests
@@ -357,7 +357,7 @@ class EntityResult: entity_id, status, integration, clamped_to, detail, data
 @dataclass(frozen=True) class AdapterScope:
     experimental: bool = False; domains = {"light"}; duration: DurationLimits | None
     fields: frozenset[str]; capabilities: frozenset[str] | None; confirmable: bool; native_groups: bool
-    max_concurrency: int = 4; notes: tuple[str, ...] = (); bench: str | None = None
+    max_concurrency: int = 4; notes: tuple[str, ...] = ()
 @dataclass class IntegrationInfo:
     key, title, ha_domain, detect: Callable[[hass, entry, device], bool] | None
     is_group: Callable[[hass, Target], bool] | None             # flags a native group (resolver sets Target.is_group)
@@ -476,18 +476,20 @@ of an adapter's targets at once so native group commands stay possible. Hue `mov
 
 ### Tier computation
 
-`scripts/check_tiers.py` (slice 9c) imports the registry without `hass` and computes each adapter's
-tier. It fails on a `bench` path that does not exist or a non-experimental adapter under 95%
-coverage (`coverage.json`). CI runs it. It generates no docs: the README feature table and
+`scripts/check_tiers.py` (slice 9c, `2026-10-25-release-gates.md`) imports the registry without `hass`
+and computes each adapter's tier from its records, found by path (`docs/bench/<integration>/<action>*.md`).
+It fails on a malformed record, a record with no adapter, or a non-experimental adapter under 95%
+coverage (`coverage.json`); CI runs it and prints the tier table. `--require-beta`, run only by
+`cut-release`, also fails on any `untested` adapter. It generates no docs: the README feature table and
 `docs/integrations.md` are hand-written. Fingerprint: AST hash of the adapter module, excluding
 docstrings and the `AdapterScope` declaration; bench records carry the fingerprint they
 tested and list the capabilities (Shelly: RPC components) and light fields they exercised. Proof
 follows the call: a record proves the device-side call, whatever HA domain the target shows, so a
-relay exposed as a `switch` or as an on/off `light` rides one record. `beta` needs every capability
-and field in scope covered by a record with the current fingerprint; the check fails on a
-scope entry no such record covers. Untested capabilities are left out of `AdapterScope.capabilities`
-and refused, not taken into scope on a sibling's proof. Adding a capability after a tester report is a
-scope edit plus a record listing it; the fingerprint, and so the existing records, survive it. Tier ladder: see `CLAUDE.md`. A release-workflow check rejects tags not matching
+relay exposed as a `switch` or as an on/off `light` rides one record. `beta` needs a record with the
+current fingerprint, and every capability and field in scope covered: a capability by any passing
+record (any fingerprint), a field by a current-fingerprint record. Untested capabilities are left out of
+`AdapterScope.capabilities` and refused, not taken into scope on a sibling's proof. Adding a capability
+after a tester report is a scope edit plus a record listing it; the fingerprint survives it. Tier ladder: see `CLAUDE.md`. A release-workflow check rejects tags not matching
 `^v\d+\.\d+\.\d+(rc\d+)?$`.
 
 Tester reports (slice 9b): RC builds raise one fixable Repairs issue ("vX.Y.ZrcN: help test on your
@@ -595,7 +597,7 @@ test-report issue).
 | 11 | Matter `turn_on_for` | LT check; `OnWithTimedOff`; optional read-back; rig test on bulb and plug. |
 | 10 | ZHA `turn_on_for` | ZHA set up on the maintainer's rig first: a second Zigbee coordinator on its own channel, apart from Z2M's network; devices paired to it for the rig roles; steps in the private rig notes; addressing; admin context passthrough; ValueError -> rejected; rig test, run with an admin token (`.env.rig`) for ZHA suites only. |
 | 7 | Hue port | five adapters + bridge/transition_cache/colors; `move` across brightness, color_temp, hue, saturation; `grouped_light` native for move/stop, expanded for set/get_attributes; hue_dimmer tests ported to real-hass fixtures; rig parity with hue_dimmer `tests/RELEASE_CHECKLIST.md`; then Hue `turn_on_for`/`turn_off_for` once open item 10 is answered (`experimental=True`), with `cancel_delayed_toggle` across all integrations if the cancel contract needs it. |
-| 9c | Release gates | **plan in /plan first**; computed tiers and the scope-coverage check in `scripts/check_tiers.py`, run in CI; per-adapter coverage check; tag-format check; RC audit gate (`2026-10-23-rc-audit-gate.md`: `cut-rc` workflow, `check_audit.py`, `/rc-audit`); `test-report.yml` issue form (bug reports need it whenever 9b lands); bench files filled from rig runs. Lands before the first RC (`v0.0.2rc1`), wherever in this sequence a release is first wanted. |
+| 9c | Release gates | Plan: `docs/plans/2026-10-25-release-gates.md`. Computed tiers and the scope-coverage check in `scripts/check_tiers.py`, run in CI; per-adapter coverage check; `test-report.yml` issue form (bug reports need it whenever 9b lands); every `v*` tag from a workflow (`cut-release-candidate` with the RC audit gate of `2026-10-23-rc-audit-gate.md`, `cut-release` with `check_tiers --require-beta`) behind a tag ruleset. Lands before the first RC (`v0.0.2rc1`), wherever in this sequence a release is first wanted. |
 | 9d | Rig coverage sweep | **plan in /plan first**; audit every adapter's scope (domains, capabilities, fields, native groups) against the maintainer's rig hardware; add inventory roles and step files for everything the rig can reach; rig runs leave a current-fingerprint bench record for each, so v0.1.0 launches with the widest scope the rig can prove. What the rig can't reach is listed for 9b and stays out of scope. |
 | 9e | Native groups survey | **plan in /plan first**; a short exploration of integration-native groups beyond Hue (Z2M and ZHA group entities; Matter and Shelly where HA exposes any): how each is detected and addressed, whether its native group command keeps the device-side behavior (timed off, transitions) across members, and a rig check of each candidate. Outcome: per integration, `native_groups` on or off for v0.1.0, recorded as a decision here, with bench records for those turned on. Hue's `grouped_light` ships in 7 regardless. |
 | 12 | `v0.1.0` ("v1" names the scope, not the version) | feature complete for this plan; scope limited to what rig runs (and any tester reports) cover; README feature table current; release checklist adapted from hue_dimmer. |

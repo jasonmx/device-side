@@ -91,3 +91,13 @@ it. Anything else fails the test. `--unattended` skips the questions and reports
 When every test of an adapter passes, the run writes `docs/bench/<integration>/<action>.md`: the adapter's
 fingerprint (`scripts/fingerprint.py`), the Home Assistant version, the devices' model and firmware, and the
 capabilities and fields the tests reached. A failed or partial (`-k`) run writes nothing.
+
+`scripts/check_tiers.py` computes each adapter's tier from all its records and prints the table; CI runs it.
+
+### Tester reports
+
+A passing [Test report](../../.github/ISSUE_TEMPLATE/test-report.yml) issue becomes its own record,
+`docs/bench/<integration>/<action>-issue-<N>.md`, next to the rig's, so a rig run never overwrites it. It uses the
+rig record's key/value table: `Source` cites the issue (`tester report, #<N>`), and `Fingerprint` is the adapter's
+at the RC tag the tester ran (`git checkout <rc> && scripts/fingerprint.py`). List only the capabilities and fields
+the report shows working. The tests table is optional.

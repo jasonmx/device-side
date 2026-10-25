@@ -15,21 +15,25 @@ A tier belongs to an **adapter** (action × integration) and covers its whole sc
 | Tier | Meaning | Bar |
 |---|---|---|
 | experimental | design in flux | `experimental=True` on the adapter; no coverage bar |
-| untested | design settled | >95% coverage of the adapter module; some of its scope not yet covered by a bench record |
-| beta | tested on hardware | every capability and field in scope covered by a bench record (rig run or tester report) with the current fingerprint |
+| untested | design settled | ≥95% line coverage of the adapter module; some of its scope not yet covered by a bench record |
+| beta | tested on hardware | at least one bench record (rig run or tester report) with the current fingerprint, and every capability and field in scope covered (below) |
 | stable | released | on `main`; everything on `main` is stable |
 
-Only `experimental` is declared; `scripts/check_tiers.py` computes the rest and fails on scope no
-current-fingerprint record covers. Fingerprint = AST hash of the adapter module, excluding
-docstrings and the `AdapterScope` declaration; any other change resets the adapter to
-`untested`. Regressions block promotion; they never demote.
+Only `experimental` is declared; `scripts/check_tiers.py` computes the rest from every
+`docs/bench/<integration>/<action>*.md` record of the adapter. CI prints the tiers; only `cut-release`
+requires every adapter beta. Fingerprint = AST hash of the adapter module, excluding docstrings and
+the `AdapterScope` declaration; any other change resets the adapter to `untested` until a record
+carries the new fingerprint. Regressions block promotion; they never demote.
+
+**Capabilities carry forward, fields don't.** A capability listed by any passing record (any
+fingerprint) stays covered while the adapter has a current-fingerprint record that reached the device; a field needs a
+current-fingerprint record listing it.
 
 **Proof follows the call.** A bench record proves the call an adapter sends and the capability it
 reaches (Shelly: the RPC component), whatever entity domain the target shows: a relay exposed as a
 `switch` or an on/off `light` rides one record. Records list the capabilities and fields they
 exercised. A capability or field nobody has tested is left out of scope and refused, never added on
-a sibling's proof. Adding one after a tester report is a scope edit plus a record listing it;
-existing records survive because the fingerprint excludes the declaration.
+a sibling's proof. Adding one after a tester report is a scope edit plus a record listing it.
 
 **Setting `experimental`:** set it for a new action, a new field or attribute, or a new integration
 (including ports). Leave it off for fixes, refactors and performance work. When unsure, ask.

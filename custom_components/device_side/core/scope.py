@@ -31,7 +31,6 @@ class AdapterScope:
     native_groups: bool = False
     max_concurrency: int = 4
     notes: tuple[str, ...] = ()
-    bench: str | None = None
 
 
 @dataclass(slots=True)
