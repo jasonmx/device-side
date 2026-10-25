@@ -85,3 +85,75 @@ input was not tested, and what it does may depend on the input mode.
 - **Only relays are in scope.** `Light`, `CCT`, `RGB`, `RGBW` and `RGBCCT` document `toggle_after`
   the same way as `Switch`, but they are different firmware and no hardware run has covered them,
   so they are refused until a tester reports one.
+
+## Zigbee2MQTT
+
+### What it talks to
+
+Zigbee devices through the [Zigbee2MQTT](https://www.zigbee2mqtt.io/) bridge, via the core `mqtt`
+integration. Device Side publishes directly to the Z2M device topic; Z2M translates the payload to
+a Zigbee cluster command (`OnWithTimedOff`) and forwards it to the device. The timer therefore
+runs on the device, not on the bridge or in Home Assistant.
+
+Only entities Z2M registered via MQTT discovery are served; Z2M devices set up in any other way
+are not detected.
+
+### How targets resolve
+
+An entity belongs to this integration when its device carries the identifier
+`("mqtt", "zigbee2mqtt_<address>")` that Z2M writes during MQTT discovery. The address is
+the device's IEEE address for individual devices.
+
+Device Side builds the command topic from the identifier: `zigbee2mqtt/<address>/set`. This assumes
+the default Z2M base topic; see Sharp edges if you changed it.
+
+### `turn_on_for`
+
+For **light entities without fields**: publishes `{"state":"ON","on_time":<seconds>}` to the
+device topic. Z2M translates `on_time` (in seconds, rounded to 1 decimal place) to the Zigbee
+`OnWithTimedOff` command.
+
+For **light entities with fields** (`brightness`, `color_temp_kelvin`, `rgb_color`, `hs_color`,
+`xy_color`, `transition`): calls `light.turn_on` first (blocking) so HA's MQTT light entity
+handles the color mode, sets the attributes through its own protocol, then publishes
+`{"state":"ON","on_time":<seconds>}` separately. The two-step approach keeps HA's light state in
+sync and delegates attribute handling to the integration that knows the device's capabilities.
+
+For **switch entities**: publishes only. Light fields sent to a switch are ignored and the result
+carries detail `light_fields_ignored`.
+
+Returns `sent` (fire-and-forget). Z2M does not report the timer back; confirmation is not
+available.
+
+### Groups
+
+Z2M group entities are passed through to the adapter as a single target when `native_groups` is
+supported. The adapter publishes to the group's command topic. Detection of group entities in the
+HA registry needs verification on hardware; see the rig verification list.
+
+### Cancelling
+
+Send a regular `turn_on` or `turn_off` through Home Assistant. This publishes `{"state":"ON"}` or
+`{"state":"OFF"}` to the device topic, which Z2M forwards to the device. Whether the Zigbee device
+cancels its running `OnWithTimedOff` timer on a plain `On` command depends on the device's
+firmware. Most Z2M-supported lights cancel the timer on any state change.
+
+### Sharp edges
+
+- **Duration limits.** Zigbee `on_time` is a uint16 in tenths of a second, so the maximum is
+  65534 tenths = 6553.4 s (about 1.8 hours). A duration over 6553.4 s is clamped and the result
+  carries `clamped_to`. Durations under 50 ms are floored to 50 ms.
+- **Renamed devices.** Z2M's MQTT command topic uses the device's *friendly name*, not its IEEE
+  address. Device Side derives the topic from the IEEE stored in the device identifier; this only
+  works when the device has never been renamed in Z2M (so the friendly name is still the IEEE).
+  If you renamed a device, the command topic won't match and the publish reaches nothing. Needs
+  verification on hardware; on the rig-verify list.
+- **Custom base topic.** If Z2M is configured with a base topic other than `zigbee2mqtt`, the
+  command topic Device Side builds will be wrong and the publish will reach no device. Check your
+  Z2M configuration; there is no workaround in v1.
+- **No confirmation.** Z2M's MQTT interface does not synchronously confirm the timer started.
+  The result is always `sent`, never `confirmed`, regardless of whether the device accepted the
+  command.
+- **Tuya countdown devices.** Some Tuya devices exposed via Z2M implement auto-off through a
+  proprietary countdown attribute rather than `OnWithTimedOff`. Publishing `on_time` to these
+  devices has no effect. This is a documented v1 gap; check your device's Z2M exposes page.
