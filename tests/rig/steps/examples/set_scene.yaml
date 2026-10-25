@@ -1,0 +1,34 @@
+# hue_dimmer tests/RELEASE_CHECKLIST.md §5.1-5.3 as steps. Only the parser tests load this until slice 7.
+# The target is the scene; `target: group` points a step at the room the scene belongs to. §5.4-5.8 need
+# scene kinds (a light off, All-Day, dynamic), a large room and a second bridge that inventory roles don't name yet.
+action: set_scene
+rig_seconds: 60
+tests:
+  - name: sets_while_off  # §5.1
+    roles: [scene]
+    steps:
+      - set: {target: group, state: on, color_temp_kelvin: 6500}
+      - set: {target: group, state: off}
+      - call: {}
+      - expect_response: {status: expected, integration: self}
+      - wait: 1
+      - expect_state: {target: group, state: off}
+      - set: {target: group, state: on}
+      - observe: Did every light come on in the scene's colors and brightness?
+
+  - name: applies_while_on  # §5.2
+    roles: [scene]
+    steps:
+      - set: {target: group, state: on, color_temp_kelvin: 6500}
+      - call: {}
+      - expect_state: {target: group, state: on, within: tol}
+      - observe: Did the lights change to the scene straight away and stay on?
+
+  - name: no_stale_snapshot  # §5.3
+    roles: [scene]
+    steps:
+      - observe: Change one light's color in this scene in the Hue app. Done?
+      - set: {target: group, state: off}
+      - call: {}
+      - set: {target: group, state: on}
+      - observe: Did that light come on in its edited color?

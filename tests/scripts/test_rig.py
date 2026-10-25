@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 
 from custom_components.device_side.core.registry import AdapterRegistry
-from tests.rig.inventory import Inventory, RigModule, load_env, main_checkout, rig_modules
+from tests.rig.engine import load_step_files
+from tests.rig.inventory import Inventory, load_env, main_checkout
 
 REPO = Path(__file__).parents[2]
 _spec = importlib.util.spec_from_file_location("rig", REPO / "scripts" / "rig.py")
@@ -37,6 +38,12 @@ def inventory(tmp_path) -> Inventory:
 def test_inventory_rejects_unknown_role(tmp_path):
     path = write(tmp_path, "inventory.yaml", "shelly:\n  - entity_id: switch.plug\n    roles: [plug]\n")
     with pytest.raises(ValueError, match="unknown roles"):
+        Inventory.load(path)
+
+
+def test_inventory_rejects_unknown_integration(tmp_path):
+    path = write(tmp_path, "inventory.yaml", "z2m:\n  - entity_id: switch.plug\n    roles: [switch_plug]\n")
+    with pytest.raises(ValueError, match="unknown integration 'z2m'"):
         Inventory.load(path)
 
 
@@ -71,28 +78,35 @@ def test_load_env_reads_command_vars(tmp_path, monkeypatch):
     assert "RIG_RESTART_CMD" not in env
 
 
-def test_rig_modules_read_constants_without_importing():
-    shelly = next(module for module in rig_modules() if module.path.name == "test_shelly_turn_on_for.py")
-    assert (shelly.integration, shelly.action) == ("shelly", "turn_on_for")
-    assert shelly.roles == ("switch_plug", "light_onoff", "light_wrapped")
-    assert shelly.seconds > 0
-
-
-def test_select_and_plan_lines(inventory):
-    modules = [
-        RigModule(Path("test_shelly_turn_on_for.py"), "shelly", "turn_on_for", ("switch_plug", "light_dimmable"), 20),
-        RigModule(Path("test_hue_move.py"), "hue", "move", ("light_color",), 10),
-        RigModule(Path("test_zha_turn_on_for.py"), "zha", "turn_on_for", ("switch_plug",), 10),
+def test_select_plan_lines_and_estimate(inventory):
+    step_files = load_step_files()
+    suites = rig.select(step_files, inventory, None)
+    assert [(suite.integration, suite.action) for suite in suites] == [
+        ("shelly", "turn_off_for"), ("hue", "turn_off_for"), ("shelly", "turn_on_for"), ("hue", "turn_on_for"),
     ]
-    selected = rig.select(modules, inventory, None)
-    assert [module.integration for module in selected] == ["shelly", "hue"]
-    assert rig.select(modules, inventory, ["hue"]) == [modules[1]]
+    assert [suite.integration for suite in rig.select(step_files, inventory, ["hue"])] == ["hue", "hue"]
 
-    lines = rig.plan_lines(selected, inventory, AdapterRegistry.discover())
-    assert lines == [
+    registry = AdapterRegistry.discover()
+    shelly_on = [suite for suite in suites if suite.integration == "shelly" and suite.action == "turn_on_for"]
+    assert rig.plan_lines(shelly_on + suites[1:2], inventory, registry) == [
         "shelly / turn_on_for -> switch.plug (beta)",
-        "hue / move -> light.lamp (no adapter, will skip)",
+        "    on_then_off[switch_plug]: switch.plug",
+        "    on_then_off[light_onoff]: no light_onoff entity in inventory",
+        "    on_then_off[light_wrapped]: no light_wrapped entity in inventory",
+        "    refuses_brightness_on_a_wrapper[light_wrapped]: no light_wrapped entity in inventory",
+        "    refuses_brightness_out_of_scope[light_onoff]: no light_onoff entity in inventory",
+        "hue / turn_off_for (no adapter, will skip)",
     ]
+    assert rig.plan_lines(shelly_on, inventory, registry, "on_then") == [
+        "shelly / turn_on_for -> switch.plug (beta)",
+        "    on_then_off[switch_plug]: switch.plug",
+        "    on_then_off[light_onoff]: no light_onoff entity in inventory",
+        "    on_then_off[light_wrapped]: no light_wrapped entity in inventory",
+    ]
+
+    shelly_seconds = sum(step_file.rig_seconds for step_file in step_files)
+    assert rig.estimate(suites, registry, restarting=False) == shelly_seconds
+    assert rig.estimate(suites, registry, restarting=True) == shelly_seconds + rig.RESTART_ESTIMATE_S
 
 
 @pytest.mark.parametrize(("answer", "approved"), [("y", True), ("YES", True), ("", False), ("n", False)])
@@ -113,12 +127,6 @@ def test_gate_refuses_without_a_terminal(monkeypatch):
 def test_gate_env_approval_skips_the_prompt(monkeypatch):
     monkeypatch.setenv("DEVICE_SIDE_RIG_APPROVED", "1")
     assert rig.gate(lambda _: pytest.fail("prompted")) is True
-
-
-def test_rig_modules_name_a_missing_constant(tmp_path):
-    write(tmp_path, "test_shelly_turn_off_for.py", "ROLES = ['switch_plug']\n")
-    with pytest.raises(ValueError, match=r"test_shelly_turn_off_for.py: .*RIG_SECONDS"):
-        rig_modules(tmp_path)
 
 
 def fake_ha(monkeypatch, replies):

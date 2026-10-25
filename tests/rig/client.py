@@ -45,7 +45,7 @@ class HAClient:
         if (reply := await self._ws.receive_json())["type"] != "auth_ok":
             raise RuntimeError(f"WebSocket auth failed: {reply.get('message')}")
         self._reader = asyncio.create_task(self._read())
-        await self._command({"type": "subscribe_events", "event_type": "state_changed"})
+        await self.command({"type": "subscribe_events", "event_type": "state_changed"})
 
     async def close(self) -> None:
         if self._reader is not None:
@@ -67,7 +67,7 @@ class HAClient:
                     self._states[event["entity_id"]] = event["new_state"]
                     self._changed.notify_all()
 
-    async def _command(self, payload: dict) -> Any:
+    async def command(self, payload: dict) -> Any:
         msg_id = next(self._ids)
         future = asyncio.get_running_loop().create_future()
         self._pending[msg_id] = future
@@ -85,7 +85,7 @@ class HAClient:
         payload = {"type": "call_service", "domain": domain, "service": service, "service_data": data}
         if return_response:
             payload["return_response"] = True
-        result = await self._command(payload)
+        result = await self.command(payload)
         return result.get("response") if return_response else None
 
     async def get_state(self, entity_id: str) -> dict | None:
@@ -95,6 +95,10 @@ class HAClient:
             response.raise_for_status()
             state = await response.json()
         async with self._changed:
+            # An event that landed while the request was in flight is newer; keep it.
+            cached = self._states.get(entity_id)
+            if cached is not None and cached["last_updated"] > state["last_updated"]:
+                return cached
             self._states[entity_id] = state
         return state
 

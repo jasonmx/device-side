@@ -1,5 +1,3 @@
-import os
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -13,16 +11,6 @@ from custom_components.device_side.core.registry import AdapterRegistry
 from .fakes.scripted import SCRIPT
 
 FAKE_INTEGRATIONS = ["tests.fakes.broken_integration", "tests.fakes.fake_integration", "tests.fakes.fake_special"]
-
-RIG_DIR = Path(__file__).parent / "rig"
-
-
-def pytest_ignore_collect(collection_path: Path, config):
-    """Unit runs never import the rig: it talks to the live HA. scripts/rig.py sets DEVICE_SIDE_RIG=1."""
-    if collection_path == RIG_DIR and os.environ.get("DEVICE_SIDE_RIG") != "1":
-        return True
-    return None
-
 
 @pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations):
