@@ -49,7 +49,7 @@ def _write_for(light: Light, request: SetAttributesRequest) -> tuple[dict, bool]
         if light.color is None:
             dropped = True
         else:
-            write["color_xy"] = xy
+            write["color_xy"] = colors.clamp_to_gamut(light, xy)
     return write, dropped
 
 

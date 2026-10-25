@@ -33,8 +33,10 @@ class HueBridge:
         mirek: int | None = 370,
         mirek_valid: bool = True,
         xy: tuple[float, float] | None = None,
+        gamut: dict | None = None,
     ) -> str:
-        """A bulb and its device. brightness/mirek/xy None leave out the dimming/color_temperature/color feature."""
+        """A bulb and its device. brightness/mirek/xy None leave out the dimming/color_temperature/color feature;
+        gamut is the color feature's red/green/blue points, left out when None."""
         device_id = f"device-{light_id}"
         light: dict = {
             "id": light_id,
@@ -49,6 +51,8 @@ class HueBridge:
             light["color_temperature"] = {"mirek": mirek, "mirek_valid": mirek_valid, "mirek_schema": MIREK_SCHEMA}
         if xy is not None:
             light["color"] = {"xy": {"x": xy[0], "y": xy[1]}, "gamut_type": "C"}
+            if gamut is not None:
+                light["color"]["gamut"] = gamut
         device = {
             "id": device_id,
             "type": "device",

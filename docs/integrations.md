@@ -347,8 +347,6 @@ a scene the bridge no longer has is `rejected` with `scene_not_found`.
 
 ### Sharp edges
 
-- **No gamut clamp.** `set_attributes` sends a color outside a bulb's gamut as is, and the bulb
-  shows the nearest color it can.
 - **Large scenes are slow.** `set_scene` sends one write per light, one after another, and the
   bridge refuses more than 3 requests at once (aiohue retries with a growing wait), so a scene on a
   large room can take seconds to land.

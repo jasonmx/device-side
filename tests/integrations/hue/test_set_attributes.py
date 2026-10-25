@@ -2,7 +2,7 @@
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
-from homeassistant.util.color import color_hs_to_xy, color_RGB_to_xy
+from homeassistant.util.color import GamutType, XYPoint, check_point_in_lamps_reach, color_hs_to_xy, color_RGB_to_xy
 
 from ...conftest import call
 from ...fixtures.hue import add_hue_entity, add_hue_group, hue_entry
@@ -199,3 +199,34 @@ async def test_v1_bridge_is_refused(hass, bridge):
 
     assert raised.value.translation_placeholders["summary"] == "light.lamp: bridge_v1, light.room: bridge_v1"
     assert bridge.puts == []
+
+
+GAMUT_C = {"red": {"x": 0.6915, "y": 0.3083}, "green": {"x": 0.17, "y": 0.7}, "blue": {"x": 0.1532, "y": 0.0475}}
+
+
+async def test_color_inside_the_gamut_is_sent_unchanged(hass, bridge):
+    await lamp(hass, bridge, xy=(0.4, 0.4), gamut=GAMUT_C)
+
+    await call(hass, "set_attributes", {"entity_id": "light.lamp", "xy_color": [0.4, 0.4]})
+
+    assert bridge.puts == [("light/light-1", color((0.4, 0.4)))]
+
+
+async def test_color_outside_the_gamut_is_sent_at_the_nearest_edge(hass, bridge):
+    await lamp(hass, bridge, xy=(0.4, 0.4), gamut=GAMUT_C)
+
+    await call(hass, "set_attributes", {"entity_id": "light.lamp", "xy_color": [0.1, 0.9]})
+
+    ((_, put),) = bridge.puts
+    sent = (put["color"]["xy"]["x"], put["color"]["xy"]["y"])
+    assert check_point_in_lamps_reach(sent, GamutType(*(XYPoint(**GAMUT_C[k]) for k in ("red", "green", "blue"))))
+    assert sent != (0.1, 0.9)
+    assert sent[1] < 0.9
+
+
+async def test_color_is_sent_as_is_when_the_light_reports_no_gamut(hass, bridge):
+    await lamp(hass, bridge, xy=(0.4, 0.4))
+
+    await call(hass, "set_attributes", {"entity_id": "light.lamp", "xy_color": [0.1, 0.9]})
+
+    assert bridge.puts == [("light/light-1", color((0.1, 0.9)))]

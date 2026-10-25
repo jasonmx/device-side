@@ -2,7 +2,15 @@
 
 from typing import TYPE_CHECKING
 
-from homeassistant.util.color import color_hs_to_xy, color_RGB_to_xy, color_temperature_kelvin_to_mired
+from homeassistant.util.color import (
+    GamutType,
+    XYPoint,
+    check_point_in_lamps_reach,
+    color_hs_to_xy,
+    color_RGB_to_xy,
+    color_temperature_kelvin_to_mired,
+    get_closest_point_to_point,
+)
 
 from ...core.models import LightFields
 
@@ -29,6 +37,18 @@ def color_xy(fields: LightFields) -> tuple[float, float] | None:
     if fields.xy_color is not None:
         return (float(fields.xy_color[0]), float(fields.xy_color[1]))
     return None
+
+
+def clamp_to_gamut(light: Light, xy: tuple[float, float]) -> tuple[float, float]:
+    """The xy, or the nearest point of the light's gamut if outside it; as is for a light that reports no gamut."""
+    if light.color is None or (gamut := light.color.gamut) is None:
+        return xy
+    triangle = GamutType(
+        XYPoint(gamut.red.x, gamut.red.y), XYPoint(gamut.green.x, gamut.green.y), XYPoint(gamut.blue.x, gamut.blue.y)
+    )
+    if check_point_in_lamps_reach(xy, triangle):
+        return xy
+    return get_closest_point_to_point(xy, triangle)
 
 
 def mirek(light: Light, kelvin: float) -> int | None:
