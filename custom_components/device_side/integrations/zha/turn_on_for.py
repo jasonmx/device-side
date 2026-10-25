@@ -43,7 +43,7 @@ class ZHATurnOnFor(Adapter[TurnOnForRequest]):
         # The rig has ZHA bulbs but no ZHA plug, so switch stays out of scope until someone tests one.
         domains=frozenset({"light"}),
         duration=_TIMER_LIMITS,
-        fields=frozenset({"brightness"}),
+        fields=frozenset({"brightness", "color_temp_kelvin"}),
         max_concurrency=2,
         confirmable=True,
     )

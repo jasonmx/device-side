@@ -70,7 +70,7 @@ async def test_untested_field_is_refused(hass, setup_production, commands, turn_
     add_zha_entity(hass, zha_entry(hass), "light.bulb")
 
     with pytest.raises(HomeAssistantError) as raised:
-        await call(hass, "turn_on_for", {"entity_id": "light.bulb", "duration": 5, "color_temp_kelvin": 3000})
+        await call(hass, "turn_on_for", {"entity_id": "light.bulb", "duration": 5, "hs_color": [30, 50]})
 
     assert raised.value.translation_placeholders["summary"] == "light.bulb: fields_not_tested"
     assert not commands
