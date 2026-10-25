@@ -26,7 +26,7 @@ from tests.rig.inventory import Inventory, RigEntity
 
 TOL = 0.2
 PENDING: list[asyncio.TimerHandle | asyncio.Task] = []
-TOLERANCE = {"shelly": TOL, "zha": TOL, "fake": TOL}
+TOLERANCE = {"shelly": TOL, "zha": TOL, "hue": TOL, "fake": TOL}
 REGISTRY = AdapterRegistry.discover()
 
 ON_THEN_OFF = """
@@ -231,6 +231,37 @@ tests:
     assert outcomes(result)["fails[light_dimmable]"][0] is Outcome.FAIL
     assert ha.calls[-1] == ("light", "turn_on", {"entity_id": "light.lamp", "brightness": 50, "hs_color": [30, 50]})
     assert ha.states["light.lamp"]["state"] == "on"
+
+
+async def test_an_off_light_gets_its_device_side_attributes_back(tmp_path):
+    def device_side(ha, action, data):
+        entity_id = data["entity_id"]
+        if action == "get_attributes":
+            attributes = {"brightness": 40, "color_temp_kelvin": 2700, "xy_color": [0.46, 0.41]}
+            return {entity_id: {"status": "confirmed", "attributes": attributes}}
+        return {entity_id: {"status": "sent", "integration": "hue"}}
+
+    ha = FakeHA({"light.lamp": {}, "light.room": {"attributes": {"entity_id": ["light.lamp"]}}}, device_side)
+    text = """
+action: set_attributes
+rig_seconds: 5
+tests:
+  - name: brightens_while_off
+    roles: [group]
+    steps:
+      - call: {brightness: 200}
+"""
+    result = await run_one(ha, suite(tmp_path, text, "hue"), inventory("hue", group="light.room"))
+
+    assert outcomes(result) == {"brightens_while_off[group]": (Outcome.PASS, "")}
+    # Read for the member only: the room's own row averages its lights, and the member is restored itself.
+    assert [call for call in ha.calls if call[1] == "get_attributes"] == [
+        ("device_side", "get_attributes", {"entity_id": "light.lamp"})
+    ]
+    assert ha.calls[-2:] == [
+        ("light", "turn_off", {"entity_id": "light.lamp"}),
+        ("device_side", "set_attributes", {"entity_id": "light.lamp", "brightness": 40, "color_temp_kelvin": 2700}),
+    ]
 
 
 OBSERVED = ON_THEN_OFF + "      - observe: Did it click twice?\n"
@@ -491,6 +522,26 @@ async def test_set_activates_a_scene_without_waiting_on_its_state(tmp_path):
     result = await run_one(ha, suite(tmp_path, text), inventory(scene="scene.evening"))
     assert outcomes(result)["t[scene]"] == (Outcome.PASS, "")
     assert ("scene", "turn_on", {"entity_id": "scene.evening"}) in ha.calls
+
+
+async def test_set_waits_for_every_member_to_reach_the_brightness(tmp_path):
+    ha = FakeHA(
+        {
+            "light.room": {"state": "on", "attributes": {"entity_id": ["light.a"], "brightness": 255}},
+            "light.a": {"state": "on", "attributes": {"brightness": 255}},
+        }
+    )
+
+    async def slow_member(domain, service, data=None, return_response=False):
+        """The group reads the new brightness at once, its member only a moment later."""
+        ha.calls.append((domain, service, dict(data or {})))
+        ha.states["light.room"]["attributes"]["brightness"] = 51
+        PENDING.append(asyncio.get_running_loop().call_later(0.05, lambda: ha.set("light.a", "on", brightness=51)))
+
+    ha.call_service = slow_member
+    text = header("group") + "      - set: {state: on, brightness_pct: 20}\n      - expect_state: {brightness: 51}\n"
+    result = await run_one(ha, suite(tmp_path, text), inventory(group="light.room"))
+    assert outcomes(result)["t[group]"] == (Outcome.PASS, "")
 
 
 async def test_admin_integrations_run_on_the_admin_connection(tmp_path):

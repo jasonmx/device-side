@@ -15,7 +15,7 @@ def test_every_shipped_step_file_parses(path):
 
 def test_load_step_files_skips_the_examples():
     actions = {step_file.action for step_file in load_step_files()}
-    assert actions == {"turn_on_for", "turn_off_for"}
+    assert actions == {"get_attributes", "set_attributes", "set_scene", "turn_on_for", "turn_off_for"}
     assert actions <= set(AdapterRegistry.discover().actions)
 
 

@@ -13,3 +13,11 @@ shelly:
     roles: [light_onoff]
   - entity_id: light.porch_lamp
     roles: [light_wrapped]
+
+hue:
+  - entity_id: light.desk_lamp
+    roles: [light_ct]
+  - entity_id: light.living_room  # a room or zone; scene steps also point at it
+    roles: [group]
+  - entity_id: scene.living_room_relax  # a scene in that room
+    roles: [scene]

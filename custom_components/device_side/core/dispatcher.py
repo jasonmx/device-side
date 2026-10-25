@@ -55,7 +55,13 @@ class Dispatcher:
 
         results = (await action.run(self.hass, request, targets, self) if targets else []) + early
         order = {entity_id: index for index, entity_id in enumerate([*members, *empty_groups])}
-        results.sort(key=lambda result: order.get(result.entity_id, len(order)))
+        # A member row follows its group's row.
+        results.sort(
+            key=lambda result: (
+                order.get(result.entity_id, order.get(result.member_of, len(order))),
+                result.member_of is not None,
+            )
+        )
 
         if all(result.status in FAILED for result in results):
             summary = ", ".join(f"{result.entity_id}: {result.detail or result.status}" for result in results)
@@ -71,7 +77,8 @@ class Dispatcher:
     async def run_adapters(self, action_key: str, request: Request, targets: list[Target]) -> list[EntityResult]:
         """Bucket targets by adapter, expand native groups an adapter can't address, run every adapter concurrently.
 
-        Returns exactly one result per (expanded) target.
+        Returns exactly one result per (expanded) target, plus any member rows a native_groups adapter reports for
+        the groups it addressed.
         """
         results: list[EntityResult] = []
         buckets: dict[str, tuple[Adapter, list[Target]]] = {}
@@ -111,8 +118,10 @@ class Dispatcher:
                 expanded.append(target)
             elif expand is None:
                 results.append(adapter.result(target, Status.UNSUPPORTED, detail="group_not_supported"))
+            elif members := expand(self.hass, target):
+                expanded.extend(members)
             else:
-                expanded.extend(expand(self.hass, target))
+                results.append(adapter.result(target, Status.UNSUPPORTED, detail="empty_group"))
         seen: set[str] = set()
         return [target for target in expanded if not (target.reported_id in seen or seen.add(target.reported_id))]
 
@@ -140,21 +149,32 @@ class Dispatcher:
         clamped_to: float | None,
     ) -> list[EntityResult]:
         by_id: dict[str, EntityResult] = {}
+        member_rows: dict[str, EntityResult] = {}
         expected = {target.reported_id for target in targets}
+        groups = {target.reported_id for target in targets if target.is_group} if adapter.scope.native_groups else set()
         for result in raw:
-            if result.entity_id in by_id or result.entity_id not in expected:
+            if result.entity_id in expected and result.entity_id not in by_id:
+                by_id[result.entity_id] = result
+            elif result.member_of in groups and not (result.entity_id in expected or result.entity_id in member_rows):
+                # A member the caller also targeted keeps its own row.
+                member_rows[result.entity_id] = result
+            else:
                 _LOGGER.debug(
                     "%s on %s: dropping stray result for %s", adapter.action, adapter.integration, result.entity_id
                 )
-                continue
-            by_id[result.entity_id] = result
         ignored = bool(request.fields_present())
         out = []
         for target in targets:
             result = by_id.get(target.reported_id) or adapter.result(target, Status.REJECTED, detail="no_result")
-            if clamped_to is not None and result.clamped_to is None and result.status not in FAILED:
-                result = replace(result, clamped_to=clamped_to)
             if ignored and target.domain != "light" and result.detail is None:
                 result = replace(result, detail="light_fields_ignored")
             out.append(result)
-        return out
+        out += member_rows.values()
+        if clamped_to is None:
+            return out
+        return [
+            replace(result, clamped_to=clamped_to)
+            if result.clamped_to is None and result.status not in FAILED
+            else result
+            for result in out
+        ]

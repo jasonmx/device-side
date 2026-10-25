@@ -1,18 +1,8 @@
-# hue_dimmer tests/RELEASE_CHECKLIST.md §4 as steps. Only the parser tests load this until slice 7.
-# On the group role the set gives every member the same values, and expect_response checks each member's entry.
+# hue_dimmer tests/RELEASE_CHECKLIST.md §4.2 as steps. Only the parser tests load this until move lands (slice 7b),
+# when it joins steps/get_attributes.yaml.
 action: get_attributes
-rig_seconds: 40
+rig_seconds: 15
 tests:
-  - name: reads_while_off  # §4.1
-    roles: [light_color, group]
-    steps:
-      - set: {state: on, brightness: 102, color_temp_kelvin: 2700}
-      - set: {state: off}
-      - call: {}
-      - expect_response:
-          status: expected
-          attributes: {brightness: {min: 100, max: 104}, color_temp_kelvin: {min: 2650, max: 2750}}
-
   - name: predicts_mid_transition  # §4.2: about 40% three seconds in, not the 100% the bridge reports
     roles: [light_color, group]
     steps:

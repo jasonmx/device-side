@@ -407,14 +407,29 @@ class RunResult:
 
 @dataclass(slots=True)
 class Snapshot:
+    """Each touched entity's state, put back after the case.
+
+    HA shows no brightness or color for a light that is off, so with `device_side` set (the integration has
+    get_attributes and set_attributes adapters) an off light's device-side attributes are read when it is first
+    touched and written back after it is turned off again. A group is skipped there: its members are touched too.
+    """
+
     ha: HAClient
     power: dict[str, str] = field(default_factory=dict)  # Inventory.power(): entity -> its supply
+    device_side: bool = False
     taken: dict[str, dict | None] = field(default_factory=dict)
+    stored: dict[str, dict] = field(default_factory=dict)
 
     async def take(self, entity_id: str) -> dict | None:
         """The entity's state before the case moved it, and that of every entity it powers."""
         if entity_id not in self.taken:
-            self.taken[entity_id] = await self.ha.get_state(entity_id)
+            state = self.taken[entity_id] = await self.ha.get_state(entity_id)
+            if self.device_side and _is_off_light(entity_id, state):
+                response = await self.ha.call_service(
+                    "device_side", "get_attributes", {"entity_id": entity_id}, return_response=True
+                )
+                if attributes := ((response or {}).get(entity_id) or {}).get("attributes"):
+                    self.stored[entity_id] = attributes
             for powered, supply in self.power.items():
                 if supply == entity_id:
                     await self.take(powered)
@@ -453,17 +468,31 @@ class Snapshot:
         domain = entity_id.partition(".")[0]
         if state["state"] == "off":
             await self.ha.call_service(domain, "turn_off", {"entity_id": entity_id})
+            if (stored := self.stored.get(entity_id)) and (data := _light_data(stored)):
+                await self.ha.call_service("device_side", "set_attributes", {"entity_id": entity_id, **data})
             return
-        data = {"entity_id": entity_id}
-        if domain == "light":
-            attributes = state["attributes"]
-            if attributes.get("brightness") is not None:
-                data["brightness"] = attributes["brightness"]
-            for name in _RESTORE_COLOR:
-                if attributes.get(name) is not None:
-                    data[name] = attributes[name]
-                    break
-        await self.ha.call_service(domain, "turn_on", data)
+        data = _light_data(state["attributes"]) if domain == "light" else {}
+        await self.ha.call_service(domain, "turn_on", {"entity_id": entity_id, **data})
+
+
+def _is_off_light(entity_id: str, state: dict | None) -> bool:
+    """A light that is off and not a group (a group lists its members in its entity_id attribute)."""
+    return (
+        entity_id.startswith("light.")
+        and state is not None
+        and state["state"] == "off"
+        and "entity_id" not in state["attributes"]
+    )
+
+
+def _light_data(attributes: dict) -> dict:
+    """Brightness and the first color attribute light.turn_on (or set_attributes) accepts, from a light's attributes."""
+    data = {"brightness": attributes["brightness"]} if attributes.get("brightness") is not None else {}
+    for name in _RESTORE_COLOR:
+        if attributes.get(name) is not None:
+            data[name] = attributes[name]
+            break
+    return data
 
 
 def _value(state: dict, name: str) -> Any:
@@ -499,7 +528,14 @@ class _CaseRun:
         self.case, self.ha, self.registry, self.ask = case, ha, registry, ask
         self.integration = case.suite.integration
         self.names: dict[str, float] = {"tol": tolerance}
-        self.snapshot = Snapshot(ha, power or {})
+        self.snapshot = Snapshot(
+            ha,
+            power or {},
+            device_side=all(
+                registry.adapter(action, self.integration) is not None
+                for action in ("get_attributes", "set_attributes")
+            ),
+        )
         self.response: dict | None = None
         self.error: HAError | None = None
         self.last_action = case.suite.action
@@ -576,7 +612,13 @@ class _CaseRun:
             return
         service = "turn_on" if args["state"] == "on" else "turn_off"
         await self.ha.call_service(domain, service, {"entity_id": entity_id, **data})
-        await self.await_state(entity_id, {"state": args["state"]}, self.names["tol"])
+        want: dict[str, Any] = {"state": args["state"]}
+        if "brightness_pct" in data:
+            # A light already on reads "on" at once; wait for the brightness, so the bridge state the next call
+            # reads is the one just set. Hue rounds to its own 0-100 scale, so allow a step either side.
+            brightness = round(data["brightness_pct"] * 255 / 100)
+            want["brightness"] = {"min": brightness - 2, "max": brightness + 2}
+        await self.await_state(entity_id, want, self.names["tol"])
 
     async def _call(self, args: dict, following: str | None) -> None:
         action = args.get("action", self.case.suite.action)
