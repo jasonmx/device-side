@@ -148,6 +148,11 @@ requires it.
 - **Set Turn-On Levels dropped (2026-10-25):** `set_turn_on_defaults` (the level and fade a device
   remembers for a plain turn-on) is a big, complicated lift. Revisit once a large user base shows
   whether it's needed and what it should look like.
+- **ZHA's power-on settings are not a substitute (checked 2026-10-25):** its device config sets the
+  startup attributes (`StartUpOnOff`, `StartUpCurrentLevel`, `StartUpColorTemperatureMireds`), which
+  apply when mains power returns, not to an On command (`OnLevel`, not exposed). Its "smooth
+  transition power-on" option is HA-side sequencing of `light.turn_on`, not setting attributes while
+  off. Neither overlaps timed on/off, `move`/`stop` or `set_attributes`.
 - **Naming convention (fixed now; it is a 0-to-1 decision):**
   1. `verb_object`, HA vocabulary only. Objects are the names HA's own services and state
      attributes use (`brightness`, `color_temp`, `attributes`, `scene`); protocol vocabulary
