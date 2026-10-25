@@ -1,7 +1,7 @@
 # RC audit gate
 
 Goal: no `vX.Y.ZrcN` tag exists unless `/audit-code` has been run over the code it ships and no
-Critical or High finding is left open. Lands as part of slice 9 of
+Critical or High finding is left open. Lands as part of slice 9a of
 `2026-10-23-device-side-repo-plan.md` (it owns the tag-format check this reuses).
 
 ## Decisions
@@ -89,5 +89,5 @@ Replace "RCs are tagged `vX.Y.ZrcN` from it and run every tier." with:
 
 - `check_audit.py` tests green; `cut-rc` dry-run on a scratch `release/v0.0.0` branch refuses a
   missing record, an open High, and a post-audit code commit, then tags once fixed.
-- Slice 9 row in the repo plan and the CLAUDE.md Releases line point at this gate.
+- Slice 9a row in the repo plan and the CLAUDE.md Releases line point at this gate.
 - `v0.0.2rc1` is the first real RC cut through it (v0.0.1 ships without an RC; see slice 5).

@@ -237,8 +237,8 @@ requires it.
 - **Versions:** minimum HA set to a release within the last six months (2026.x) so no compat
   shims; tests pin current stable; Python 3.14 in CI; copy ruff, pre-commit, codespell,
   gitleaks, hassfest and HACS validate workflows from hue_dimmer. Releases go `v0.0.x` while
-  building; `v0.1.0` once this plan is feature complete and third-party testers have validated
-  the hardware the rig lacks.
+  building; `v0.1.0` once this plan is feature complete. Remote testers don't gate it: scope the
+  maintainer's rig can't reach stays out of scope and is refused until a tester report covers it.
 - **hue_dimmer:** deprecated with a migration guide, but only after device_side is
   feature-complete and stable, to spare existing Hue users regressions and churn.
 
@@ -501,7 +501,7 @@ and refused, not taken into scope on a sibling's proof. Adding a capability afte
 scope edit plus a record listing it; the fingerprint, and so the existing records, survive it. Tier ladder: see `CLAUDE.md`. A release-workflow check rejects tags not matching
 `^v\d+\.\d+\.\d+(rc\d+)?$`.
 
-Tester reports: RC builds raise one fixable Repairs issue ("vX.Y.ZrcN: help test on your
+Tester reports (slice 9b): RC builds raise one fixable Repairs issue ("vX.Y.ZrcN: help test on your
 hardware"). Its repair flow multi-selects the RC's requested tests (each an adapter and capability, e.g.
 Shelly `turn_on_for` on the `Light` component) that match the user's own entities; each chosen test
 becomes a non-fixable Repairs issue ("Test wanted: <integration> · <capability> on <device model>") whose
@@ -598,10 +598,16 @@ in-use household lights.** Rig passes are recorded in `docs/bench/<integration>/
 | 6 | Z2M `turn_on_for` | detect, addressing, publish; `light.turn_on` precedes when fields present; group topic when `native_groups`; rig test. |
 | 7 | Hue port | five adapters + bridge/transition_cache/colors; `move` across brightness, color_temp, hue, saturation; `grouped_light` native for move/stop, expanded for set/get_attributes; hue_dimmer tests ported to real-hass fixtures; rig parity with hue_dimmer `tests/RELEASE_CHECKLIST.md`; then Hue `turn_on_for`/`turn_off_for` once open item 10 is answered (`experimental=True`), with `cancel_delayed_toggle` across all integrations if the cancel contract needs it. |
 | 8 | Docs generator + templates | `gen_docs.py --check` in CI; matrix, README block, action pages, `integrations.md` sections; `_notes.yaml`; contributing guides. Lands before the first v0.0.2 RC. |
-| 9 | Bench + tiers + tester flow | **plan in /plan first** (interview the maintainer before any code); automated tester runner: standalone file (`uv run`, PEP 723 inline metadata, aiohttp WebSocket + PyYAML), talks to HA_URL + long-lived token, assumes integration installed via HACS or by hand (no deploy); `tests/rig/client.py` moved to a location both the runner and `scripts/rig.py` import; rig tests converted to declarative YAML step files (set state → call action → expect → restore), keyed by inventory roles so the user maps roles to their own entities; `--dry-run` prints the steps with entities filled in; confirmation gate on every run; `scripts/rig.py` uses the same YAML step files for the maintainer's rig; runner prints a prefilled test-report issue body (pass/fail per step, HA version, device model, firmware, adapter fingerprint) feeding `test-report.yml` and bench records; `testing.md` updated: dedicated non-admin HA user for the token; check whether ZHA admin context needs an exception; fingerprinting and computed tiers in `gen_docs.py`, including the scope-coverage check; per-adapter coverage check; tag-format check; RC audit gate (`2026-10-23-rc-audit-gate.md`: `cut-rc` workflow, `check_audit.py`, `/rc-audit`); `test-report.yml` issue form; RC-only umbrella Repairs issue with multi-select flow and prefilled per-test links; bench files filled from rig runs and tester reports. Lands before the first v0.0.2 RC, which is the project's first RC. |
+| 9a | Bench + tiers + release gates | **plan in /plan first** (interview the maintainer before any code); fingerprinting and computed tiers in `gen_docs.py`, including the scope-coverage check; per-adapter coverage check; tag-format check; RC audit gate (`2026-10-23-rc-audit-gate.md`: `cut-rc` workflow, `check_audit.py`, `/rc-audit`); rig tests converted to declarative YAML step files (set state → call action → expect → restore), keyed by inventory roles so a tester can later map roles to their own entities; `scripts/rig.py` runs the step files, `--dry-run` prints the steps with entities filled in; each rig run prints the bench record fields (pass/fail per step, HA version, device model, firmware, adapter fingerprint); `test-report.yml` issue form (bug reports need it whenever 9b lands); `testing.md` updated: dedicated non-admin HA user for the token; check whether ZHA admin context needs an exception; bench files filled from rig runs. Lands before the first v0.0.2 RC, which is the project's first RC. |
 | 10 | ZHA `turn_on_for` | after Jason has ZHA running on the rig; addressing; admin context passthrough; ValueError -> rejected; rig test. |
 | 11 | Matter `turn_on_for` | after Jason has Matter running on the rig; LT check; `OnWithTimedOff`; optional read-back; rig test on bulb and plug. |
-| 12 | `v0.1.0` ("v1" names the scope, not the version) | feature complete for this plan; third-party tester reports for the hardware the rig lacks; matrix current; release checklist adapted from hue_dimmer. |
+| 12 | `v0.1.0` ("v1" names the scope, not the version) | feature complete for this plan; scope limited to what rig runs (and any tester reports) cover; matrix current; release checklist adapted from hue_dimmer. |
+| 9b | Remote tester flow (after `v0.1.0`) | **plan in /plan first**; starts when an adapter needs hardware the rig lacks (a reported bug on someone else's device, a community integration such as Z-Wave JS). Standalone tester runner: one file (`uv run`, PEP 723 inline metadata, aiohttp WebSocket + PyYAML), talks to HA_URL + long-lived token, assumes integration installed via HACS or by hand (no deploy), runs 9a's YAML step files with a confirmation gate on every run; `tests/rig/client.py` moved to a location both the runner and `scripts/rig.py` import; runner prints a prefilled `test-report.yml` issue body; RC-only umbrella Repairs issue with multi-select flow and prefilled per-test links; bench files filled from tester reports. |
+
+Slice 9 was split on 2026-10-25. Color bulbs from Shelly and Hue let the maintainer's rig cover the v1
+integrations, so v0.1.0 needs no remote testers and the tester tooling moves to 9b. Hardware the rig still
+lacks (plugs on ZHA, Z2M and Matter; a Thread-native Matter bulb; Shelly components beyond the bulb's) stays
+out of scope until someone tests it.
 
 `v0.0.x` releases are cut between slices whenever a set of adapters reaches beta; one release may carry
 several integrations or actions.
