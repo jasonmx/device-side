@@ -223,8 +223,6 @@ devices may differ.
   (about 1.8 hours). A longer duration is clamped and the result carries `clamped_to`.
 - **Turning the light on keeps the timer.** On the tested bulb, someone who turns the light on or
   changes its brightness during a timer still sees it switch off when the timer ends.
-- **No confirmation.** The result is `sent`, never `confirmed`: Device Side doesn't read the
-  timer back yet.
 
 ## Matter
 
