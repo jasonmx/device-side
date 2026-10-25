@@ -191,8 +191,24 @@ Lights only, with `brightness` as the only field, until each is tested on hardwa
 
 ### Cancelling
 
-Send a regular `light.turn_on` or `light.turn_off`. The Zigbee spec says `On` and `Off` clear the
-device's `OnTime`, so the timer stops. A second `turn_on_for` replaces the first.
+Send `light.turn_off`. Turning the light on again does not cancel the timer on the one bulb tested
+(below), so don't rely on it. A second `turn_on_for` replaces the first.
+
+### Tested behavior
+
+How a device treats a running timer is up to its firmware, so this holds only for the bulb it was
+measured on: a Philips Hue LTA004, firmware `0x01001416`, on Home Assistant 2026.10.2. Other
+devices may differ.
+
+- **The timer is readable.** `OnTime` (attribute `0x4001`) counts down in tenths of a second
+  (a 30 s timer read 290, 250, 200 and 99 at 1, 5, 10 and 20 s), and the bulb turned off at 30.2 s.
+  `OnTime` reads 0 when no timer is running.
+- **A new timer replaces the old one,** in both directions: 60 s then 20 s left 20 s; 20 s then
+  60 s left 60 s.
+- **`light.turn_on` does not cancel it.** A plain `light.turn_on` (ZHA sends `On`) and one with
+  `brightness` (ZHA sends `move_to_level_with_on_off`) both left the timer running, and the bulb
+  still turned off on time.
+- **`light.turn_off` cancels it.** After off then on, `OnTime` read 0.
 
 ### Sharp edges
 
@@ -201,6 +217,8 @@ device's `OnTime`, so the timer stops. A second `turn_on_for` replaces the first
   detail `admin_required`. Automations run without a user, so they pass.
 - **Duration limits.** `on_time` is a uint16 in tenths of a second, so the maximum is 6553.4 s
   (about 1.8 hours). A longer duration is clamped and the result carries `clamped_to`.
+- **Turning the light on keeps the timer.** On the tested bulb, someone who turns the light on or
+  changes its brightness during a timer still sees it switch off when the timer ends.
 - **No confirmation.** The result is `sent`, never `confirmed`: Device Side doesn't read the
   timer back yet.
 

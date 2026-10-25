@@ -636,7 +636,10 @@ the first action of that session is slice 0.
    non-success ZCL status and zigpy raises on delivery failure, so a returned call is `SENT`. Params
    `on_off_control`, `on_time`, `off_wait_time`, `command_type: server`. A light's unique_id is
    `{ieee}-{endpoint}`; group entities are `{platform}_zha_group_0x{id:04x}`. A non-admin caller gets
-   `Unauthorized` -> `REJECTED`/`admin_required`. Still open: whether the OnTime read-back works for `CONFIRMED`.
+   `Unauthorized` -> `REJECTED`/`admin_required`. OnTime read-back works on the rig's Hue bulb (counts
+   down live; a new timer replaces the old), so `CONFIRMED` = OnTime at or just under the request. An
+   adapter can only read it through ZHA internals (`get_zha_gateway`); the public read is an admin
+   websocket command. Per-device results: `docs/integrations.md`, ZHA, Tested behavior.
 4. Z2M: `zigbee2mqtt_` identifier prefix [M]; IEEE as topic segment [M]; `command_topic` from the
    entity object vs base-topic derivation; whether `on_time` + `brightness` in one payload is
    safe (would remove the two-step on Z2M).
