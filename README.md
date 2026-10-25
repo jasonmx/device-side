@@ -39,12 +39,12 @@ If you're OK with that, let's dive in.
 
 |                        |         Shelly          | Zigbee2MQTT | ZHA | Matter | Hue |
 |:---------------------- |:-----------------------:|:-----------:|:---:|:------:|:---:|
-| On With Timed Off      | ✨ switches<br>🙋 lights |          |   |      |   |
-| Off With Timed On      | ✨ switches<br>🙋 lights |     ❌      | ❌  |   ❌   |   |
+| On With Timed Off      | ✅ switches<br>🙋 lights |          |   |      |   |
+| Off With Timed On      | ✅ switches<br>🙋 lights |     ❌      | ❌  |   ❌   |   |
 | Smooth Dimming         |                         |           |   |      | ✅¹ |
 | Set Without Turning On |                         |           |   |      | ✅¹ |
 
-✅ Stable · ✨ Newly released · 🙋 Ready for release once a [volunteer tests it](CONTRIBUTING.md) · ❌ Appears not possible
+✅ Stable · 🙋 Ready for release once a [volunteer tests it](CONTRIBUTING.md) · ❌ Appears not possible
 
 ¹ Available now in [Hue Smooth Dimming](https://github.com/jasonmx/hue-smooth-dimming). Details per integration are in [docs/integrations.md](docs/integrations.md).
 
