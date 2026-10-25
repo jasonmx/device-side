@@ -31,6 +31,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
 from custom_components.device_side.core.registry import AdapterRegistry  # noqa: E402
+from scripts.check_tiers import BENCH_DIR, compute  # noqa: E402
 from tests.rig.client import HAClient  # noqa: E402
 from tests.rig.engine import (  # noqa: E402
     ADMIN_INTEGRATIONS,
@@ -77,21 +78,20 @@ def select(step_files: list[StepFile], inventory: Inventory, integrations: list[
 
 
 def plan_lines(
-    suites: list[Suite], inventory: Inventory, registry: AdapterRegistry, keyword: str | None = None
+    suites: list[Suite],
+    inventory: Inventory,
+    registry: AdapterRegistry,
+    keyword: str | None = None,
+    bench_dir: Path = BENCH_DIR,
 ) -> list[str]:
-    """Per adapter about to run: the household entities it will move and its declared tier, then each test case."""
+    """Per adapter about to run: the household entities it will move and its tier now, then each test case."""
+    tiers = {(tier.action, tier.integration): tier.tier for tier in compute(registry, bench_dir)[0]}
     lines = []
     for suite in suites:
-        adapter = registry.adapter(suite.action, suite.integration)
-        if adapter is None:
+        if registry.adapter(suite.action, suite.integration) is None:
             lines.append(f"{suite.integration} / {suite.action} (no adapter, will skip)")
             continue
-        # A bench record counts as beta here; slice 9c checks it against the adapter's fingerprint.
-        bench = REPO / "docs" / "bench" / suite.integration / f"{suite.action}.md"
-        if adapter.scope.experimental:
-            tier = "experimental"
-        else:
-            tier = "beta" if bench.exists() else "untested"
+        tier = tiers[(suite.action, suite.integration)]
         roles = suite.file.roles
         entities = [entity for role in roles if (entity := inventory.entity(suite.integration, role))]
         targets = ", ".join(dict.fromkeys(entities)) or "no entity, will skip"
@@ -323,7 +323,7 @@ async def run_rig(
         )
         source = f"rig run (`scripts/rig.py`), commit `{git('rev-parse', '--short', 'HEAD')}`"
         today = datetime.date.today().isoformat()
-        for path in await write_records(result, ha, registry, REPO / "docs" / "bench", today, source):
+        for path in await write_records(result, ha, registry, BENCH_DIR, today, source):
             print(f"Wrote {path.relative_to(REPO)}; review the diff before committing it.")
     finally:
         await ha.close()
