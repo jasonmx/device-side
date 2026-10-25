@@ -1,9 +1,8 @@
-"""The rig's household entities and connection settings. Shared by scripts/rig.py and the rig fixtures.
+"""The rig's household entities and connection settings. Shared by scripts/rig.py and the rig engine.
 
 Pure file reading, no HA or pytest imports, so the runner's preflight can load it before anything mutates.
 """
 
-import ast
 import os
 import subprocess
 from dataclasses import dataclass, field
@@ -78,31 +77,3 @@ def load_env(path: Path = ENV_FILE) -> dict[str, str]:
         if key in os.environ:
             env[key] = os.environ[key]
     return env
-
-
-@dataclass(frozen=True, slots=True)
-class RigModule:
-    """One rig test module, read without importing it: test_<integration>_<action>.py with literal constants."""
-
-    path: Path
-    integration: str
-    action: str
-    roles: tuple[str, ...]
-    seconds: int
-
-
-def rig_modules(rig_dir: Path = RIG_DIR) -> list[RigModule]:
-    # Only plain module-level `NAME = <literal>` assignments count; `ROLES += [...]` is not read.
-    modules = []
-    for path in sorted(rig_dir.glob("test_*.py")):
-        integration, _, action = path.stem.removeprefix("test_").partition("_")
-        constants = {
-            node.targets[0].id: ast.literal_eval(node.value)
-            for node in ast.parse(path.read_text()).body
-            if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
-            and node.targets[0].id in {"ROLES", "RIG_SECONDS"}
-        }
-        if missing := {"ROLES", "RIG_SECONDS"} - constants.keys():
-            raise ValueError(f"{path.name}: missing module-level constant(s) {sorted(missing)}")
-        modules.append(RigModule(path, integration, action, tuple(constants["ROLES"]), constants["RIG_SECONDS"]))
-    return modules

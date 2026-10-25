@@ -8,7 +8,6 @@ requires-python = ">=3.14.2"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-markers = ["rig: drives the live rig HA; run through scripts/rig.py only"]
 
 [tool.ruff]
 line-length = 120

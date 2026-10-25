@@ -1,0 +1,24 @@
+# The device's own timer turns the target back on. Same relay-call argument as turn_on_for: a pass on any of the
+# three on/off roles proves on/off for all.
+action: turn_off_for
+rig_seconds: 35
+tests:
+  - name: off_then_on
+    roles: [switch_plug, light_onoff, light_wrapped]
+    steps:
+      - set: {state: on}
+      - call: {duration: 6}
+      - expect_response: {status: expected, integration: self}
+      - expect_state: {state: off, within: tol}
+      - wait: duration - tol
+      - expect_state: {state: off}
+      - expect_state: {state: on, within: 2 * tol}
+
+  # Shelly's Light component is out of scope until a tester reports on it.
+  - name: refuses_a_dimmer_out_of_scope
+    roles: [light_dimmable]
+    only: [shelly]
+    steps:
+      - call: {duration: 6}
+      - expect_error: {key: all_targets_failed, summary: capability_not_tested}
+      - expect_state: {state: unchanged}

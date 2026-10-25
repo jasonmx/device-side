@@ -5,12 +5,15 @@ The rig is the household's own Home Assistant and its in-use lights. Nothing cha
 preflight reads the inventory, the adapter registry and the deployed tree hash, prints what will run, then asks.
 DEVICE_SIDE_RIG_APPROVED=1 answers the gate for a non-interactive caller that already has a human's yes.
 
-One run at a time: a lock in the git common dir, shared by every worktree, refuses a second.
+One run at a time: a lock in the git common dir, shared by every worktree, refuses a second. The tests are the
+step files in tests/rig/steps, run by tests/rig/engine.py; a full pass of an adapter rewrites its bench record.
 
-Usage: scripts/rig.py [--dry-run] [--no-deploy] [--no-restart] [--integration KEY ...] [-k EXPR]
+Usage: scripts/rig.py [--dry-run] [--no-deploy] [--no-restart] [--unattended] [--integration KEY ...] [-k TEXT]
 """
 
 import argparse
+import asyncio
+import datetime
 import fcntl
 import json
 import os
@@ -28,7 +31,9 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
 from custom_components.device_side.core.registry import AdapterRegistry  # noqa: E402
-from tests.rig.inventory import INVENTORY, Inventory, RigModule, load_env, rig_modules  # noqa: E402
+from tests.rig.client import HAClient  # noqa: E402
+from tests.rig.engine import StepFile, Suite, cases, load_step_files, run, write_records  # noqa: E402
+from tests.rig.inventory import INVENTORY, Inventory, load_env  # noqa: E402
 
 COMPONENT = "custom_components/device_side"
 SERVICE = ("device_side", "turn_on_for")
@@ -53,32 +58,44 @@ def git(*args: str, check: bool = True) -> str:
     return subprocess.run(["git", "-C", str(REPO), *args], check=check, capture_output=True, text=True).stdout.strip()
 
 
-def select(modules: list[RigModule], inventory: Inventory, integrations: list[str] | None) -> list[RigModule]:
+def select(step_files: list[StepFile], inventory: Inventory, integrations: list[str] | None) -> list[Suite]:
+    """Every step file on every inventory integration, narrowed to --integration."""
     return [
-        module
-        for module in modules
-        if module.integration in inventory.integrations and (not integrations or module.integration in integrations)
+        Suite(step_file, integration)
+        for step_file in step_files
+        for integration in inventory.integrations
+        if not integrations or integration in integrations
     ]
 
 
-def plan_lines(modules: list[RigModule], inventory: Inventory, registry: AdapterRegistry) -> list[str]:
-    """One line per adapter about to run: which household entities it will move, and the adapter's declared tier."""
+def plan_lines(
+    suites: list[Suite], inventory: Inventory, registry: AdapterRegistry, keyword: str | None = None
+) -> list[str]:
+    """Per adapter about to run: the household entities it will move and its declared tier, then each test case."""
     lines = []
-    for module in modules:
-        adapter = registry.adapter(module.action, module.integration)
+    for suite in suites:
+        adapter = registry.adapter(suite.action, suite.integration)
         if adapter is None:
-            tier = "no adapter, will skip"
+            lines.append(f"{suite.integration} / {suite.action} (no adapter, will skip)")
+            continue
+        # A bench record counts as beta here; slice 9c checks it against the adapter's fingerprint.
+        bench = REPO / "docs" / "bench" / suite.integration / f"{suite.action}.md"
+        if adapter.scope.experimental:
+            tier = "experimental"
         else:
-            # A hand-written bench record counts as beta; slice 9 checks it against the adapter's fingerprint.
-            bench = REPO / "docs" / "bench" / module.integration / f"{module.action}.md"
-            if adapter.scope.experimental:
-                tier = "experimental"
-            else:
-                tier = "beta" if bench.exists() else "untested"
-        entities = [entity for role in module.roles if (entity := inventory.entity(module.integration, role))]
-        targets = ", ".join(entities) or "no entity, will skip"
-        lines.append(f"{module.integration} / {module.action} -> {targets} ({tier})")
+            tier = "beta" if bench.exists() else "untested"
+        roles = suite.file.roles
+        entities = [entity for role in roles if (entity := inventory.entity(suite.integration, role))]
+        targets = ", ".join(dict.fromkeys(entities)) or "no entity, will skip"
+        lines.append(f"{suite.integration} / {suite.action} -> {targets} ({tier})")
+        for case in cases(suite, inventory, keyword):
+            lines.append(f"    {case.id}: {case.skip or ', '.join(dict.fromkeys(case.entities.values()))}")
     return lines
+
+
+def estimate(suites: list[Suite], registry: AdapterRegistry, restarting: bool) -> int:
+    seconds = sum(suite.file.rig_seconds for suite in suites if registry.adapter(suite.action, suite.integration))
+    return seconds + (RESTART_ESTIMATE_S if restarting else 0)
 
 
 def deployed_tree(status_cmd: str) -> str | None:
@@ -194,7 +211,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-deploy", action="store_true", help="test whatever HA already runs")
     parser.add_argument("--no-restart", action="store_true", help="sync the integration but do not restart HA")
     parser.add_argument("--integration", action="append", help="limit to an integration key (repeatable)")
-    parser.add_argument("-k", dest="keyword", help="passed to pytest -k")
+    parser.add_argument("-k", dest="keyword", help="run only test cases whose id contains this text")
+    parser.add_argument("--unattended", action="store_true", help="skip observe steps, reporting them not observed")
     args = parser.parse_args(argv)
 
     if not args.dry_run:
@@ -206,13 +224,14 @@ def main(argv: list[str] | None = None) -> int:
     if not INVENTORY.exists():
         raise SystemExit(f"{INVENTORY} is absent; copy inventory.example.yaml and fill it in")
     inventory = Inventory.load()
-    modules = select(rig_modules(), inventory, args.integration)
-    if not modules:
+    registry = AdapterRegistry.discover()
+    suites = select(load_step_files(), inventory, args.integration)
+    if not any(registry.adapter(suite.action, suite.integration) for suite in suites):
         raise SystemExit("No rig test matches the inventory's integrations.")
     deploy = deploy_state(env.get("RIG_STATUS_CMD", ""))
     deploying = deploy.needed and not args.no_deploy
     restarting = deploying and not args.no_restart
-    print_plan(inventory, modules, deploy, deploying, restarting)
+    print_plan(inventory, suites, registry, args.keyword, deploy, deploying, restarting)
 
     if deploying:
         check_deploy(env, args.no_restart, deploy)
@@ -233,18 +252,24 @@ def main(argv: list[str] | None = None) -> int:
         }
         subprocess.run(command, check=True, env=deploy_env)
     wait_until_ready(env["HA_URL"].rstrip("/"), env["HA_TOKEN"], READY_TIMEOUT_S if restarting else 15)
-    return run_pytest(modules, args.keyword)
+    return asyncio.run(run_rig(env, suites, inventory, registry, args.keyword, args.unattended))
 
 
 def print_plan(
-    inventory: Inventory, modules: list[RigModule], deploy: Deploy, deploying: bool, restarting: bool
+    inventory: Inventory,
+    suites: list[Suite],
+    registry: AdapterRegistry,
+    keyword: str | None,
+    deploy: Deploy,
+    deploying: bool,
+    restarting: bool,
 ) -> None:
     print(f"Inventory ({INVENTORY}):")
     for integration, entities in inventory.integrations.items():
         for entity in entities:
             print(f"  {integration:8} {entity.entity_id:40} {', '.join(sorted(entity.roles))}")
     print("Adapters:")
-    for line in plan_lines(modules, inventory, AdapterRegistry.discover()):
+    for line in plan_lines(suites, inventory, registry, keyword):
         print(f"  {line}")
     print(f"Integration: local {deploy.local_tree[:12]}, deployed {(deploy.deployed_tree or 'none')[:12]}")
     if deploying:
@@ -253,17 +278,30 @@ def print_plan(
         print("Deploy: skipped (--no-deploy); the tests exercise the deployed tree, not this checkout")
     else:
         print("Deploy: not needed, no restart")
-    estimate = sum(module.seconds for module in modules) + (RESTART_ESTIMATE_S if restarting else 0)
-    print(f"Estimated duration: {estimate} s. These are in-use household devices; they will visibly change state.")
+    seconds = estimate(suites, registry, restarting)
+    print(f"Estimated duration: {seconds} s. These are in-use household devices; they will visibly change state.")
 
 
-def run_pytest(modules: list[RigModule], keyword: str | None) -> int:
-    args = [sys.executable, "-m", "pytest", *(str(module.path) for module in modules)]
-    # The HA test plugin blocks sockets and fakes hass; the unit conftest above tests/rig needs that plugin.
-    args += ["--confcutdir", str(REPO / "tests" / "rig"), "-p", "no:homeassistant", "-p", "no:cacheprovider"]
-    args += ["-v", "-rs", *(["-k", keyword] if keyword else [])]
-    rig_env = {**os.environ, "DEVICE_SIDE_RIG": "1", "DEVICE_SIDE_RIG_APPROVED": "1"}
-    return subprocess.run(args, cwd=REPO, env=rig_env).returncode
+async def run_rig(
+    env: dict,
+    suites: list[Suite],
+    inventory: Inventory,
+    registry: AdapterRegistry,
+    keyword: str | None,
+    unattended: bool,
+) -> int:
+    """Run the step files, then write a bench record for each adapter whose every test passed."""
+    ha = HAClient(env["HA_URL"], env["HA_TOKEN"])
+    await ha.connect()
+    try:
+        result = await run(suites, inventory, registry, ha, keyword=keyword, ask=None if unattended else input)
+        source = f"rig run (`scripts/rig.py`), commit `{git('rev-parse', '--short', 'HEAD')}`"
+        today = datetime.date.today().isoformat()
+        for path in await write_records(result, ha, registry, REPO / "docs" / "bench", today, source):
+            print(f"Wrote {path.relative_to(REPO)}; review the diff before committing it.")
+    finally:
+        await ha.close()
+    return 1 if result.failed else 0
 
 
 if __name__ == "__main__":
