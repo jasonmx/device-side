@@ -107,6 +107,13 @@ the device's IEEE address for individual devices.
 Device Side builds the command topic from the identifier: `zigbee2mqtt/<address>/set`. This assumes
 the default Z2M base topic; see Sharp edges if you changed it.
 
+The topic uses the IEEE address, which Z2M accepts alongside the `friendly_name`, so it still
+reaches a renamed device (`resolveEntity` in
+[`lib/zigbee.ts`](https://github.com/Koenkk/zigbee2mqtt/blob/master/lib/zigbee.ts) looks the
+segment up with `getDevice` in
+[`lib/util/settings.ts`](https://github.com/Koenkk/zigbee2mqtt/blob/master/lib/util/settings.ts),
+which matches the IEEE-keyed `devices` map before `friendly_name`).
+
 ### `turn_on_for`
 
 For **light entities without fields**: publishes `{"state":"ON","on_time":<seconds>}` to the
@@ -143,10 +150,6 @@ firmware. Most Z2M-supported lights cancel the timer on any state change.
 - **Duration limits.** Zigbee `on_time` is a uint16 in tenths of a second, so the maximum is
   65534 tenths = 6553.4 s (about 1.8 hours). A duration over 6553.4 s is clamped and the result
   carries `clamped_to`. Durations under 50 ms are floored to 50 ms.
-- **Renamed devices.** Z2M names a device's topic after its IEEE address, or its `friendly_name`
-  if one is set. Device Side always publishes to the IEEE topic. Z2M's docs don't say whether
-  that topic still reaches a device after it is renamed, so this is unverified until a rig run
-  covers it.
 - **Custom base topic.** If Z2M is configured with a base topic other than `zigbee2mqtt`, the
   command topic Device Side builds will be wrong and the publish will reach no device. Check your
   Z2M configuration; there is no workaround in v1.
