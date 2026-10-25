@@ -57,3 +57,10 @@ Work in worktree `wt/zha-confirm` off `release/v0.0.2`. First commit this plan a
 - **Ask Jason before the rig run.** Then run `scripts/rig.py` on the ZHA suites only, with the admin token. Expect `confirmed` on the bulb steps.
 - Write the new `docs/bench/zha/turn_on_for.md` record with the new fingerprint, and check that `scripts/check_tiers.py` still reports experimental.
 - Open a PR into `release/v0.0.2`, run `ci-green wt/zha-confirm` in the background, squash-merge, and remove the worktree and branch.
+
+## Amendment (rig, 2026-10-25)
+
+With OnTime read alone, `bulb_on_then_off` failed twice: the call returned `confirmed`, but HA's state stayed
+`off`. HA learns a ZHA light is on only from an OnOff attribute event, and the bulb's report never came after the
+immediate read. zigpy emits an event for every value it reads, so `zcl.read_attributes` now reads OnOff and OnTime
+in one request, and `confirmed` also requires OnOff on (Jason).

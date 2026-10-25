@@ -1,5 +1,5 @@
 """ZHA turn_on_for: optional light.turn_on for fields, OnWithTimedOff through zha.issue_zigbee_cluster_command,
-then an OnTime read-back."""
+then an OnOff and OnTime read-back."""
 
 import logging
 from typing import ClassVar
@@ -32,8 +32,11 @@ class ZHATurnOnFor(Adapter[TurnOnForRequest]):
     issue_zigbee_cluster_command is an admin-only action, so the call carries the caller's context: a non-admin
     caller is refused by ZHA, not let through with Device Side's own rights. The zha library raises on a
     delivery failure or a non-success ZCL status, so a command that returns was accepted. A new timer replaces a
-    running one, so reading OnTime straight back shows whether ours is running: CONFIRMED when it sits within
-    _READBACK_SLACK_TENTHS under the request, otherwise SENT with a detail.
+    running one, so reading OnTime straight back shows whether ours is running: CONFIRMED when the light reads on
+    and OnTime sits within _READBACK_SLACK_TENTHS under the request, otherwise SENT with a detail.
+
+    The read takes OnOff too. Read alone, OnTime left HA's state off on the rig's Hue bulb, which never reported
+    turning on; the OnOff read updates the entity itself.
     """
 
     action: ClassVar[str] = "turn_on_for"
@@ -95,9 +98,11 @@ class ZHATurnOnFor(Adapter[TurnOnForRequest]):
                 return self.result(target, Status.REJECTED, detail="admin_required")
 
             # The comparison sits in the try too: a value it can't compare is a failed read, not a failed command.
+            lowest = max(1, on_time - _READBACK_SLACK_TENTHS)
             try:
-                remaining = await zcl.read_attribute(hass, addr, zcl.ON_OFF_CLUSTER, zcl.ON_TIME)
-                running = 0 < remaining and on_time - _READBACK_SLACK_TENTHS <= remaining <= on_time
+                values = await zcl.read_attributes(hass, addr, zcl.ON_OFF_CLUSTER, [zcl.ON_OFF, zcl.ON_TIME])
+                # on_off arrives as zigpy's t.Bool enum, so it's tested for truth rather than compared to True.
+                running = bool(values[zcl.ON_OFF]) and lowest <= values[zcl.ON_TIME] <= on_time
             except Exception as err:  # noqa: BLE001 - zha and zigpy errors can't be imported here; see zcl.py
                 _LOGGER.debug("%s read-back failed for %s: %s", self.action, target.entity_id, err)
                 return self.result(target, Status.SENT, detail="readback_failed")
