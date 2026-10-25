@@ -4,8 +4,8 @@
 |---|---|
 | Result | pass |
 | Date | 2026-10-25 |
-| Source | rig run (`scripts/rig.py`), commit `1d12461` |
-| Fingerprint | `a0fef920e49c0716` (`integrations/zha/turn_on_for.py`) |
+| Source | rig run (`scripts/rig.py`), commit `8c5d180` |
+| Fingerprint | `8b1581b4d343fe72` (`integrations/zha/turn_on_for.py`) |
 | Home Assistant | 2026.10.2 |
 | Device | LTA004, firmware `0x01001416` |
 | Capabilities | every capability the adapter addresses |
