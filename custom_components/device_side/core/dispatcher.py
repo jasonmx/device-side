@@ -166,9 +166,15 @@ class Dispatcher:
         out = []
         for target in targets:
             result = by_id.get(target.reported_id) or adapter.result(target, Status.REJECTED, detail="no_result")
-            if clamped_to is not None and result.clamped_to is None and result.status not in FAILED:
-                result = replace(result, clamped_to=clamped_to)
             if ignored and target.domain != "light" and result.detail is None:
                 result = replace(result, detail="light_fields_ignored")
             out.append(result)
-        return out + list(member_rows.values())
+        out += member_rows.values()
+        if clamped_to is None:
+            return out
+        return [
+            replace(result, clamped_to=clamped_to)
+            if result.clamped_to is None and result.status not in FAILED
+            else result
+            for result in out
+        ]

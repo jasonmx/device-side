@@ -150,6 +150,17 @@ async def test_one_failing_light_does_not_stop_the_others(hass, bridge):
     assert response == {"light.one": {"status": "rejected", "integration": "hue", "detail": "error"}, "light.two": SENT}
 
 
+async def test_light_gone_from_the_bridge_is_rejected(hass, bridge):
+    bridge.light("light-1")
+    entry = await hue_entry(hass, bridge)
+    add_hue_entity(hass, entry, "light.lamp", "light-1")
+    add_hue_entity(hass, entry, "light.gone", "light-gone")
+
+    response = await call(hass, "set_attributes", {"entity_id": ["light.lamp", "light.gone"], "brightness": 102})
+
+    assert response["light.gone"] == {"status": "rejected", "integration": "hue", "detail": "not_on_bridge"}
+
+
 async def test_room_is_written_light_by_light(hass, bridge):
     bridge.light("light-1", **COLOR_LIGHT)
     bridge.light("light-2", **COLOR_LIGHT)

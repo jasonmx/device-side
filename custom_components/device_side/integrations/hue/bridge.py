@@ -38,7 +38,7 @@ def is_hue_group(hass: HomeAssistant, target: Target) -> bool:
 
 
 def expand_group(hass: HomeAssistant, target: Target) -> list[Target]:
-    """The room's or zone's lights that have a light entity in HA, by entity_id: aiohue lists a room's in set order.
+    """The room's or zone's lights that have a light entity in HA, sorted by entity_id (aiohue's order is a set's).
 
     Only called for a target is_hue_group accepted, which has a v2 bridge.
     """

@@ -82,7 +82,8 @@ class HueSetAttributes(Adapter[SetAttributesRequest]):
     ) -> list[EntityResult]:
         async def send(target: Target) -> EntityResult:
             api = bridge_api(target)
-            light = api.lights[resource_id(target)]
+            if (light := api.lights.get(resource_id(target))) is None:
+                return self.result(target, Status.REJECTED, detail="not_on_bridge")
             write, dropped = _write_for(light, request)
             if not write:
                 if dropped:

@@ -152,12 +152,13 @@ async def test_native_groups_adapter_may_report_member_rows(hass, fake):
         ]
 
     with patch("tests.fakes.fake_integration.FakeTurnOffFor.execute", execute):
-        response = await call(hass, "turn_off_for", {"entity_id": ["switch.fake_group", "switch.a"], "duration": 5})
+        response = await call(hass, "turn_off_for", {"entity_id": ["switch.fake_group", "switch.a"], "duration": 500})
 
+    # Member rows are clamped like any other.
     assert response == {
-        "switch.a": {"status": "sent", "integration": "fake"},
-        "switch.fake_group": {"status": "confirmed", "integration": "fake"},
-        "switch.b": {"status": "confirmed", "member_of": "switch.fake_group"},
+        "switch.a": {"status": "sent", "integration": "fake", "clamped_to": 100},
+        "switch.fake_group": {"status": "confirmed", "integration": "fake", "clamped_to": 100},
+        "switch.b": {"status": "confirmed", "clamped_to": 100, "member_of": "switch.fake_group"},
     }
     assert list(response) == ["switch.a", "switch.fake_group", "switch.b"]
 
