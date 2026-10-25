@@ -94,12 +94,14 @@ class ZHATurnOnFor(Adapter[TurnOnForRequest]):
             except Unauthorized:
                 return self.result(target, Status.REJECTED, detail="admin_required")
 
+            # The comparison sits in the try too: a value it can't compare is a failed read, not a failed command.
             try:
                 remaining = await zcl.read_attribute(hass, addr, zcl.ON_OFF_CLUSTER, zcl.ON_TIME)
+                running = 0 < remaining and on_time - _READBACK_SLACK_TENTHS <= remaining <= on_time
             except Exception as err:  # noqa: BLE001 - zha and zigpy errors can't be imported here; see zcl.py
                 _LOGGER.debug("%s read-back failed for %s: %s", self.action, target.entity_id, err)
                 return self.result(target, Status.SENT, detail="readback_failed")
-            if 0 < remaining and on_time - _READBACK_SLACK_TENTHS <= remaining <= on_time:
+            if running:
                 return self.result(target, Status.CONFIRMED)
             return self.result(target, Status.SENT, detail="timer_not_reported")
 

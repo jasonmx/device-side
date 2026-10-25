@@ -107,9 +107,17 @@ async def test_on_time_outside_slack_is_sent(hass, setup_production, commands, o
     assert response == {"light.bulb": {"status": "sent", "integration": "zha", "detail": "timer_not_reported"}}
 
 
-async def test_failed_read_is_sent(hass, setup_production, commands, on_time):
+@pytest.mark.parametrize(
+    "read",
+    [
+        {"side_effect": ImportError("No module named 'zha'")},
+        {"side_effect": LookupError("ZHA device not found")},
+        {"return_value": None},  # an uncomparable value
+    ],
+)
+async def test_failed_read_is_sent(hass, setup_production, commands, on_time, read):
     add_zha_entity(hass, zha_entry(hass), "light.bulb")
-    on_time.side_effect = ImportError("No module named 'zha'")
+    on_time.configure_mock(**read)
 
     response = await call(hass, "turn_on_for", {"entity_id": "light.bulb", "duration": 5})
 

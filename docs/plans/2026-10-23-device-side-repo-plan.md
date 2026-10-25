@@ -634,7 +634,7 @@ the first action of that session is slice 0.
 2. Shelly: `RpcDevice.call_rpc` signature at the pinned aioshelly; `toggle_after` type/unit and
    limits; `GetStatus` timer field names; `Switch.Set toggle_after` [M]; how `_id` derives from key.
 3. ZHA (answered in slice 10, zha 2.3.1): `Device.issue_cluster_command` raises `ZHAException` on a
-   non-success ZCL status and zigpy raises on delivery failure, so a returned call is `SENT`. Params
+   non-success ZCL status and zigpy raises on delivery failure, so a returned call was accepted. Params
    `on_off_control`, `on_time`, `off_wait_time`, `command_type: server`. A light's unique_id is
    `{ieee}-{endpoint}`; group entities are `{platform}_zha_group_0x{id:04x}`. A non-admin caller gets
    `Unauthorized` -> `REJECTED`/`admin_required`. OnTime read-back works on the rig's Hue bulb (counts
