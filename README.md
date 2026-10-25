@@ -23,9 +23,9 @@ If you're OK with that, let's dive in.
 
 ✅ Stable · 🙋 Ready for release once a [volunteer tests it](CONTRIBUTING.md) · ❌ Appears not possible
 
-¹ Available now in [Hue Smooth Dimming](https://github.com/jasonmx/hue-smooth-dimming). 
+¹ Available now in [Hue Smooth Dimming](https://github.com/jasonmx/hue-smooth-dimming).
 
-Details per integration are in [docs/integrations.md](docs/integrations.md). Shelly Gen 1 & Hue Bridge v1 are unsupported. 
+Details per integration are in [docs/integrations.md](docs/integrations.md). Shelly Gen 1 & Hue Bridge v1 are unsupported.
 
 ## Get Started
 Requires at least one core integration to be installed: Matter, ZHA, Z2M via MQTT, Shelly, or Philips Hue.
