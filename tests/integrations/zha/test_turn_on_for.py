@@ -124,13 +124,14 @@ async def test_failed_read_is_sent(hass, setup_production, commands, on_time, re
     assert response == {"light.bulb": {"status": "sent", "integration": "zha", "detail": "readback_failed"}}
 
 
-async def test_switch_is_out_of_scope(hass, setup_production, commands, turn_ons):
+async def test_switch_takes_the_same_timer(hass, setup_production, commands, turn_ons):
     add_zha_entity(hass, zha_entry(hass), "switch.plug")
 
-    with pytest.raises(HomeAssistantError) as raised:
-        await call(hass, "turn_on_for", {"entity_id": "switch.plug", "duration": 5})
+    response = await call(hass, "turn_on_for", {"entity_id": "switch.plug", "duration": 5})
 
-    assert raised.value.translation_placeholders["summary"] == "switch.plug: domain_not_tested"
+    assert response == {"switch.plug": CONFIRMED}
+    assert not turn_ons
+    assert commands[0].data["params"]["on_time"] == 50
 
 
 async def test_entity_without_a_light_unique_id_is_not_addressable(hass, setup_production, commands, turn_ons):

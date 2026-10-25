@@ -3,6 +3,8 @@
 #   switch_plug, light_onoff (a relay shown as a light), light_wrapped (a switch_as_x light over a switch),
 #   light_dimmable, light_ct, light_color, group, scene
 # Tests restore each entity's prior state afterwards, but every entity here will visibly change state.
+# powered_by names the inventory switch an entity draws power through: its cases need that switch on, and a case
+# that switches it puts the entity back once power returns.
 
 shelly:
   - entity_id: switch.office_plug

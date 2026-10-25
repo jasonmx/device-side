@@ -40,8 +40,7 @@ class ZHATurnOnFor(Adapter[TurnOnForRequest]):
     integration: ClassVar[str] = "zha"
     scope: ClassVar[AdapterScope] = AdapterScope(
         experimental=True,
-        # The rig has ZHA bulbs but no ZHA plug, so switch stays out of scope until someone tests one.
-        domains=frozenset({"light"}),
+        domains=frozenset({"light", "switch"}),
         duration=_TIMER_LIMITS,
         fields=frozenset({"brightness", "color_temp_kelvin"}),
         max_concurrency=2,

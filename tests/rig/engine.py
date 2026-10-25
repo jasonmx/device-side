@@ -37,6 +37,12 @@ ADMIN_INTEGRATIONS = frozenset({"zha"})
 # Statuses that mean the command reached the device.
 _REACHED = frozenset({"confirmed", "sent"})
 
+# An entity whose supply a case switched rejoins its network after power returns. ZHA keeps showing the last state
+# of a mains device for hours, so the restore waits, then retries until the device takes the command.
+POWER_SETTLE_S = 5.0
+POWER_REJOIN_S = 60.0
+POWER_RETRY_S = 3.0
+
 
 class SchemaError(ValueError):
     """A step file that does not parse; the message names the file, test and step."""
@@ -402,34 +408,62 @@ class RunResult:
 @dataclass(slots=True)
 class Snapshot:
     ha: HAClient
+    power: dict[str, str] = field(default_factory=dict)  # Inventory.power(): entity -> its supply
     taken: dict[str, dict | None] = field(default_factory=dict)
 
     async def take(self, entity_id: str) -> dict | None:
+        """The entity's state before the case moved it, and that of every entity it powers."""
         if entity_id not in self.taken:
             self.taken[entity_id] = await self.ha.get_state(entity_id)
+            for powered, supply in self.power.items():
+                if supply == entity_id:
+                    await self.take(powered)
         return self.taken[entity_id]
 
     async def restore(self) -> None:
-        for entity_id, state in self.taken.items():
+        # A powered entity goes back after its supply, whatever order the case touched them in.
+        cut = [entity_id for entity_id in self.taken if self.power.get(entity_id) in self.taken]
+        for entity_id in [entity_id for entity_id in self.taken if entity_id not in cut] + cut:
+            state = self.taken[entity_id]
             if state is None or state["state"] not in ("on", "off"):
                 continue
-            domain = entity_id.partition(".")[0]
+            if entity_id not in cut:
+                try:
+                    await self.put_back(entity_id, state)
+                except Exception as err:  # noqa: BLE001 - a failed restore is logged so it can't mask the test result
+                    _LOGGER.warning("Could not restore %s to %s: %s", entity_id, state["state"], err)
+            elif (self.taken[self.power[entity_id]] or {}).get("state") == "on":  # unpowered before: nothing to restore
+                await self.put_back_after_power(entity_id, state)
+
+    async def put_back_after_power(self, entity_id: str, state: dict) -> None:
+        loop = asyncio.get_running_loop()
+        await asyncio.sleep(POWER_SETTLE_S)
+        deadline = loop.time() + POWER_REJOIN_S
+        while True:
             try:
-                if state["state"] == "off":
-                    await self.ha.call_service(domain, "turn_off", {"entity_id": entity_id})
-                    continue
-                data = {"entity_id": entity_id}
-                if domain == "light":
-                    attributes = state["attributes"]
-                    if attributes.get("brightness") is not None:
-                        data["brightness"] = attributes["brightness"]
-                    for name in _RESTORE_COLOR:
-                        if attributes.get(name) is not None:
-                            data[name] = attributes[name]
-                            break
-                await self.ha.call_service(domain, "turn_on", data)
-            except Exception as err:  # noqa: BLE001 - a failed restore is logged so it can't mask the test result
-                _LOGGER.warning("Could not restore %s to %s: %s", entity_id, state["state"], err)
+                await self.put_back(entity_id, state)
+                return
+            except Exception as err:  # noqa: BLE001 - as restore(): retried, then logged
+                if loop.time() >= deadline:
+                    _LOGGER.warning("Could not restore %s after power returned: %s", entity_id, err)
+                    return
+            await asyncio.sleep(POWER_RETRY_S)
+
+    async def put_back(self, entity_id: str, state: dict) -> None:
+        domain = entity_id.partition(".")[0]
+        if state["state"] == "off":
+            await self.ha.call_service(domain, "turn_off", {"entity_id": entity_id})
+            return
+        data = {"entity_id": entity_id}
+        if domain == "light":
+            attributes = state["attributes"]
+            if attributes.get("brightness") is not None:
+                data["brightness"] = attributes["brightness"]
+            for name in _RESTORE_COLOR:
+                if attributes.get(name) is not None:
+                    data[name] = attributes[name]
+                    break
+        await self.ha.call_service(domain, "turn_on", data)
 
 
 def _value(state: dict, name: str) -> Any:
@@ -453,11 +487,19 @@ def _describe(state: dict | None, names: Iterable[str]) -> str:
 class _CaseRun:
     """The steps of one case, against one HA connection, with what earlier steps left behind."""
 
-    def __init__(self, case: Case, ha: HAClient, registry: Any, tolerance: float, ask: Callable[[str], str] | None):
+    def __init__(
+        self,
+        case: Case,
+        ha: HAClient,
+        registry: Any,
+        tolerance: float,
+        ask: Callable[[str], str] | None,
+        power: dict[str, str] | None = None,
+    ):
         self.case, self.ha, self.registry, self.ask = case, ha, registry, ask
         self.integration = case.suite.integration
         self.names: dict[str, float] = {"tol": tolerance}
-        self.snapshot = Snapshot(ha)
+        self.snapshot = Snapshot(ha, power or {})
         self.response: dict | None = None
         self.error: HAError | None = None
         self.last_action = case.suite.action
@@ -495,6 +537,7 @@ class _CaseRun:
         result = CaseResult(case.id, case.role, domain, Outcome.PASS, entity_ids=tuple(case.entities.values()))
         steps = case.test.steps
         try:
+            await self.check_power()
             for index, step in enumerate(steps):
                 following = steps[index + 1].kind if index + 1 < len(steps) else None
                 try:
@@ -512,6 +555,16 @@ class _CaseRun:
             await self.snapshot.restore()
         result.fields, result.reached = frozenset(self.fields), self.reached
         return result
+
+    async def check_power(self) -> None:
+        """Fail up front if a target's supply is off: its state in HA is stale, so every step would mislead."""
+        for entity_id in self.case.entities.values():
+            if (supply := self.snapshot.power.get(entity_id)) is None:
+                continue
+            state = await self.ha.get_state(supply)
+            if state is None or state["state"] != "on":
+                found = state["state"] if state else "missing"
+                raise StepFailure(f"power: {entity_id} draws power through {supply}, which is {found}; turn it on")
 
     async def _set(self, args: dict, _following: str | None) -> None:
         entity_id = self.entity(args)
@@ -697,7 +750,8 @@ async def run(
             if case.skip:
                 result = CaseResult(case.id, case.role, None, Outcome.SKIPPED, case.skip)
             else:
-                result = await _CaseRun(case, client, registry, tolerance[suite.integration], ask).run()
+                case_run = _CaseRun(case, client, registry, tolerance[suite.integration], ask, inventory.power())
+                result = await case_run.run()
             out(f"  {case.id}: {result.outcome}" + (f" ({result.detail})" if result.detail else ""))
             suite_result.cases.append(result)
         results.append(suite_result)

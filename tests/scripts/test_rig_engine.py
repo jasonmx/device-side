@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from custom_components.device_side.core.registry import AdapterRegistry
+from tests.rig import engine
 from tests.rig.client import HAError
 from tests.rig.engine import (
     Outcome,
@@ -504,3 +505,57 @@ async def test_admin_integrations_skip_without_an_admin_connection(tmp_path):
     result = await run_one(ha, suite(tmp_path, ON_THEN_OFF, "zha"), inventory("zha", switch_plug="switch.plug"))
     assert result.suites == []
     assert not ha.calls
+
+
+def powered_inventory() -> Inventory:
+    """A bulb that draws power through a plug, both on ZHA."""
+    return Inventory(
+        {
+            "zha": [
+                RigEntity("light.bulb", frozenset({"light_dimmable"}), "switch.plug"),
+                RigEntity("switch.plug", frozenset({"switch_plug"})),
+            ]
+        }
+    )
+
+
+async def test_a_case_on_an_unpowered_entity_fails_before_any_step(tmp_path):
+    ha = FakeHA({"light.bulb": {"state": "on"}, "switch.plug": {"state": "off"}})
+    text = header("light_dimmable") + "      - set: {state: off}\n"
+    result = await run_one(ha, suite(tmp_path, text, "zha"), powered_inventory(), admin=ha)
+    outcome, detail = outcomes(result)["t[light_dimmable]"]
+    assert outcome is Outcome.FAIL
+    assert detail == "power: light.bulb draws power through switch.plug, which is off; turn it on"
+    assert ha.calls == []
+
+
+async def test_switching_a_supply_puts_what_it_powers_back_once_it_rejoins(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "POWER_SETTLE_S", 0)
+    monkeypatch.setattr(engine, "POWER_RETRY_S", 0.01)
+
+    class Rejoining(FakeHA):
+        refusals = 2
+
+        async def call_service(self, domain, service, data=None, return_response=False):
+            if domain == "light" and self.refusals:
+                self.refusals -= 1
+                raise OSError("no route")
+            return await super().call_service(domain, service, data, return_response)
+
+    ha = Rejoining({"light.bulb": {"state": "on", "attributes": {"brightness": 90}}, "switch.plug": {"state": "on"}})
+    text = header("switch_plug") + "      - set: {state: off}\n"
+    result = await run_one(ha, suite(tmp_path, text, "zha"), powered_inventory(), admin=ha)
+    assert outcomes(result)["t[switch_plug]"][0] is Outcome.PASS
+    assert ha.calls[-2:] == [
+        ("switch", "turn_on", {"entity_id": "switch.plug"}),
+        ("light", "turn_on", {"entity_id": "light.bulb", "brightness": 90}),
+    ]
+    assert ha.refusals == 0
+
+
+async def test_an_entity_unpowered_before_the_case_is_left_alone(tmp_path):
+    ha = FakeHA({"light.bulb": {"state": "on"}, "switch.plug": {"state": "off"}})
+    text = header("switch_plug") + "      - set: {state: on}\n"
+    await run_one(ha, suite(tmp_path, text, "zha"), powered_inventory(), admin=ha)
+    assert ha.calls[-1] == ("switch", "turn_off", {"entity_id": "switch.plug"})
+    assert not [call for call in ha.calls if call[0] == "light"]
