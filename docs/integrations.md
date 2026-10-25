@@ -183,8 +183,12 @@ Sends `OnWithTimedOff` (OnOff cluster `0x0006`, command `0x42`) with `on_off_con
 `on_time` in tenths of a second and `off_wait_time: 0`. With `brightness`, Device Side first calls
 `light.turn_on`, then sends the timer.
 
-Returns `sent`. ZHA raises when the device can't be reached or answers with a failure status, and
-that target is `rejected`.
+ZHA raises when the device can't be reached or answers with a failure status, and that target is
+`rejected`. Otherwise Device Side reads the OnTime attribute (`0x4001`) straight back, uncached.
+OnTime counts down live and a new timer replaces an old one, so the result is `confirmed` when OnTime
+is above 0, at most the requested tenths, and no more than 3 s under them. Otherwise it is `sent`,
+with detail `timer_not_reported` (the bulb answered with some other value) or `readback_failed`
+(the read itself failed).
 
 Lights only, with `brightness` as the only field, until each is tested on hardware. Plugs
 (`switch`) are out of scope.
