@@ -271,8 +271,8 @@ def test_check_tokens_stops_a_zha_run_without_an_admin_token():
     rig.check_tokens({**env, "HA_ADMIN_TOKEN": "admin"}, [zha])
 
 
-class SwitchHA:
-    """States and switch calls, for pause_switches and resume_switches."""
+class PauseHA:
+    """States and turn_on/turn_off calls, for pause and resume."""
 
     def __init__(self, states: dict[str, str], failing: str | None = None):
         self.states, self.failing, self.calls = states, failing, []
@@ -281,35 +281,40 @@ class SwitchHA:
         return {"state": self.states[entity_id]} if entity_id in self.states else None
 
     async def call_service(self, domain, service, data):
-        self.calls.append((service, data["entity_id"]))
+        self.calls.append((domain, service, data["entity_id"]))
         if service == "turn_on" and data["entity_id"] == self.failing:
             raise RuntimeError("refused")
 
 
-async def test_pause_switches_turns_off_only_what_is_on_and_resumes_it(capsys):
-    states = {"switch.al_office": "on", "switch.al_dining": "off", "switch.al_hall": "on"}
-    ha = SwitchHA(states, failing="switch.al_hall")
-    env = {"RIG_PAUSE_SWITCHES": " switch.al_office, switch.al_dining ,switch.al_hall,"}
+async def test_pause_turns_off_only_what_is_on_and_resumes_it(capsys):
+    states = {"switch.al_office": "on", "automation.motion_hall": "off", "automation.motion_den": "on"}
+    ha = PauseHA(states, failing="automation.motion_den")
+    env = {"RIG_PAUSE": " switch.al_office, automation.motion_hall ,automation.motion_den,"}
     paused: list[str] = []
 
-    await rig.pause_switches(ha, rig.pause_list(env), paused)
-    await rig.resume_switches(ha, paused)
+    await rig.pause(ha, rig.pause_list(env), paused)
+    await rig.resume(ha, paused)
 
-    assert paused == ["switch.al_office", "switch.al_hall"]
+    assert paused == ["switch.al_office", "automation.motion_den"]
     assert ha.calls == [
-        ("turn_off", "switch.al_office"),
-        ("turn_off", "switch.al_hall"),
-        ("turn_on", "switch.al_office"),
-        ("turn_on", "switch.al_hall"),
+        ("switch", "turn_off", "switch.al_office"),
+        ("automation", "turn_off", "automation.motion_den"),
+        ("switch", "turn_on", "switch.al_office"),
+        ("automation", "turn_on", "automation.motion_den"),
     ]
-    assert "Could not turn switch.al_hall back on" in capsys.readouterr().out
+    assert "Could not turn automation.motion_den back on" in capsys.readouterr().out
 
 
-async def test_pause_switches_stops_on_an_unknown_switch():
-    ha = SwitchHA({"switch.al_office": "on"})
+async def test_pause_stops_on_an_unknown_entity():
+    ha = PauseHA({"switch.al_office": "on"})
     paused: list[str] = []
 
-    with pytest.raises(SystemExit, match="switch.typo in RIG_PAUSE_SWITCHES"):
-        await rig.pause_switches(ha, ["switch.al_office", "switch.typo"], paused)
+    with pytest.raises(SystemExit, match="switch.typo in RIG_PAUSE"):
+        await rig.pause(ha, ["switch.al_office", "switch.typo"], paused)
 
     assert paused == ["switch.al_office"]
+
+
+def test_pause_list_refuses_other_domains():
+    with pytest.raises(SystemExit, match="automations and switches only, got light.hall"):
+        rig.pause_list({"RIG_PAUSE": "switch.al_office, light.hall"})

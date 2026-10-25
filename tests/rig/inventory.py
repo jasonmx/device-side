@@ -91,7 +91,7 @@ def load_env(path: Path = ENV_FILE) -> dict[str, str]:
         "RIG_SYNC_CMD",
         "RIG_STATUS_CMD",
         "RIG_RESTART_CMD",
-        "RIG_PAUSE_SWITCHES",
+        "RIG_PAUSE",
     ):
         if key in os.environ:
             env[key] = os.environ[key]
