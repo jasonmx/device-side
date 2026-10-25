@@ -12,10 +12,10 @@ We're looking for four kinds of help in particular:
 
 ## What gets built
 
-- **On-device features only.** Our goal is to unlock on-device features that aren't easily available in HA, never faking them with HA-side timers or loops. We build the building blocks; experiences built on top of them, such as blueprints and dashboard cards, belong in their own repos.
-- **Focus on features with broad appeal.** An on-device feature needs to be regularly requested by users in forums or on GitHub, and to exist on devices supported by a [top-30 Home Assistant integration](https://analytics.home-assistant.io/integrations/). This keeps development focused on the most important features while keeping the codebase compact to simplify maintenance.
-- **Every integration and entity domain is welcome.** We're starting with lights and switches on Matter, ZHA, Zigbee2MQTT and Shelly, and lights on Hue. Once a feature qualifies, any integration can add it (e.g. TP-Link, Z-Wave), and other entity domains (e.g. fans, climate) are welcome too.
-- **We build for people, not machines.** We design and name our actions around how people think, not how devices operate. For example, a `stop` action ends a dimming transition, because `brightness_step: 0` is unintuitive.
+- **On-device features only.** Our goal is to unlock features that already exist on devices and are hard to access in HA. We never simulate features with Home Assistant timers or loops.
+- **Features with broad appeal.** We focus only on features that keep coming up in community forums and feature requests, and which are supportable by at least one of the [top-30 Home Assistant integration](https://analytics.home-assistant.io/integrations/). This keeps development focused on the most impactful features and maintenance low.
+- **Every integration and entity domain is welcome.** Contributors are invited to add new integrations (e.g. TP-Link, Z-Wave) and new entity domains (e.g. fans, climate), subject to the broad appeal constraint above.
+- **We build for people, not machines.** We design and name our actions around how people think, not how devices operate. For example, a `stop` action ends a dimming transition, because `brightness_step: 0` isn't intuitive.
 - **Fill gaps and fix sharp edges.** We don't replicate what Core and the automation editor can already do easily.
 
 ## Developing
