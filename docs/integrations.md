@@ -126,8 +126,9 @@ handles the color mode, sets the attributes through its own protocol, then publi
 `{"state":"ON","on_time":<seconds>}` separately. The two-step approach keeps HA's light state in
 sync and delegates attribute handling to the integration that knows the device's capabilities.
 
-For **switch entities**: publishes only. Light fields sent to a switch are ignored and the result
-carries detail `light_fields_ignored`.
+Lights only. Zigbee plugs and switches (`switch`) are unsupported on Zigbee2MQTT and ZHA alike: few
+honor `OnWithTimedOff` (IKEA's are moving to Thread, and Sonoff and Tuya run their own countdowns),
+so a timer sent to one usually does nothing. If you have one that does, open an issue.
 
 Returns `sent` (fire-and-forget). Z2M does not report the timer back; confirmation is not
 available.
@@ -156,9 +157,6 @@ firmware. Most Z2M-supported lights cancel the timer on any state change.
 - **No confirmation.** Z2M's MQTT interface does not synchronously confirm the timer started.
   The result is always `sent`, never `confirmed`, regardless of whether the device accepted the
   command.
-- **Tuya countdown devices.** Some Tuya devices exposed via Z2M implement auto-off through a
-  proprietary countdown attribute rather than `OnWithTimedOff`. Publishing `on_time` to these
-  devices has no effect. This is a documented v1 gap; check your device's Z2M exposes page.
 
 ## ZHA
 
@@ -192,8 +190,8 @@ reads off), `timer_not_reported` (OnTime holds some other value) or `readback_fa
 itself failed).
 
 Lights only, with `brightness` and `color_temp_kelvin` as the fields, until more are tested on
-hardware. Plugs (`switch`) are out of scope: the one tested, a Tuya TS011F, stores OnTime as its
-own countdown and never switches on, so it reads back `not_on`.
+hardware. Zigbee plugs and switches are unsupported, as on Zigbee2MQTT: the one tested, a Tuya
+TS011F, stores OnTime as its own countdown and never switches on, so it reads back `not_on`.
 
 ### Cancelling
 
