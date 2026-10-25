@@ -24,7 +24,7 @@ We're looking for four kinds of help in particular:
 - If you use a coding agent, point it at [CLAUDE.md](CLAUDE.md). It holds the repo's rules.
 - Open pull requests against whichever is newer: `main` or the latest `release/vX.Y.Z` branch.
   Just after a release there may be no release branch.
-- Set up with `uv sync`, then `uv pip install -r requirements_test.txt`.
+- Set up with `uv sync`. To add a dependency, use `uv add --dev`, not `uv pip install`.
 - Run `.venv/bin/pytest` and `pre-commit run --all-files` before you push. CI runs both.
 - Run `/audit-code` on your diff in Claude Code before opening a pull request. If you don't use it, ask for an audit in the PR.
 - A new action, field or integration starts with `experimental=True` on its adapter, which waives the coverage bar so you can try things quickly. Fixes and refactors don't set it.

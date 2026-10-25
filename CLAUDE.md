@@ -37,7 +37,7 @@ existing records survive because the fingerprint excludes the declaration.
 ## Pull requests
 
 - Base: whichever is newer, `main` or the latest `release/vX.Y.Z` branch.
-- Setup: `uv sync`, then `uv pip install -r requirements_test.txt`.
+- Setup: `uv sync`. Test dependencies live in the `dev` group of `pyproject.toml`; never `uv pip install` into `.venv`, as the next sync removes it.
 - Before each push: `.venv/bin/pytest` and `pre-commit run --all-files` (ruff and the household check).
 - Before opening the PR: `/audit-code` on the diff.
 
