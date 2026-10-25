@@ -68,8 +68,10 @@ an adapter module, so the 95% adapter-coverage bar doesn't apply, but cover ever
 
 ## Bypass protection
 
-A tag ruleset on `refs/tags/v*` (creation, update, deletion) that only GitHub Actions may bypass, so a
-manual `git push --tags` can't skip either gate. The repo is public, so rulesets are available.
+A tag ruleset on `refs/tags/v*` (creation, update, deletion) whose only bypass is a deploy key, so a
+manual `git push --tags` can't skip either gate. On a personal repo GitHub Actions can't be a bypass actor,
+so the cut workflows check out with the key (secret `RELEASE_TAG_DEPLOY_KEY`) and push the tag over SSH;
+`gh release create` still uses `GITHUB_TOKEN`.
 
 ## Local helper: `.claude/skills/rc-audit/SKILL.md`
 
