@@ -289,3 +289,69 @@ it.
   cluster's FeatureMap attribute from the cached node data, using a minimal attribute descriptor
   class rather than importing chip.clusters. This should work with any python-matter-server
   version that exposes endpoint.get_attribute_value. Verified assumption: to confirm on hardware.
+
+## Hue
+
+### What it talks to
+
+A Hue Bridge v2 or Bridge Pro, through the aiohue connection the core `hue` integration holds open.
+Device Side adds no connection or credentials of its own. Reads come from aiohue's copy of the
+bridge's state, which the bridge's event stream keeps current, so a read sends nothing to the bridge.
+A v1 bridge is refused with `bridge_v1`.
+
+### How targets resolve
+
+An entity belongs to this integration when its entity registry entry comes from `hue`. Its unique
+ID is the bridge's resource ID: a light, a scene, or the `grouped_light` of a room or zone, which
+the Hue integration shows as one light marked `is_hue_group`. A room's lights are the ones the
+bridge lists for it that have a light entity in Home Assistant.
+
+### `set_attributes`
+
+One write per light, with brightness, color temperature or color and never `on`, so a light that
+is off stays off and comes on with the new settings. A room is written light by light, with one
+result per light, because a write to the room's `grouped_light` misses the lights that are off.
+
+`brightness` converts to Hue's percent as the Hue integration does; `color_temp_kelvin`
+is clamped to the light's range; colors convert to xy. `min_brightness` and `max_brightness` are
+percent and move the brightness the bridge last stored into that range, so they work while off; a
+light already inside it is `confirmed` with `within_limits` and nothing is written. An explicit
+`brightness` overrides both.
+
+A field a light can't take (color on a white bulb) is dropped and the result is `sent` with
+`fields_dropped`. A light that can take none of them is `unsupported` with `fields_not_supported`.
+
+### `get_attributes`
+
+Returns `brightness` (0 to 255), `color_temp_kelvin`, `xy_color`, `rgb_color` and `hs_color` under
+Home Assistant's names, for lights that are off too. `color_temp_kelvin` is left out while a light
+is in color mode, since the value the bridge keeps is stale.
+
+A room returns its own row, then one per light marked `member_of` the room. While any light is on,
+the room's brightness is the bridge's (the average of the lights that are on) and its color
+temperature and color average the lights that are on, matching what the Hue integration shows for
+the room. With every light off the bridge reports nothing useful, so the room row averages all of
+its lights.
+
+### `set_scene`
+
+Reads the scene from aiohue on every call, so edits made in the Hue app apply, then writes each
+light's brightness, color temperature and color as a light write. The Hue API has no recall that
+leaves lights off, which is why it isn't one. `on: true` is dropped so nothing turns on; `on: false`
+is sent, as a recall would. Gradients, effects and dynamics are not written, so a dynamic scene
+sets its first frame.
+
+One failing light doesn't stop the rest: the result is `sent` with `some_lights_failed`, or
+`rejected` if every light failed. All-Day (smart) scenes are `unsupported` with `smart_scene`;
+a scene the bridge no longer has is `rejected` with `scene_not_found`.
+
+### Sharp edges
+
+- **No gamut clamp.** `set_attributes` sends a color outside a bulb's gamut as is, and the bulb
+  shows the nearest color it can.
+- **Large scenes are slow.** `set_scene` sends one write per light, one after another, and the
+  bridge refuses more than 3 requests at once (aiohue retries with a growing wait), so a scene on a
+  large room can take seconds to land.
+- **Lights hidden from Home Assistant are skipped.** A light in a room with no light entity (a
+  disabled one, say) gets no write from `set_attributes` on the room and no row from
+  `get_attributes`, though `set_scene` writes it.

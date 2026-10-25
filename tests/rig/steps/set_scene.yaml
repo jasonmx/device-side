@@ -1,4 +1,4 @@
-# hue_dimmer tests/RELEASE_CHECKLIST.md §5.1-5.3 as steps. Only the parser tests load this until slice 7.
+# hue_dimmer tests/RELEASE_CHECKLIST.md §5.1-5.3 as steps.
 # The target is the scene; `target: group` points a step at the room the scene belongs to. §5.4-5.8 need
 # scene kinds (a light off, All-Day, dynamic), a large room and a second bridge that inventory roles don't name yet.
 action: set_scene

@@ -98,7 +98,7 @@ def test_load_env_reads_command_vars(tmp_path, monkeypatch):
 
 
 def test_select_plan_lines_and_estimate(inventory, tmp_path):
-    step_files = load_step_files()
+    step_files = [step_file for step_file in load_step_files() if step_file.action in ("turn_off_for", "turn_on_for")]
     suites = rig.select(step_files, inventory, None)
     assert [(suite.integration, suite.action) for suite in suites] == [
         ("shelly", "turn_off_for"), ("hue", "turn_off_for"), ("shelly", "turn_on_for"), ("hue", "turn_on_for"),

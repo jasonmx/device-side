@@ -1,10 +1,11 @@
-# hue_dimmer tests/RELEASE_CHECKLIST.md §3 as steps. Only the parser tests load this until slice 7.
-# A room is written light by light, so on the group role expect_state checks every member.
+# hue_dimmer tests/RELEASE_CHECKLIST.md §3 as steps.
+# A room is written light by light, so on the group role the response and expect_state cover every member.
+# Color steps run on the light_color role only.
 action: set_attributes
-rig_seconds: 60
+rig_seconds: 70
 tests:
   - name: sets_while_off  # §3.1
-    roles: [light_color, group]
+    roles: [light_ct, group]
     steps:
       - set: {state: off}
       - call: {brightness: 102, color_temp_kelvin: 2700}
@@ -15,25 +16,34 @@ tests:
       - expect_state: {brightness: {min: 100, max: 104}, color_temp_kelvin: {min: 2650, max: 2750}, within: tol}
 
   - name: sets_color_while_off  # §3.2
-    roles: [light_color, group]
+    roles: [light_color]
     steps:
       - set: {state: off}
       - call: {rgb_color: [255, 0, 0]}
+      - expect_response: {status: expected, integration: self}
       - expect_state: {state: off}
       - set: {state: on}
       - observe: Did it come on red?
 
   - name: min_brightness_raises  # §3.3
-    roles: [light_color, group]
+    roles: [light_ct, group]
     steps:
       - set: {state: on, brightness_pct: 20}
       - call: {min_brightness: 50}
       - expect_state: {brightness: {min: 126, max: 130}, within: tol}
 
   - name: min_brightness_leaves_brighter  # §3.3
-    roles: [light_color, group]
+    roles: [light_ct, group]
     steps:
       - set: {state: on, brightness_pct: 70}
       - call: {min_brightness: 50}
+      - expect_response: {status: confirmed, detail: within_limits}
       - wait: tol
       - expect_state: {brightness: {min: 177, max: 180}}
+
+  - name: max_brightness_lowers
+    roles: [light_ct, group]
+    steps:
+      - set: {state: on, brightness_pct: 80}
+      - call: {max_brightness: 30}
+      - expect_state: {brightness: {min: 75, max: 79}, within: tol}

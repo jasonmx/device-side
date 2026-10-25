@@ -22,6 +22,15 @@ def test_matrix_lists_every_pair_sorted():
     registry = AdapterRegistry(actions.discover(), FAKE_INTEGRATIONS)
 
     assert [(action, integration, adapter is not None) for action, integration, adapter in registry.matrix()] == [
+        ("get_attributes", "broken_integration", False),
+        ("get_attributes", "fake", False),
+        ("get_attributes", "fake_special", False),
+        ("set_attributes", "broken_integration", False),
+        ("set_attributes", "fake", False),
+        ("set_attributes", "fake_special", False),
+        ("set_scene", "broken_integration", False),
+        ("set_scene", "fake", False),
+        ("set_scene", "fake_special", False),
         ("turn_off_for", "broken_integration", False),
         ("turn_off_for", "fake", True),
         ("turn_off_for", "fake_special", False),
@@ -45,7 +54,8 @@ def test_adapter_for_unknown_action_is_refused():
 
 def test_production_discovery_imports_cleanly():
     registry = AdapterRegistry.discover()
-    assert set(registry.actions) == {"turn_off_for", "turn_on_for"}
+    assert set(registry.actions) == {"get_attributes", "set_attributes", "set_scene", "turn_off_for", "turn_on_for"}
     assert registry.integrations["shelly"].available
+    assert registry.integrations["hue"].available
     assert registry.adapter("turn_on_for", "shelly") is not None
     assert registry.adapter("turn_off_for", "shelly") is not None

@@ -22,7 +22,7 @@ turn_on_for:
       selector:
         duration:
           enable_millisecond: true
-    brightness:
+    brightness: &brightness
       filter:
         attribute:
           supported_color_modes:
@@ -37,7 +37,7 @@ turn_on_for:
         number:
           min: 1
           max: 255
-    color_temp_kelvin:
+    color_temp_kelvin: &color_temp_kelvin
       filter:
         attribute:
           supported_color_modes:
@@ -52,7 +52,7 @@ turn_on_for:
           unit: "kelvin"
           min: 2000
           max: 6500
-    rgb_color:
+    rgb_color: &rgb_color
       filter:
         attribute:
           supported_color_modes:
@@ -64,7 +64,7 @@ turn_on_for:
       example: "[255, 100, 100]"
       selector:
         color_rgb:
-    hs_color:
+    hs_color: &hs_color
       filter:
         attribute:
           supported_color_modes:
@@ -76,7 +76,7 @@ turn_on_for:
       example: "[300, 70]"
       selector:
         object:
-    xy_color:
+    xy_color: &xy_color
       filter:
         attribute:
           supported_color_modes:
@@ -105,3 +105,46 @@ turn_off_for:
         integration: shelly
   fields:
     duration: *duration
+
+set_attributes:
+  target:
+    entity:
+      - domain: light
+        integration: hue
+  fields:
+    brightness: *brightness
+    color_temp_kelvin: *color_temp_kelvin
+    rgb_color: *rgb_color
+    hs_color: *hs_color
+    xy_color: *xy_color
+    min_brightness: &percent
+      example: 20
+      filter:
+        attribute:
+          supported_color_modes:
+            - light.ColorMode.BRIGHTNESS
+            - light.ColorMode.COLOR_TEMP
+            - light.ColorMode.HS
+            - light.ColorMode.XY
+            - light.ColorMode.RGB
+            - light.ColorMode.RGBW
+            - light.ColorMode.RGBWW
+      selector:
+        number:
+          min: 0.4
+          max: 100
+          step: 0.2
+          unit_of_measurement: "%"
+    max_brightness: *percent
+
+get_attributes:
+  target:
+    entity:
+      - domain: light
+        integration: hue
+
+set_scene:
+  target:
+    entity:
+      - domain: scene
+        integration: hue

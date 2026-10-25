@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
-from custom_components.device_side.core.models import Status, TimedRequest
+from custom_components.device_side.core.models import EntityResult, Status, TimedRequest
 
 from ..conftest import call
 from ..fixtures.fake import add_fake_entity, add_fake_native_group, add_ha_group, add_switch_as_x, fake_config_entry
@@ -123,6 +123,43 @@ async def test_native_group_expands_when_adapter_cannot_address_it(hass, fake, r
 
     assert set(response) == {"light.a", "light.b"}
     assert reset_script.calls[0][3] == ["light.a", "light.b"]
+
+
+async def test_native_group_expanding_to_nothing_is_unsupported(hass, fake, reset_script):
+    add_fake_entity(hass, fake, "light.a")
+    add_fake_native_group(hass, fake, "light.fake_group", [])
+
+    response = await call(hass, "turn_on_for", {"entity_id": ["light.fake_group", "light.a"], "duration": 5})
+
+    assert response["light.fake_group"] == {"status": "unsupported", "integration": "fake", "detail": "empty_group"}
+    assert reset_script.calls[0][3] == ["light.a"]
+
+
+async def test_native_groups_adapter_may_report_member_rows(hass, fake):
+    add_fake_entity(hass, fake, "switch.a")
+    add_fake_entity(hass, fake, "switch.b")
+    add_fake_native_group(hass, fake, "switch.fake_group", ["switch.a", "switch.b"])
+
+    async def execute(self, hass, request, targets):
+        by_id = {target.entity_id: target for target in targets}
+        return [
+            self.result(by_id["switch.fake_group"], Status.CONFIRMED),
+            self.result(by_id["switch.a"], Status.SENT),
+            # A member the caller also targeted keeps its own row; a row claiming a non-group target is stray.
+            EntityResult("switch.a", Status.CONFIRMED, member_of="switch.fake_group"),
+            EntityResult("switch.b", Status.CONFIRMED, member_of="switch.fake_group"),
+            EntityResult("switch.c", Status.CONFIRMED, member_of="switch.a"),
+        ]
+
+    with patch("tests.fakes.fake_integration.FakeTurnOffFor.execute", execute):
+        response = await call(hass, "turn_off_for", {"entity_id": ["switch.fake_group", "switch.a"], "duration": 5})
+
+    assert response == {
+        "switch.a": {"status": "sent", "integration": "fake"},
+        "switch.fake_group": {"status": "confirmed", "integration": "fake"},
+        "switch.b": {"status": "confirmed", "member_of": "switch.fake_group"},
+    }
+    assert list(response) == ["switch.a", "switch.fake_group", "switch.b"]
 
 
 async def test_native_group_without_expand_hook_is_unsupported(hass, fake, reset_script):

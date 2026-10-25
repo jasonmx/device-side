@@ -205,6 +205,20 @@ wheels = [
 ]
 
 [[package]]
+name = "aiohue"
+version = "4.9.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "asyncio-throttle" },
+    { name = "awesomeversion" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/aa/1a/308e84d36c895ffcc34f6006e5c125933bece96c3af5ec6f78c990ebf5a9/aiohue-4.9.0.tar.gz", hash = "sha256:c1c5edf114266f6b5878ffccf82db8b326141cc3d8c3697f5fc3aa87a4d3747e", size = 66784, upload-time = "2026-07-30T21:04:37.263Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f5/30/42981d2d4c5a4df89b65d39e2eb9f03d162158fbdc7a34f0dab6a0c93a0a/aiohue-4.9.0-py3-none-any.whl", hash = "sha256:cad291385da10f97571eca060069bac03bf6d1195e0edf6fde765c233205449e", size = 98339, upload-time = "2026-07-30T21:04:36.105Z" },
+]
+
+[[package]]
 name = "aiooui"
 version = "0.1.11"
 source = { registry = "https://pypi.org/simple" }
@@ -304,6 +318,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/56/79/732a581e3ceb09f938d33ad8ab3419856181d95bb621aa2441a10f281e10/async_interrupt-1.2.2.tar.gz", hash = "sha256:be4331a029b8625777905376a6dc1370984c8c810f30b79703f3ee039d262bf7", size = 8484, upload-time = "2025-02-22T17:15:04.073Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5a/77/060b972fa7819fa9eea9a70acf8c7c0c58341a1e300ee5ccb063e757a4a7/async_interrupt-1.2.2-py3-none-any.whl", hash = "sha256:0a8deb884acfb5fe55188a693ae8a4381bbbd2cb6e670dac83869489513eec2c", size = 8907, upload-time = "2025-02-22T17:15:01.971Z" },
+]
+
+[[package]]
+name = "asyncio-throttle"
+version = "1.0.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/13/6f/0e2d42c0e95d50edf63147b8a742703061945e02760f25d6a0e8f028ccb0/asyncio-throttle-1.0.2.tar.gz", hash = "sha256:2675282e99d9129ecc446f917e174bc205c65e36c602aa18603b4948567fcbd4", size = 3775, upload-time = "2021-04-07T13:37:50.114Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f6/6a/d18c93722fb56dc1ffed5fb7e7fcff4f8031f80f84c5cc0427363a036b0c/asyncio_throttle-1.0.2-py3-none-any.whl", hash = "sha256:4d4c1eb3250f735f59ce842d8d92cd2927c008bd52008797ba030b5787c41f3b", size = 4079, upload-time = "2021-04-07T13:37:48.63Z" },
 ]
 
 [[package]]
@@ -947,6 +970,7 @@ source = { virtual = "." }
 
 [package.dev-dependencies]
 dev = [
+    { name = "aiohue" },
     { name = "pytest-homeassistant-custom-component" },
     { name = "ruff" },
 ]
@@ -955,6 +979,7 @@ dev = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "aiohue", specifier = "==4.9.0" },
     { name = "pytest-homeassistant-custom-component", specifier = "==0.13.373" },
     { name = "ruff", specifier = ">=0.17.2" },
 ]

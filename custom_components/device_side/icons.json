@@ -1,5 +1,14 @@
 {
   "services": {
+    "get_attributes": {
+      "service": "mdi:lightbulb-question"
+    },
+    "set_attributes": {
+      "service": "mdi:tune-variant"
+    },
+    "set_scene": {
+      "service": "mdi:palette"
+    },
     "turn_off_for": {
       "service": "mdi:timer-outline"
     },

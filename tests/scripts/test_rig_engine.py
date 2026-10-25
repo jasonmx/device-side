@@ -26,7 +26,7 @@ from tests.rig.inventory import Inventory, RigEntity
 
 TOL = 0.2
 PENDING: list[asyncio.TimerHandle | asyncio.Task] = []
-TOLERANCE = {"shelly": TOL, "zha": TOL, "fake": TOL}
+TOLERANCE = {"shelly": TOL, "zha": TOL, "hue": TOL, "fake": TOL}
 REGISTRY = AdapterRegistry.discover()
 
 ON_THEN_OFF = """
@@ -231,6 +231,37 @@ tests:
     assert outcomes(result)["fails[light_dimmable]"][0] is Outcome.FAIL
     assert ha.calls[-1] == ("light", "turn_on", {"entity_id": "light.lamp", "brightness": 50, "hs_color": [30, 50]})
     assert ha.states["light.lamp"]["state"] == "on"
+
+
+async def test_an_off_light_gets_its_device_side_attributes_back(tmp_path):
+    def device_side(ha, action, data):
+        entity_id = data["entity_id"]
+        if action == "get_attributes":
+            attributes = {"brightness": 40, "color_temp_kelvin": 2700, "xy_color": [0.46, 0.41]}
+            return {entity_id: {"status": "confirmed", "attributes": attributes}}
+        return {entity_id: {"status": "sent", "integration": "hue"}}
+
+    ha = FakeHA({"light.lamp": {}, "light.room": {"attributes": {"entity_id": ["light.lamp"]}}}, device_side)
+    text = """
+action: set_attributes
+rig_seconds: 5
+tests:
+  - name: brightens_while_off
+    roles: [group]
+    steps:
+      - call: {brightness: 200}
+"""
+    result = await run_one(ha, suite(tmp_path, text, "hue"), inventory("hue", group="light.room"))
+
+    assert outcomes(result) == {"brightens_while_off[group]": (Outcome.PASS, "")}
+    # Read for the member only: the room's own row averages its lights, and the member is restored itself.
+    assert [call for call in ha.calls if call[1] == "get_attributes"] == [
+        ("device_side", "get_attributes", {"entity_id": "light.lamp"})
+    ]
+    assert ha.calls[-2:] == [
+        ("light", "turn_off", {"entity_id": "light.lamp"}),
+        ("device_side", "set_attributes", {"entity_id": "light.lamp", "brightness": 40, "color_temp_kelvin": 2700}),
+    ]
 
 
 OBSERVED = ON_THEN_OFF + "      - observe: Did it click twice?\n"
