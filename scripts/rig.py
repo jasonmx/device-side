@@ -317,7 +317,9 @@ async def run_rig(
     await ha.connect()
     if admin:
         await admin.connect()
+    paused: list[str] = []
     try:
+        await pause_switches(ha, pause_list(env), paused)
         result = await run(
             suites, inventory, registry, ha, admin=admin, keyword=keyword, ask=None if unattended else input
         )
@@ -326,10 +328,41 @@ async def run_rig(
         for path in await write_records(result, ha, registry, BENCH_DIR, today, source):
             print(f"Wrote {path.relative_to(REPO)}; review the diff before committing it.")
     finally:
+        await resume_switches(ha, paused)
         await ha.close()
         if admin:
             await admin.close()
     return 1 if result.failed else 0
+
+
+def pause_list(env: dict) -> list[str]:
+    """RIG_PAUSE_SWITCHES: comma-separated switches that must be off while the rig runs."""
+    return [entity_id.strip() for entity_id in env.get("RIG_PAUSE_SWITCHES", "").split(",") if entity_id.strip()]
+
+
+async def pause_switches(ha: HAClient, entity_ids: list[str], paused: list[str]) -> None:
+    """Turn off each listed switch that is on, appending it to `paused` as it goes.
+
+    For automations that would fight the tests, such as an Adaptive Lighting instance resetting a light's color
+    temperature whenever it turns on. A listed switch HA doesn't know stops the run before any test.
+    """
+    for entity_id in entity_ids:
+        if (state := await ha.get_state(entity_id)) is None:
+            raise SystemExit(f"{entity_id} in RIG_PAUSE_SWITCHES has no state in Home Assistant")
+        if state["state"] == "on":
+            await ha.call_service("switch", "turn_off", {"entity_id": entity_id})
+            paused.append(entity_id)
+            print(f"Paused {entity_id} for the run.")
+
+
+async def resume_switches(ha: HAClient, paused: list[str]) -> None:
+    """Turn back on what pause_switches turned off; a failure is printed, so the switch can be turned on by hand."""
+    for entity_id in paused:
+        try:
+            await ha.call_service("switch", "turn_on", {"entity_id": entity_id})
+            print(f"Resumed {entity_id}.")
+        except Exception as err:  # noqa: BLE001 - try every switch, and say which one stayed off
+            print(f"Could not turn {entity_id} back on: {err}. Turn it on by hand.")
 
 
 if __name__ == "__main__":

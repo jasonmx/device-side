@@ -269,3 +269,47 @@ def test_check_tokens_stops_a_zha_run_without_an_admin_token():
         rig.check_tokens(env, [shelly, zha])
     rig.check_tokens(env, [shelly])
     rig.check_tokens({**env, "HA_ADMIN_TOKEN": "admin"}, [zha])
+
+
+class SwitchHA:
+    """States and switch calls, for pause_switches and resume_switches."""
+
+    def __init__(self, states: dict[str, str], failing: str | None = None):
+        self.states, self.failing, self.calls = states, failing, []
+
+    async def get_state(self, entity_id):
+        return {"state": self.states[entity_id]} if entity_id in self.states else None
+
+    async def call_service(self, domain, service, data):
+        self.calls.append((service, data["entity_id"]))
+        if service == "turn_on" and data["entity_id"] == self.failing:
+            raise RuntimeError("refused")
+
+
+async def test_pause_switches_turns_off_only_what_is_on_and_resumes_it(capsys):
+    states = {"switch.al_office": "on", "switch.al_dining": "off", "switch.al_hall": "on"}
+    ha = SwitchHA(states, failing="switch.al_hall")
+    env = {"RIG_PAUSE_SWITCHES": " switch.al_office, switch.al_dining ,switch.al_hall,"}
+    paused: list[str] = []
+
+    await rig.pause_switches(ha, rig.pause_list(env), paused)
+    await rig.resume_switches(ha, paused)
+
+    assert paused == ["switch.al_office", "switch.al_hall"]
+    assert ha.calls == [
+        ("turn_off", "switch.al_office"),
+        ("turn_off", "switch.al_hall"),
+        ("turn_on", "switch.al_office"),
+        ("turn_on", "switch.al_hall"),
+    ]
+    assert "Could not turn switch.al_hall back on" in capsys.readouterr().out
+
+
+async def test_pause_switches_stops_on_an_unknown_switch():
+    ha = SwitchHA({"switch.al_office": "on"})
+    paused: list[str] = []
+
+    with pytest.raises(SystemExit, match="switch.typo in RIG_PAUSE_SWITCHES"):
+        await rig.pause_switches(ha, ["switch.al_office", "switch.typo"], paused)
+
+    assert paused == ["switch.al_office"]
