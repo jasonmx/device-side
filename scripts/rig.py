@@ -32,7 +32,15 @@ sys.path.insert(0, str(REPO))
 
 from custom_components.device_side.core.registry import AdapterRegistry  # noqa: E402
 from tests.rig.client import HAClient  # noqa: E402
-from tests.rig.engine import StepFile, Suite, cases, load_step_files, run, write_records  # noqa: E402
+from tests.rig.engine import (  # noqa: E402
+    ADMIN_INTEGRATIONS,
+    StepFile,
+    Suite,
+    cases,
+    load_step_files,
+    run,
+    write_records,
+)
 from tests.rig.inventory import INVENTORY, Inventory, load_env  # noqa: E402
 
 COMPONENT = "custom_components/device_side"
@@ -219,13 +227,13 @@ def main(argv: list[str] | None = None) -> int:
         lock = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir")) / LOCK_NAME
         _held = lock_rig(lock, git("rev-parse", "--abbrev-ref", "HEAD"))  # noqa: F841 (held until exit)
     env = load_env()
-    if not args.dry_run and not (env.get("HA_URL") and env.get("HA_TOKEN")):
-        raise SystemExit("HA_URL and HA_TOKEN must be set in .env.rig (see tests/rig/env.example)")
     if not INVENTORY.exists():
         raise SystemExit(f"{INVENTORY} is absent; copy inventory.example.yaml and fill it in")
     inventory = Inventory.load()
     registry = AdapterRegistry.discover()
     suites = select(load_step_files(), inventory, args.integration)
+    if not args.dry_run:
+        check_tokens(env, suites)
     if not any(registry.adapter(suite.action, suite.integration) for suite in suites):
         raise SystemExit("No rig test matches the inventory's integrations.")
     deploy = deploy_state(env.get("RIG_STATUS_CMD", ""))
@@ -253,6 +261,19 @@ def main(argv: list[str] | None = None) -> int:
         subprocess.run(command, check=True, env=deploy_env)
     wait_until_ready(env["HA_URL"].rstrip("/"), env["HA_TOKEN"], READY_TIMEOUT_S if restarting else 15)
     return asyncio.run(run_rig(env, suites, inventory, registry, args.keyword, args.unattended))
+
+
+def check_tokens(env: dict, suites: list[Suite]) -> None:
+    """Stop before the gate when .env.rig lacks a token the run needs."""
+    if not (env.get("HA_URL") and env.get("HA_TOKEN")):
+        raise SystemExit("HA_URL and HA_TOKEN must be set in .env.rig (see tests/rig/env.example)")
+    if env.get("HA_ADMIN_TOKEN"):
+        return
+    if admin_only := sorted({suite.integration for suite in suites} & ADMIN_INTEGRATIONS):
+        raise SystemExit(
+            f"{', '.join(admin_only)} needs HA_ADMIN_TOKEN in .env.rig (an admin user's token), "
+            "or leave it out with --integration"
+        )
 
 
 def print_plan(
@@ -292,15 +313,22 @@ async def run_rig(
 ) -> int:
     """Run the step files, then write a bench record for each adapter whose every test passed."""
     ha = HAClient(env["HA_URL"], env["HA_TOKEN"])
+    admin = HAClient(env["HA_URL"], env["HA_ADMIN_TOKEN"]) if env.get("HA_ADMIN_TOKEN") else None
     await ha.connect()
+    if admin:
+        await admin.connect()
     try:
-        result = await run(suites, inventory, registry, ha, keyword=keyword, ask=None if unattended else input)
+        result = await run(
+            suites, inventory, registry, ha, admin=admin, keyword=keyword, ask=None if unattended else input
+        )
         source = f"rig run (`scripts/rig.py`), commit `{git('rev-parse', '--short', 'HEAD')}`"
         today = datetime.date.today().isoformat()
         for path in await write_records(result, ha, registry, REPO / "docs" / "bench", today, source):
             print(f"Wrote {path.relative_to(REPO)}; review the diff before committing it.")
     finally:
         await ha.close()
+        if admin:
+            await admin.close()
     return 1 if result.failed else 0
 
 

@@ -630,8 +630,11 @@ the first action of that session is slice 0.
    endpoint parsing from unique_id vs iterating `node.endpoints`.
 2. Shelly: `RpcDevice.call_rpc` signature at the pinned aioshelly; `toggle_after` type/unit and
    limits; `GetStatus` timer field names; `Switch.Set toggle_after` [M]; how `_id` derives from key.
-3. ZHA: does `issue_zigbee_cluster_command` raise on NAK or time out silently; zigpy param names
-   for OnWithTimedOff; unique_id endpoint format; admin refusal path.
+3. ZHA (answered in slice 10, zha 2.3.1): `Device.issue_cluster_command` raises `ZHAException` on a
+   non-success ZCL status and zigpy raises on delivery failure, so a returned call is `SENT`. Params
+   `on_off_control`, `on_time`, `off_wait_time`, `command_type: server`. A light's unique_id is
+   `{ieee}-{endpoint}`; group entities are `{platform}_zha_group_0x{id:04x}`. A non-admin caller gets
+   `Unauthorized` -> `REJECTED`/`admin_required`. Still open: whether the OnTime read-back works for `CONFIRMED`.
 4. Z2M: `zigbee2mqtt_` identifier prefix [M]; IEEE as topic segment [M]; `command_topic` from the
    entity object vs base-topic derivation; whether `on_time` + `brightness` in one payload is
    safe (would remove the two-step on Z2M).

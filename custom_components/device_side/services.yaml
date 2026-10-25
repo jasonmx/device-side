@@ -13,6 +13,8 @@ turn_on_for:
         integration: mqtt
       - domain: light
         integration: matter
+      - domain: light
+        integration: zha
   fields:
     duration: &duration
       required: true

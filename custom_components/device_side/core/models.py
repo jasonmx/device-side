@@ -1,11 +1,11 @@
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from enum import StrEnum
 from typing import Any
 
 import probatio
 from homeassistant.components.light.const import LIGHT_TURN_ON_SCHEMA
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import State
+from homeassistant.core import Context, State
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
@@ -70,6 +70,9 @@ class LightFields:
 @dataclass(frozen=True, slots=True)
 class Request:
     """Base for an action's parsed call. Subclasses add their fields."""
+
+    # The caller's context, set by the dispatcher: adapters forward it so an admin-only service checks the caller.
+    context: Context | None = field(default=None, kw_only=True)
 
     def fields_present(self) -> frozenset[str]:
         """light.turn_on fields this request carries; adapters must have them in scope.fields."""

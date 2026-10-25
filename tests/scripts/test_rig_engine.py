@@ -25,7 +25,7 @@ from tests.rig.inventory import Inventory, RigEntity
 
 TOL = 0.2
 PENDING: list[asyncio.TimerHandle | asyncio.Task] = []
-TOLERANCE = {"shelly": TOL, "fake": TOL}
+TOLERANCE = {"shelly": TOL, "zha": TOL, "fake": TOL}
 REGISTRY = AdapterRegistry.discover()
 
 ON_THEN_OFF = """
@@ -295,7 +295,7 @@ async def test_a_keyword_runs_a_subset_and_marks_the_suite_partial(tmp_path):
 
 
 async def test_a_suite_without_an_adapter_is_skipped(tmp_path):
-    result = await run_one(FakeHA({}), suite(tmp_path, ONLY, "zha"), Inventory({"zha": []}))
+    result = await run_one(FakeHA({}), suite(tmp_path, ONLY, "hue"), Inventory({"hue": []}))
     assert result.suites == []
 
 
@@ -490,3 +490,17 @@ async def test_set_activates_a_scene_without_waiting_on_its_state(tmp_path):
     result = await run_one(ha, suite(tmp_path, text), inventory(scene="scene.evening"))
     assert outcomes(result)["t[scene]"] == (Outcome.PASS, "")
     assert ("scene", "turn_on", {"entity_id": "scene.evening"}) in ha.calls
+
+
+async def test_admin_integrations_run_on_the_admin_connection(tmp_path):
+    ha, admin = FakeHA({"switch.plug": {}}), FakeHA({"switch.plug": {}}, timer_on)
+    await run_one(ha, suite(tmp_path, ON_THEN_OFF, "zha"), inventory("zha", switch_plug="switch.plug"), admin=admin)
+    assert not ha.calls
+    assert any(domain == "device_side" for domain, _, _ in admin.calls)
+
+
+async def test_admin_integrations_skip_without_an_admin_connection(tmp_path):
+    ha = FakeHA({"switch.plug": {}}, timer_on)
+    result = await run_one(ha, suite(tmp_path, ON_THEN_OFF, "zha"), inventory("zha", switch_plug="switch.plug"))
+    assert result.suites == []
+    assert not ha.calls

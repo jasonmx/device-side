@@ -41,8 +41,9 @@ Make a dedicated Home Assistant user without admin rights and create its long-li
 token can't change your configuration if it leaks.
 
 ZHA is the exception. Its cluster command is an admin-only action, and the ZHA adapter passes the caller's
-context through to it, so a non-admin token is refused. ZHA rig tests will use an admin token, for that adapter
-only, once the ZHA adapter lands.
+context through to it, so a non-admin token is refused. Put an admin user's token in `HA_ADMIN_TOKEN`: the ZHA
+suites run on it and every other suite stays on `HA_TOKEN`. Without it, a run that includes ZHA stops before the
+gate; `--integration` leaves ZHA out.
 
 ### Writing a step file
 
