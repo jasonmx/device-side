@@ -36,6 +36,7 @@ tests:
     roles: [light_dimmable]
     steps:
       - set: {state: off}
+      - wait: 2  # ZHA ignores a light's "on" report for 1.5 s after light.turn_off
       - call: {duration: 6}
       - expect_response: {status: expected, integration: self}
       - expect_state: {state: on, within: tol}
@@ -49,6 +50,7 @@ tests:
     only: [zha, zigbee2mqtt]
     steps:
       - set: {state: off}
+      - wait: 2  # ZHA ignores a light's "on" report for 1.5 s after light.turn_off
       - call: {duration: 6, brightness: 128}
       - expect_response: {status: expected, integration: self}
       - expect_state: {state: on, brightness: {min: 120, max: 136}, within: tol}

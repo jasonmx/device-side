@@ -57,3 +57,9 @@ Work in worktree `wt/zha-confirm` off `release/v0.0.2`. First commit this plan a
 - **Ask Jason before the rig run.** Then run `scripts/rig.py` on the ZHA suites only, with the admin token. Expect `confirmed` on the bulb steps.
 - Write the new `docs/bench/zha/turn_on_for.md` record with the new fingerprint, and check that `scripts/check_tiers.py` still reports experimental.
 - Open a PR into `release/v0.0.2`, run `ci-green wt/zha-confirm` in the background, squash-merge, and remove the worktree and branch.
+
+## Amendment (rig, 2026-10-25)
+
+`bulb_on_then_off` failed on this branch and on `release/v0.0.2` alike: the `set: off` step leaves ZHA ignoring the
+light's "on" report for 1.5 s, so HA stayed `off`. The bulb cases now wait 2 s after `set: off`, and
+`docs/integrations.md` lists the race as a ZHA sharp edge.

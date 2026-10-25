@@ -223,6 +223,12 @@ devices may differ.
   (about 1.8 hours). A longer duration is clamped and the result carries `clamped_to`.
 - **Turning the light on keeps the timer.** On the tested bulb, someone who turns the light on or
   changes its brightness during a timer still sees it switch off when the timer ends.
+- **Home Assistant can show the wrong state.** For 1.5 s after `light.turn_off`, ZHA ignores a
+  light's "on" report and never replays it. On the tested bulb, `turn_on_for` sent 0.1 s after
+  `light.turn_off` lit the bulb and started its timer, while Home Assistant showed it `off`. That's
+  why the timer belongs on the device: the bulb still switches itself off when the timer ends,
+  whereas a timer in Home Assistant, such as an automation that turns the light off once it has
+  been on for 10 minutes, would never fire.
 
 ## Matter
 
