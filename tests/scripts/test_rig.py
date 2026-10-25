@@ -41,6 +41,12 @@ def test_inventory_rejects_unknown_role(tmp_path):
         Inventory.load(path)
 
 
+def test_inventory_rejects_unknown_integration(tmp_path):
+    path = write(tmp_path, "inventory.yaml", "z2m:\n  - entity_id: switch.plug\n    roles: [switch_plug]\n")
+    with pytest.raises(ValueError, match="unknown integration 'z2m'"):
+        Inventory.load(path)
+
+
 def test_inventory_entity_by_role(inventory):
     assert inventory.entity("shelly", "switch_plug") == "switch.plug"
     assert inventory.entity("shelly", "light_dimmable") is None

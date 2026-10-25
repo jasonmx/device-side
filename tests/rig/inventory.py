@@ -35,7 +35,7 @@ ROLES = frozenset(
 )
 
 # Seconds either side of a duration within which a device may flip. Zigbee and Matter hop through a mesh.
-TOLERANCE_S = {"shelly": 2.0, "hue": 2.0, "z2m": 3.0, "zha": 3.0, "matter": 3.0}
+TOLERANCE_S = {"shelly": 2.0, "hue": 2.0, "zigbee2mqtt": 3.0, "zha": 3.0, "matter": 3.0}
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +53,8 @@ class Inventory:
         raw = yaml.safe_load(path.read_text()) or {}
         inventory = cls()
         for integration, entities in raw.items():
+            if integration not in TOLERANCE_S:
+                raise ValueError(f"{path.name}: unknown integration {integration!r}; use {', '.join(TOLERANCE_S)}")
             inventory.integrations[integration] = []
             for item in entities or []:
                 roles = frozenset(item.get("roles", ()))
