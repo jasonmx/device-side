@@ -12,7 +12,23 @@ Device Side unlocks popular on-device features for lights and switches, like tim
 
 If you're OK with that, let's dive in.
 
+## Feature Availability
+
+|                        |         Shelly          | Zigbee2MQTT | ZHA | Matter | Hue |
+|:---------------------- |:-----------------------:|:-----------:|:---:|:------:|:---:|
+| On With Timed Off      | ✅ switches<br>🙋 lights |          |   |      |   |
+| Off With Timed On      | ✅ switches<br>🙋 lights |     ❌      | ❌  |   ❌   |   |
+| Smooth Dimming         |                         |           |   |      | ✅¹ |
+| Set Without Turning On |                         |           |   |      | ✅¹ |
+
+✅ Stable · 🙋 Ready for release once a [volunteer tests it](CONTRIBUTING.md) · ❌ Appears not possible
+
+¹ Available now in [Hue Smooth Dimming](https://github.com/jasonmx/hue-smooth-dimming). 
+
+Details per integration are in [docs/integrations.md](docs/integrations.md). Shelly Gen 1 & Hue Bridge v1 are unsupported. 
+
 ## Get Started
+Requires at least one core integration to be installed: Matter, ZHA, Z2M via MQTT, Shelly, or Philips Hue.
 
 <details>
 <summary>Install from HACS</summary>
@@ -28,22 +44,6 @@ If you're OK with that, let's dive in.
    [![Add Device Side to your Home Assistant instance.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=device_side)
 
 </details>
-Requires at least one core integration to be installed: Matter, ZHA, Z2M via MQTT, Shelly, or Philips Hue.
-
-## Feature Availability
-
-|                        |         Shelly          | Zigbee2MQTT | ZHA | Matter | Hue |
-|:---------------------- |:-----------------------:|:-----------:|:---:|:------:|:---:|
-| On With Timed Off      | ✅ switches<br>🙋 lights |          |   |      |   |
-| Off With Timed On      | ✅ switches<br>🙋 lights |     ❌      | ❌  |   ❌   |   |
-| Smooth Dimming         |                         |           |   |      | ✅¹ |
-| Set Without Turning On |                         |           |   |      | ✅¹ |
-
-✅ Stable · 🙋 Ready for release once a [volunteer tests it](CONTRIBUTING.md) · ❌ Appears not possible
-
-¹ Available now in [Hue Smooth Dimming](https://github.com/jasonmx/hue-smooth-dimming). 
-
-Details per integration are in [docs/integrations.md](docs/integrations.md). Shelly Gen 1 & Hue Bridge v1 are unsupported. 
 
 ## Usage
 
