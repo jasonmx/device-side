@@ -19,9 +19,9 @@ def test_load_step_files_skips_the_examples():
     assert actions <= set(AdapterRegistry.discover().actions)
 
 
-def test_the_shelly_tests_keep_their_roles():
+def test_the_step_files_keep_their_roles():
     by_action = {step_file.action: step_file for step_file in load_step_files()}
-    assert by_action["turn_on_for"].roles == ("switch_plug", "light_onoff", "light_wrapped")
+    assert by_action["turn_on_for"].roles == ("switch_plug", "light_onoff", "light_wrapped", "light_dimmable")
     assert by_action["turn_off_for"].roles == ("switch_plug", "light_onoff", "light_wrapped", "light_dimmable")
 
 

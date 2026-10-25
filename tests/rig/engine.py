@@ -30,6 +30,10 @@ COMPONENT_DIR = RIG_DIR.parents[1] / "custom_components" / "device_side"
 # Light attributes a restore puts back, in the order light.turn_on would accept one color at a time.
 _RESTORE_COLOR = ("color_temp_kelvin", "hs_color", "xy_color", "rgb_color")
 
+# Integrations whose adapter calls an admin-only action with the caller's context, so their suites run on
+# HA_ADMIN_TOKEN. ZHA: issue_zigbee_cluster_command is registered with async_register_admin_service.
+ADMIN_INTEGRATIONS = frozenset({"zha"})
+
 # Statuses that mean the command reached the device.
 _REACHED = frozenset({"confirmed", "sent"})
 
@@ -670,17 +674,22 @@ async def run(
     registry: Any,
     ha: HAClient,
     *,
+    admin: HAClient | None = None,
     keyword: str | None = None,
     ask: Callable[[str], str] | None = input,
     tolerance: dict[str, float] = TOLERANCE_S,
     out: Callable[[str], None] = print,
 ) -> RunResult:
-    """Run every case in order on one connection and print the table. `ask=None` is --unattended."""
+    """Run every case in order and print the table; ADMIN_INTEGRATIONS run on `admin`. `ask=None` is --unattended."""
     results = []
     for suite in suites:
         adapter = registry.adapter(suite.action, suite.integration)
         if adapter is None:
             out(f"{suite.integration} / {suite.action}: no adapter, skipped")
+            continue
+        client = admin if suite.integration in ADMIN_INTEGRATIONS else ha
+        if client is None:
+            out(f"{suite.integration} / {suite.action}: needs HA_ADMIN_TOKEN, skipped")
             continue
         suite_result = SuiteResult(suite, adapter, [], complete=not keyword)
         out(f"{suite.integration} / {suite.action}")
@@ -688,7 +697,7 @@ async def run(
             if case.skip:
                 result = CaseResult(case.id, case.role, None, Outcome.SKIPPED, case.skip)
             else:
-                result = await _CaseRun(case, ha, registry, tolerance[suite.integration], ask).run()
+                result = await _CaseRun(case, client, registry, tolerance[suite.integration], ask).run()
             out(f"  {case.id}: {result.outcome}" + (f" ({result.detail})" if result.detail else ""))
             suite_result.cases.append(result)
         results.append(suite_result)

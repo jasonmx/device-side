@@ -95,6 +95,7 @@ def test_select_plan_lines_and_estimate(inventory):
         "    on_then_off[light_wrapped]: no light_wrapped entity in inventory",
         "    refuses_brightness_on_a_wrapper[light_wrapped]: no light_wrapped entity in inventory",
         "    refuses_brightness_out_of_scope[light_onoff]: no light_onoff entity in inventory",
+        "    bulb_on_then_off[light_dimmable]: no light_dimmable entity in inventory",
         "hue / turn_off_for (no adapter, will skip)",
     ]
     assert rig.plan_lines(shelly_on, inventory, registry, "on_then") == [
@@ -102,6 +103,7 @@ def test_select_plan_lines_and_estimate(inventory):
         "    on_then_off[switch_plug]: switch.plug",
         "    on_then_off[light_onoff]: no light_onoff entity in inventory",
         "    on_then_off[light_wrapped]: no light_wrapped entity in inventory",
+        "    bulb_on_then_off[light_dimmable]: no light_dimmable entity in inventory",
     ]
 
     shelly_seconds = sum(step_file.rig_seconds for step_file in step_files)
@@ -227,3 +229,15 @@ def test_a_held_rig_lock_refuses_a_second_run_naming_the_holder(tmp_path):
     held.close()
     rig.lock_rig(path, "wt/second").close()
     assert path.read_text().startswith("wt/second ")
+
+
+def test_check_tokens_stops_a_zha_run_without_an_admin_token():
+    step_file = next(f for f in load_step_files() if f.action == "turn_on_for")
+    zha, shelly = rig.Suite(step_file, "zha"), rig.Suite(step_file, "shelly")
+    env = {"HA_URL": "http://ha:8123", "HA_TOKEN": "tok"}
+    with pytest.raises(SystemExit, match="HA_URL and HA_TOKEN"):
+        rig.check_tokens({}, [shelly])
+    with pytest.raises(SystemExit, match="zha needs HA_ADMIN_TOKEN"):
+        rig.check_tokens(env, [shelly, zha])
+    rig.check_tokens(env, [shelly])
+    rig.check_tokens({**env, "HA_ADMIN_TOKEN": "admin"}, [zha])

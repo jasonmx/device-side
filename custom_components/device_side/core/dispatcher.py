@@ -24,7 +24,7 @@ class Dispatcher:
         self.registry = registry
 
     async def handle(self, action: type[Action], call: ServiceCall) -> ServiceResponse:
-        request = action.parse(self.hass, call)
+        request = replace(action.parse(self.hass, call), context=call.context)
         # expand_group=False: we expand group.* ourselves so members remember which group they came from.
         entity_ids = sorted(await async_extract_entity_ids(call, expand_group=False))
         if not entity_ids:

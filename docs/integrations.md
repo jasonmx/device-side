@@ -160,6 +160,50 @@ firmware. Most Z2M-supported lights cancel the timer on any state change.
   proprietary countdown attribute rather than `OnWithTimedOff`. Publishing `on_time` to these
   devices has no effect. This is a documented v1 gap; check your device's Z2M exposes page.
 
+## ZHA
+
+### What it talks to
+
+Zigbee devices on the core `zha` integration's own coordinator. Device Side calls ZHA's
+`zha.issue_zigbee_cluster_command` action, which sends the Zigbee `OnWithTimedOff` command to the
+device. The timer runs on the device.
+
+### How targets resolve
+
+An entity belongs to this integration when its entity registry entry comes from `zha`. The IEEE
+address and endpoint are parsed from the unique ID, which ZHA writes as `{ieee}-{endpoint_id}` for
+a light. An entity with a longer unique ID on the same endpoint (a quirk's extra entity, such as a
+child lock) is refused with `not_addressable`, so a timer never lands on the wrong entity.
+
+ZHA group entities return `group_not_supported` for now; target the member lights instead.
+
+### `turn_on_for`
+
+Sends `OnWithTimedOff` (OnOff cluster `0x0006`, command `0x42`) with `on_off_control: 0`,
+`on_time` in tenths of a second and `off_wait_time: 0`. With `brightness`, Device Side first calls
+`light.turn_on`, then sends the timer.
+
+Returns `sent`. ZHA raises when the device can't be reached or answers with a failure status, and
+that target is `rejected`.
+
+Lights only, with `brightness` as the only field, until each is tested on hardware. Plugs
+(`switch`) are out of scope.
+
+### Cancelling
+
+Send a regular `light.turn_on` or `light.turn_off`. The Zigbee spec says `On` and `Off` clear the
+device's `OnTime`, so the timer stops. A second `turn_on_for` replaces the first.
+
+### Sharp edges
+
+- **Admin only.** `zha.issue_zigbee_cluster_command` is an admin-only action, and Device Side
+  passes the caller's identity through to it. A call made as a non-admin user is `rejected` with
+  detail `admin_required`. Automations run without a user, so they pass.
+- **Duration limits.** `on_time` is a uint16 in tenths of a second, so the maximum is 6553.4 s
+  (about 1.8 hours). A longer duration is clamped and the result carries `clamped_to`.
+- **No confirmation.** The result is `sent`, never `confirmed`: Device Side doesn't read the
+  timer back yet.
+
 ## Matter
 
 ### What it talks to
