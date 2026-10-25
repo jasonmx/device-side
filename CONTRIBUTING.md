@@ -14,9 +14,9 @@ We're looking for four kinds of help in particular:
 
 - **On-device features only.** Our goal is to unlock features that already exist on devices and are hard to access in HA. We never simulate features with Home Assistant timers or loops.
 - **Features with broad appeal.** We focus on features that users keep asking for in community forums and feature requests, and which are supportable by at least one of the [top-30 Home Assistant integration](https://analytics.home-assistant.io/integrations/). That keeps us focused on the most important features, while keeping the codebase simple and easy to maintain.
-- **Gap fillers.** We focus on features that are missing from or really hard to use in HA. We avoid replicating what Core and the automation editor already do well.
+- **Gap fillers.** We build features that are missing from or really hard to use in HA. We avoid replicating what Core and the automation editor already do well.
 - **New integrations and entity domains.** Contributors are welcome to add new integrations (e.g. TP-Link, Z-Wave) and new entity domains (e.g. fans, climate), subject to the broad appeal principle above.
-- **Accessible to non-tech users.** We create simple actions that are easily understood. For example, we end dimming transitions with a `stop` action, because `set brightness_step: 0` is not intuitive.
+- **Accessible to non-tech users.** We create simple actions that are easily understood by humans. For example, we end dimming transitions with a `stop` action, because `set brightness_step: 0` is not intuitive.
 
 ## Developing
 
