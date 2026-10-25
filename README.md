@@ -66,7 +66,7 @@ Timer runs on the device. Use it to:
 | Field               | Actions     | Description                                                                                                           |
 |:------------------- |:----------- |:--------------------------------------------------------------------------------------------------------------------- |
 | `target`            | all         | Lights and switches (required)                                                                                        |
-| `duration`          | all         | How long until the device flips back, 50 ms to 7 days (required)                                                      |
+| `duration`          | all         | How long until the device toggles, 50 ms to 7 days (required)                                                      |
 | `brightness`        | turn_on_for | Brightness (1–255). 🔒                                                                                                |
 | `color_temp_kelvin` | turn_on_for | Color temperature (2000–6500 K). 🔒                                                                                   |
 | `rgb_color`         | turn_on_for | Color as `[red, green, blue]` (0–255 each). 🔒                                                                        |
@@ -77,7 +77,7 @@ Timer runs on the device. Use it to:
 
 A field marked 🔒 is `unsupported` in the release, as it's awaiting testing on real hardware. You can test it for us: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-**Cancel:** to cancel a timer, send a `turn_on`, `turn_off`, `toggle` or new timed on/off command.
+**Cancel:** to cancel a timer, send a new action (e.g. `turn_on`, `turn_off`, `toggle` or a new timed on/off).
 
 #### Results
 
@@ -94,7 +94,7 @@ If a requested duration is out of range, `clamped_to` reports the duration the d
 
 The action succeeds if at least one entity returns `confirmed` or `sent`. If every entity returns `unsupported` or `rejected`, the action fails instead: no response is returned, and the automation stops there, like any failed action. The error message lists each entity with its reason.
 
-##### YAML Example: Heater off after 4 hours, with a warning
+#### YAML Example: Heater off after 4 hours, with a warning
 
 ```yaml
 actions:
