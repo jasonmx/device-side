@@ -157,3 +157,63 @@ firmware. Most Z2M-supported lights cancel the timer on any state change.
 - **Tuya countdown devices.** Some Tuya devices exposed via Z2M implement auto-off through a
   proprietary countdown attribute rather than `OnWithTimedOff`. Publishing `on_time` to these
   devices has no effect. This is a documented v1 gap; check your device's Z2M exposes page.
+
+## Matter
+
+### What it talks to
+
+Matter devices (Thread, Wi-Fi, Ethernet), through the connection the core `matter` integration
+holds open to python-matter-server. Device Side adds no connection of its own and needs no
+credentials beyond those the Matter integration was set up with.
+
+### How targets resolve
+
+An entity belongs to this integration when its entity registry entry comes from `matter`. The
+node ID and endpoint ID are parsed from the entity's unique ID, which the Matter integration
+writes as `{fabric_hex16}-{node_hex16}-{postfix}-{endpoint_id}-{key}-{cluster_id}-{attr_id}`.
+
+Device Side requires the OnOff cluster's Lighting (LT) feature bit to be set on the endpoint.
+Lighting-category device types (OnOffLight, DimmableLight, ColorTemperatureLight,
+ExtendedColorLight) carry this feature; a plain on/off plug typically does not. An entity whose
+endpoint lacks the LT bit returns `unsupported` with detail `no_lt_feature`.
+
+Switch-domain entities (plugs) are out of scope for now: the LT feature behavior on plugs is not
+yet confirmed on hardware.
+
+### `turn_on_for`
+
+Sends `OnOff.Commands.OnWithTimedOff(onOffControl=0, onTime=<tenths>, offWaitTime=0)` to the
+device via python-matter-server. The device turns on and turns itself off after the duration
+without needing Home Assistant to remain running.
+
+`onTime` is the duration in 1/10-second units (`round(duration_s * 10)`). `onOffControl=0` means
+the command is accepted whether the light is currently on or off. `offWaitTime=0` places no
+restriction on retriggering.
+
+After the command, Device Side reads back the `OnOff.OnTime` attribute. If it is non-zero (the
+countdown is running), the result is `confirmed`. If it is 0 or the read-back fails, the result
+is `sent` with detail `timer_not_reported` or `readback_failed`.
+
+Light fields (`brightness`, `color_temp_kelvin`, etc.) are out of scope for now. When a tester
+reports them, the adapter will send a `light.turn_on` first to set color and brightness, then
+follow with `OnWithTimedOff`.
+
+### Cancelling
+
+Send a regular `light.turn_on` or `light.turn_off`: either cancels the timed-off (the Matter
+spec says `On` and `Off` commands clear `OnTime`). A second `turn_on_for` during a timer replaces
+it.
+
+### Sharp edges
+
+- **Timer limits are 0.1 to 6553.4 s.** `OnWithTimedOff.onTime` is a uint16 in 1/10-second
+  units; the maximum of 65534 tenths corresponds to 6553.4 s. Device Side rounds durations to 10
+  ms with a 50 ms floor; a duration outside the range is clamped and the result carries
+  `clamped_to`.
+- **The Lighting (LT) feature must be present.** The command is rejected at the device if the
+  endpoint lacks this feature. Device Side refuses early with `no_lt_feature` rather than
+  forwarding a command the device will ignore.
+- **duck-typed attribute descriptor.** Device Side checks the LT feature by reading the OnOff
+  cluster's FeatureMap attribute from the cached node data, using a minimal attribute descriptor
+  class rather than importing chip.clusters. This should work with any python-matter-server
+  version that exposes endpoint.get_attribute_value. Verified assumption: to confirm on hardware.

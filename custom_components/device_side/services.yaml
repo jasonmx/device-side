@@ -11,6 +11,8 @@ turn_on_for:
         integration: shelly
       - domain: [light, switch]
         integration: mqtt
+      - domain: light
+        integration: matter
   fields:
     duration: &duration
       required: true
