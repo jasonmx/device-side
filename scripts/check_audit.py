@@ -57,7 +57,8 @@ def frontmatter(path: Path) -> dict:
     text = path.read_text()
     if not text.startswith("---\n") or "\n---\n" not in text[4:]:
         raise ValueError(f"{path} has no YAML frontmatter between --- lines")
-    data = yaml.safe_load(text[4:].split("\n---\n", 1)[0])
+    # BaseLoader keeps every scalar a string: a short sha like 0123456 would otherwise load as an octal int.
+    data = yaml.load(text[4:].split("\n---\n", 1)[0], Loader=yaml.BaseLoader)
     if not isinstance(data, dict):
         raise ValueError(f"{path}'s frontmatter is not a mapping")
     return data

@@ -88,6 +88,12 @@ def test_unreadable_frontmatter(audited, text, error):
     assert error in problem
 
 
+def test_an_all_digit_sha_stays_a_string(tmp_path):
+    path = tmp_path / "record.md"
+    path.write_text("---\nbase: 0123456\npasses: [{from: 0123456, to: 1e10}]\n---\n")
+    assert check_audit.frontmatter(path) == {"base": "0123456", "passes": [{"from": "0123456", "to": "1e10"}]}
+
+
 def test_the_record_must_name_its_rc_and_base(audited):
     repo, base, end = audited
     assert errors(repo, record(repo, base=end, passes=[(base, end)])) == [f"base is {end!r}, not {base[:7]}"]
