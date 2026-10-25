@@ -489,8 +489,9 @@ relay exposed as a `switch` or as an on/off `light` rides one record. `beta` nee
 current fingerprint, and every capability and field in scope covered: a capability by any passing
 record (any fingerprint), a field by a current-fingerprint record. Untested capabilities are left out of
 `AdapterScope.capabilities` and refused, not taken into scope on a sibling's proof. Adding a capability
-after a tester report is a scope edit plus a record listing it; the fingerprint survives it. Tier ladder: see `CLAUDE.md`. A release-workflow check rejects tags not matching
-`^v\d+\.\d+\.\d+(rc\d+)?$`.
+after a tester report is a scope edit plus a record listing it; the fingerprint survives it. Tier ladder: see `CLAUDE.md`. Tags come only from the `cut-release-candidate` and `cut-release`
+workflows (a tag ruleset refuses any other), and `scripts/check_tag.py` refuses a tag not matching
+`^v\d+\.\d+\.\d+(rc\d+)?$` or not matching its branch.
 
 Tester reports (slice 9b): RC builds raise one fixable Repairs issue ("vX.Y.ZrcN: help test on your
 hardware"). Its repair flow multi-selects the RC's requested tests (each an adapter and capability, e.g.
