@@ -1,4 +1,6 @@
-"""ZHA turn_on_for: optional light.turn_on, then OnWithTimedOff through zha.issue_zigbee_cluster_command."""
+"""ZHA turn_on_for: optional light.turn_on, OnWithTimedOff through issue_zigbee_cluster_command, OnTime read-back."""
+
+from unittest.mock import AsyncMock
 
 import probatio
 import pytest
@@ -8,12 +10,21 @@ from homeassistant.helpers.service import async_register_admin_service
 from pytest_homeassistant_custom_component.common import async_mock_service
 
 from custom_components.device_side.const import DOMAIN
+from custom_components.device_side.integrations.zha import zcl
 from custom_components.device_side.integrations.zha.addressing import address
 
 from ...conftest import call
 from ...fixtures.zha import IEEE, add_zha_entity, zha_entry
 
-SENT = {"status": "sent", "integration": "zha"}
+CONFIRMED = {"status": "confirmed", "integration": "zha"}
+
+
+@pytest.fixture(autouse=True)
+def on_time(monkeypatch):
+    """zcl.read_attribute, reading back the 5 s every test requests unless it sets its own."""
+    read = AsyncMock(return_value=50)
+    monkeypatch.setattr(zcl, "read_attribute", read)
+    return read
 
 
 @pytest.fixture
@@ -31,7 +42,7 @@ async def test_light_sends_on_with_timed_off(hass, setup_production, commands, t
 
     response = await call(hass, "turn_on_for", {"entity_id": "light.bulb", "duration": 5})
 
-    assert response == {"light.bulb": SENT}
+    assert response == {"light.bulb": CONFIRMED}
     assert not turn_ons
     assert len(commands) == 1
     assert commands[0].data == {
@@ -50,7 +61,7 @@ async def test_brightness_calls_turn_on_first(hass, setup_production, commands, 
 
     response = await call(hass, "turn_on_for", {"entity_id": "light.bulb", "duration": 5, "brightness": 128})
 
-    assert response == {"light.bulb": SENT}
+    assert response == {"light.bulb": CONFIRMED}
     assert turn_ons[0].data == {"entity_id": "light.bulb", "brightness": 128}
     assert len(commands) == 1
 
@@ -65,13 +76,52 @@ async def test_untested_field_is_refused(hass, setup_production, commands, turn_
     assert not commands
 
 
-async def test_duration_in_tenths_and_clamped(hass, setup_production, commands, turn_ons):
+async def test_duration_in_tenths_and_clamped(hass, setup_production, commands, turn_ons, on_time):
     add_zha_entity(hass, zha_entry(hass), "light.bulb")
+    on_time.return_value = 65534
 
     response = await call(hass, "turn_on_for", {"entity_id": "light.bulb", "duration": {"hours": 2}})
 
-    assert response == {"light.bulb": {**SENT, "clamped_to": 6553.4}}
+    assert response == {"light.bulb": {**CONFIRMED, "clamped_to": 6553.4}}
     assert commands[0].data["params"]["on_time"] == 65534
+
+
+@pytest.mark.parametrize("remaining", [50, 20])
+async def test_on_time_within_slack_confirms(hass, setup_production, commands, on_time, remaining):
+    add_zha_entity(hass, zha_entry(hass), "light.bulb")
+    on_time.return_value = remaining
+
+    response = await call(hass, "turn_on_for", {"entity_id": "light.bulb", "duration": 5})
+
+    assert response == {"light.bulb": CONFIRMED}
+    on_time.assert_awaited_once_with(hass, (IEEE, 11), 0x0006, 0x4001)
+
+
+@pytest.mark.parametrize("remaining", [0, 51, 19])
+async def test_on_time_outside_slack_is_sent(hass, setup_production, commands, on_time, remaining):
+    add_zha_entity(hass, zha_entry(hass), "light.bulb")
+    on_time.return_value = remaining
+
+    response = await call(hass, "turn_on_for", {"entity_id": "light.bulb", "duration": 5})
+
+    assert response == {"light.bulb": {"status": "sent", "integration": "zha", "detail": "timer_not_reported"}}
+
+
+@pytest.mark.parametrize(
+    "read",
+    [
+        {"side_effect": ImportError("No module named 'zha'")},
+        {"side_effect": LookupError("ZHA device not found")},
+        {"return_value": None},  # an uncomparable value
+    ],
+)
+async def test_failed_read_is_sent(hass, setup_production, commands, on_time, read):
+    add_zha_entity(hass, zha_entry(hass), "light.bulb")
+    on_time.configure_mock(**read)
+
+    response = await call(hass, "turn_on_for", {"entity_id": "light.bulb", "duration": 5})
+
+    assert response == {"light.bulb": {"status": "sent", "integration": "zha", "detail": "readback_failed"}}
 
 
 async def test_switch_is_out_of_scope(hass, setup_production, commands, turn_ons):
@@ -116,7 +166,7 @@ async def test_zha_error_rejects_that_target(hass, setup_production, turn_ons):
     response = await call(hass, "turn_on_for", {"entity_id": ["light.bulb", "light.gone"], "duration": 5})
 
     rejected = {"status": "rejected", "integration": "zha", "detail": "error"}
-    assert response == {"light.bulb": SENT, "light.gone": rejected}
+    assert response == {"light.bulb": CONFIRMED, "light.gone": rejected}
 
 
 @pytest.fixture
@@ -146,11 +196,13 @@ async def _call_as(hass, user) -> dict:
 async def test_admin_caller_reaches_zha(hass, setup_production, admin_command, hass_admin_user):
     add_zha_entity(hass, zha_entry(hass), "light.bulb")
 
-    assert await _call_as(hass, hass_admin_user) == {"light.bulb": SENT}
+    assert await _call_as(hass, hass_admin_user) == {"light.bulb": CONFIRMED}
     assert admin_command[0].context.user_id == hass_admin_user.id
 
 
-async def test_non_admin_caller_is_refused_by_zha(hass, setup_production, admin_command, hass_read_only_user):
+async def test_non_admin_caller_is_refused_by_zha(
+    hass, setup_production, admin_command, hass_read_only_user, on_time
+):
     add_zha_entity(hass, zha_entry(hass), "light.bulb")
 
     with pytest.raises(HomeAssistantError) as raised:
@@ -158,6 +210,7 @@ async def test_non_admin_caller_is_refused_by_zha(hass, setup_production, admin_
 
     assert raised.value.translation_placeholders["summary"] == "light.bulb: admin_required"
     assert not admin_command
+    on_time.assert_not_awaited()
 
 
 @pytest.mark.parametrize(

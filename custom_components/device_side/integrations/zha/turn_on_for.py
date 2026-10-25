@@ -1,10 +1,13 @@
-"""ZHA turn_on_for: optional light.turn_on for fields, then OnWithTimedOff through zha.issue_zigbee_cluster_command."""
+"""ZHA turn_on_for: optional light.turn_on for fields, OnWithTimedOff through zha.issue_zigbee_cluster_command,
+then an OnTime read-back."""
 
+import logging
 from typing import ClassVar
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import Unauthorized
 
+from . import zcl
 from .addressing import address
 from ...actions.turn_on_for import TurnOnForRequest
 from ...core.adapter import Adapter
@@ -14,8 +17,13 @@ from ...core.scope import AdapterScope, DurationLimits
 # OnWithTimedOff.on_time is a uint16 in tenths of a second; 0xFFFF is reserved, so 65534 tenths is the most.
 _TIMER_LIMITS = DurationLimits(min_s=0.1, max_s=6553.4)
 
-_ON_OFF_CLUSTER = 0x0006
 _ON_WITH_TIMED_OFF = 0x42
+
+# OnTime counts down live, so the read-back lands a little under the request; matches the rig's ZHA tolerance
+# (tests/rig/inventory.py TOLERANCE_S["zha"]).
+_READBACK_SLACK_TENTHS = 30
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ZHATurnOnFor(Adapter[TurnOnForRequest]):
@@ -23,7 +31,9 @@ class ZHATurnOnFor(Adapter[TurnOnForRequest]):
 
     issue_zigbee_cluster_command is an admin-only action, so the call carries the caller's context: a non-admin
     caller is refused by ZHA, not let through with Device Side's own rights. The zha library raises on a
-    delivery failure or a non-success ZCL status, so a result that comes back is SENT.
+    delivery failure or a non-success ZCL status, so a command that returns was accepted. A new timer replaces a
+    running one, so reading OnTime straight back shows whether ours is running: CONFIRMED when it sits within
+    _READBACK_SLACK_TENTHS under the request, otherwise SENT with a detail.
     """
 
     action: ClassVar[str] = "turn_on_for"
@@ -35,6 +45,7 @@ class ZHATurnOnFor(Adapter[TurnOnForRequest]):
         duration=_TIMER_LIMITS,
         fields=frozenset({"brightness"}),
         max_concurrency=2,
+        confirmable=True,
     )
 
     def supports(self, hass: HomeAssistant, request: TurnOnForRequest, target: Target) -> str | None:
@@ -59,6 +70,7 @@ class ZHATurnOnFor(Adapter[TurnOnForRequest]):
                     blocking=True,
                     context=request.context,
                 )
+            on_time = round(request.duration_s * 10)
             try:
                 await hass.services.async_call(
                     "zha",
@@ -66,13 +78,13 @@ class ZHATurnOnFor(Adapter[TurnOnForRequest]):
                     {
                         "ieee": addr.ieee,
                         "endpoint_id": addr.endpoint_id,
-                        "cluster_id": _ON_OFF_CLUSTER,
+                        "cluster_id": zcl.ON_OFF_CLUSTER,
                         "cluster_type": "in",
                         "command": _ON_WITH_TIMED_OFF,
                         "command_type": "server",
                         "params": {
                             "on_off_control": 0,
-                            "on_time": round(request.duration_s * 10),
+                            "on_time": on_time,
                             "off_wait_time": 0,
                         },
                     },
@@ -81,6 +93,16 @@ class ZHATurnOnFor(Adapter[TurnOnForRequest]):
                 )
             except Unauthorized:
                 return self.result(target, Status.REJECTED, detail="admin_required")
-            return self.result(target, Status.SENT)
+
+            # The comparison sits in the try too: a value it can't compare is a failed read, not a failed command.
+            try:
+                remaining = await zcl.read_attribute(hass, addr, zcl.ON_OFF_CLUSTER, zcl.ON_TIME)
+                running = 0 < remaining and on_time - _READBACK_SLACK_TENTHS <= remaining <= on_time
+            except Exception as err:  # noqa: BLE001 - zha and zigpy errors can't be imported here; see zcl.py
+                _LOGGER.debug("%s read-back failed for %s: %s", self.action, target.entity_id, err)
+                return self.result(target, Status.SENT, detail="readback_failed")
+            if running:
+                return self.result(target, Status.CONFIRMED)
+            return self.result(target, Status.SENT, detail="timer_not_reported")
 
         return await self.gather(hass, targets, send)

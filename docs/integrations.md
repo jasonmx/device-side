@@ -183,8 +183,12 @@ Sends `OnWithTimedOff` (OnOff cluster `0x0006`, command `0x42`) with `on_off_con
 `on_time` in tenths of a second and `off_wait_time: 0`. With `brightness`, Device Side first calls
 `light.turn_on`, then sends the timer.
 
-Returns `sent`. ZHA raises when the device can't be reached or answers with a failure status, and
-that target is `rejected`.
+ZHA raises when the device can't be reached or answers with a failure status, and that target is
+`rejected`. Otherwise Device Side reads the OnTime attribute (`0x4001`) straight back, uncached.
+OnTime counts down live and a new timer replaces an old one, so the result is `confirmed` when OnTime
+is above 0, at most the requested tenths, and no more than 3 s under them. Otherwise it is `sent`,
+with detail `timer_not_reported` (the bulb answered with some other value) or `readback_failed`
+(the read itself failed).
 
 Lights only, with `brightness` as the only field, until each is tested on hardware. Plugs
 (`switch`) are out of scope.
@@ -219,8 +223,12 @@ devices may differ.
   (about 1.8 hours). A longer duration is clamped and the result carries `clamped_to`.
 - **Turning the light on keeps the timer.** On the tested bulb, someone who turns the light on or
   changes its brightness during a timer still sees it switch off when the timer ends.
-- **No confirmation.** The result is `sent`, never `confirmed`: Device Side doesn't read the
-  timer back yet.
+- **Home Assistant can show the wrong state.** For 1.5 s after `light.turn_off`, ZHA ignores a
+  light's "on" report and never replays it. On the tested bulb, `turn_on_for` sent 0.1 s after
+  `light.turn_off` lit the bulb and started its timer, while Home Assistant showed it `off`. That's
+  why the timer belongs on the device: the bulb still switches itself off when the timer ends,
+  whereas a timer in Home Assistant, such as an automation that turns the light off once it has
+  been on for 10 minutes, would never fire.
 
 ## Matter
 

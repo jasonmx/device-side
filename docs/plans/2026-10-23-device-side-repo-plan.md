@@ -428,7 +428,7 @@ class Adapter[RequestT](ABC):
 - **ZHA:** ieee from `("zha", ieee)` identifier; endpoint from unique_id `"{ieee}-{endpoint}"`
   [M]. Optional `light.turn_on`, then `zha.issue_zigbee_cluster_command` cluster 0x0006 cmd 0x42
   params `{on_off_control:0, on_time:tenths, off_wait_time:0}`, `context=call.context`. Exception
-  -> `REJECTED`, else `SENT`; read-back of OnTime (0x4001) later for `CONFIRMED`.
+  -> `REJECTED`; then read OnTime (0x4001) -> `CONFIRMED` within 3 s under the request, else `SENT`.
 - **Matter:** `get_node_from_device_entry(hass, device)` (`matter/helpers.py`); endpoint parsed
   from the right of unique_id `{node_device_id}-{endpoint}-{key}-{cluster}-{attr}` (`parts[-4]`).
   `supports()` requires the OnOff FeatureMap Lighting bit else `no_lt_feature`. Optional
@@ -634,13 +634,13 @@ the first action of that session is slice 0.
 2. Shelly: `RpcDevice.call_rpc` signature at the pinned aioshelly; `toggle_after` type/unit and
    limits; `GetStatus` timer field names; `Switch.Set toggle_after` [M]; how `_id` derives from key.
 3. ZHA (answered in slice 10, zha 2.3.1): `Device.issue_cluster_command` raises `ZHAException` on a
-   non-success ZCL status and zigpy raises on delivery failure, so a returned call is `SENT`. Params
+   non-success ZCL status and zigpy raises on delivery failure, so a returned call was accepted. Params
    `on_off_control`, `on_time`, `off_wait_time`, `command_type: server`. A light's unique_id is
    `{ieee}-{endpoint}`; group entities are `{platform}_zha_group_0x{id:04x}`. A non-admin caller gets
    `Unauthorized` -> `REJECTED`/`admin_required`. OnTime read-back works on the rig's Hue bulb (counts
-   down live; a new timer replaces the old), so `CONFIRMED` = OnTime at or just under the request. An
-   adapter can only read it through ZHA internals (`get_zha_gateway`); the public read is an admin
-   websocket command. Per-device results: `docs/integrations.md`, ZHA, Tested behavior.
+   down live; a new timer replaces the old), so `CONFIRMED` = OnTime at or just under the request.
+   Built: `integrations/zha/zcl.py` reads it through ZHA internals (`get_zha_gateway`), since the
+   public read is an admin websocket command. Per-device results: `docs/integrations.md`, ZHA, Tested behavior.
 4. Z2M: `zigbee2mqtt_` identifier prefix [M]; IEEE as topic segment [M]; `command_topic` from the
    entity object vs base-topic derivation; whether `on_time` + `brightness` in one payload is
    safe (would remove the two-step on Z2M).
