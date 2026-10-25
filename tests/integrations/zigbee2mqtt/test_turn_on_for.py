@@ -74,29 +74,14 @@ async def test_light_with_multiple_fields_passes_them_all_to_turn_on(hass, setup
     assert len(publishes) == 1
 
 
-async def test_switch_skips_turn_on_and_publishes_on_time(hass, setup_production, publishes, turn_ons):
-    entry = z2m_entry(hass)
-    add_z2m_entity(hass, entry, "switch.plug")
+async def test_switch_is_out_of_scope(hass, setup_production, publishes, turn_ons):
+    add_z2m_entity(hass, z2m_entry(hass), "switch.plug")
 
-    response = await call(hass, "turn_on_for", {"entity_id": "switch.plug", "duration": 5})
+    with pytest.raises(HomeAssistantError) as raised:
+        await call(hass, "turn_on_for", {"entity_id": "switch.plug", "duration": 5})
 
-    assert response == {"switch.plug": SENT}
-    assert not turn_ons
-    assert len(publishes) == 1
-    assert json.loads(publishes[0].data["payload"]) == {"state": "ON", "on_time": 5.0}
-
-
-async def test_switch_with_brightness_ignores_field_and_publishes(hass, setup_production, publishes, turn_ons):
-    entry = z2m_entry(hass)
-    add_z2m_entity(hass, entry, "switch.plug")
-
-    response = await call(
-        hass, "turn_on_for", {"entity_id": "switch.plug", "duration": 5, "brightness": 200}
-    )
-
-    assert response == {"switch.plug": {**SENT, "detail": "light_fields_ignored"}}
-    assert not turn_ons
-    assert len(publishes) == 1
+    assert raised.value.translation_placeholders["summary"] == "switch.plug: domain_not_tested"
+    assert not publishes
 
 
 async def test_duration_rounded_to_one_decimal_place(hass, setup_production, publishes, turn_ons):
