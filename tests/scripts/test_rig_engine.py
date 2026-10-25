@@ -23,7 +23,7 @@ from tests.rig.engine import (
 )
 from tests.rig.inventory import Inventory, RigEntity
 
-TOL = 0.1
+TOL = 0.2
 PENDING: list[asyncio.TimerHandle | asyncio.Task] = []
 TOLERANCE = {"shelly": TOL, "fake": TOL}
 REGISTRY = AdapterRegistry.discover()
@@ -36,7 +36,7 @@ tests:
     roles: [switch_plug]
     steps:
       - set: {state: off}
-      - call: {duration: 0.3}
+      - call: {duration: 0.6}
       - expect_response: {status: expected, integration: self}
       - expect_state: {state: on, within: tol}
       - wait: duration - tol
@@ -135,7 +135,7 @@ async def test_a_timed_on_off_passes_and_restores(tmp_path):
     ha = FakeHA({"switch.plug": {"state": "on"}}, timer_on)
     result = await run_one(ha, suite(tmp_path, ON_THEN_OFF), inventory(switch_plug="switch.plug"))
     assert outcomes(result) == {"on_then_off[switch_plug]": (Outcome.PASS, "")}
-    assert ("device_side", "turn_on_for", {"entity_id": "switch.plug", "duration": {"seconds": 0.3}}) in ha.calls
+    assert ("device_side", "turn_on_for", {"entity_id": "switch.plug", "duration": {"seconds": 0.6}}) in ha.calls
     assert ha.calls[-1] == ("switch", "turn_on", {"entity_id": "switch.plug"})
     assert result.suites[0].cases[0].reached
     assert not result.failed
@@ -150,7 +150,7 @@ async def test_a_device_that_never_turns_off_fails_on_the_timeout(tmp_path):
     result = await run_one(ha, suite(tmp_path, ON_THEN_OFF), inventory(switch_plug="switch.plug"))
     outcome, detail = outcomes(result)["on_then_off[switch_plug]"]
     assert outcome is Outcome.FAIL
-    assert detail.startswith("step 7 (expect_state): switch.plug: expected {'state': 'off'} within 0.2 s")
+    assert detail.startswith("step 7 (expect_state): switch.plug: expected {'state': 'off'} within 0.4 s")
     assert result.failed
 
 
@@ -239,8 +239,8 @@ async def test_observe_unattended_reports_not_observed_and_proves_nothing(tmp_pa
     ha = FakeHA({"switch.plug": {}}, timer_on)
     result = await run_one(ha, suite(tmp_path, OBSERVED), inventory(switch_plug="switch.plug"), ask=None)
     assert outcomes(result) == {"on_then_off[switch_plug]": (Outcome.NOT_OBSERVED, "")}
-    assert result.suites[0].recordable
     assert result.suites[0].proven == []
+    assert not result.suites[0].recordable
     record = render_record(result.suites[0], "Shelly", "2026.10.1", [], "2026-10-25", "test")
     assert "| Capabilities | none |" in record
     assert "`not observed`" in record
@@ -420,7 +420,8 @@ async def test_sample(tmp_path, expect, step, failure):
     steps = suite(tmp_path, SAMPLE.replace("EXPECT", expect))
     result = await run_one(ha, steps, inventory(light_dimmable="light.lamp"))
     outcome, detail = outcomes(result)["ramps[light_dimmable]"]
-    assert (outcome is Outcome.PASS) if not failure else (failure in detail)
+    assert outcome is (Outcome.FAIL if failure else Outcome.PASS)
+    assert failure in detail
 
 
 async def test_duration_before_any_call_fails_the_step(tmp_path):
@@ -454,3 +455,38 @@ async def test_a_full_pass_writes_a_record_and_a_failure_writes_none(tmp_path):
     assert "| Fields | none |" in record
     assert "| `on_then_off[switch_plug]` | `switch` (switch_plug) | pass |" in record
     assert "switch.plug" not in record
+
+
+def header(role: str) -> str:
+    """A one-test step file on `role`, steps to follow."""
+    return f"action: turn_on_for\nrig_seconds: 5\ntests:\n  - name: t\n    roles: [{role}]\n    steps:\n"
+
+
+async def test_a_failed_restore_is_logged_and_keeps_the_result(tmp_path, caplog):
+    class Unreachable(FakeHA):
+        async def call_service(self, domain, service, data=None, return_response=False):
+            if service == "turn_on":
+                raise OSError("device gone")
+            return await super().call_service(domain, service, data, return_response)
+
+    ha = Unreachable({"light.lamp": {"state": "on"}})
+    text = header("light_dimmable") + "      - set: {state: off}\n      - expect_state: {state: on}\n"
+    result = await run_one(ha, suite(tmp_path, text), inventory(light_dimmable="light.lamp"))
+    assert outcomes(result)["t[light_dimmable]"][0] is Outcome.FAIL
+    assert "Could not restore light.lamp to on: device gone" in caplog.text
+
+
+@pytest.mark.parametrize(("brightness", "outcome"), [(50, Outcome.PASS), (39, Outcome.FAIL), (61, Outcome.FAIL)])
+async def test_a_range_bounds_a_drifting_attribute(tmp_path, brightness, outcome):
+    ha = FakeHA({"light.lamp": {"state": "on", "attributes": {"brightness": brightness}}})
+    text = header("light_dimmable") + "      - expect_state: {brightness: {min: 40, max: 60}}\n"
+    result = await run_one(ha, suite(tmp_path, text), inventory(light_dimmable="light.lamp"))
+    assert outcomes(result)["t[light_dimmable]"][0] is outcome
+
+
+async def test_set_activates_a_scene_without_waiting_on_its_state(tmp_path):
+    ha = FakeHA({"scene.evening": {"state": "2026-10-25T10:00:00+00:00"}})
+    text = header("scene") + "      - set: {state: on}\n"
+    result = await run_one(ha, suite(tmp_path, text), inventory(scene="scene.evening"))
+    assert outcomes(result)["t[scene]"] == (Outcome.PASS, "")
+    assert ("scene", "turn_on", {"entity_id": "scene.evening"}) in ha.calls

@@ -377,8 +377,8 @@ class SuiteResult:
 
     @property
     def recordable(self) -> bool:
-        ran = [case for case in self.cases if case.outcome is not Outcome.SKIPPED]
-        return self.complete and bool(ran) and all(case.outcome is not Outcome.FAIL for case in ran)
+        """A complete run that proved something and failed nothing; an all-unobserved run would erase a record."""
+        return self.complete and bool(self.proven) and all(case.outcome is not Outcome.FAIL for case in self.cases)
 
     @property
     def proven(self) -> list[CaseResult]:

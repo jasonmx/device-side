@@ -95,6 +95,10 @@ class HAClient:
             response.raise_for_status()
             state = await response.json()
         async with self._changed:
+            # An event that landed while the request was in flight is newer; keep it.
+            cached = self._states.get(entity_id)
+            if cached is not None and cached["last_updated"] > state["last_updated"]:
+                return cached
             self._states[entity_id] = state
         return state
 

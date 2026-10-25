@@ -62,6 +62,13 @@ def test_a_code_change_resets_the_fingerprint(module, old, new):
     assert module(MODULE.replace(old, new)) != module(MODULE)
 
 
+def test_a_string_heading_an_if_block_is_code_not_a_docstring(module):
+    def guarded(text: str) -> str:
+        return MODULE.replace("        return", f'        if target:\n            "{text}"\n        return')
+
+    assert module(guarded("one")) != module(guarded("two"))
+
+
 def test_main_prints_every_adapter(capsys):
     assert fp.main() == 0
     lines = capsys.readouterr().out.splitlines()

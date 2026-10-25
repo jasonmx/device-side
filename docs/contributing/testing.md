@@ -69,7 +69,7 @@ tests:
 | `expect_error` | The call before it must fail, with this `key` and/or `summary`. |
 | `expect_state` | Checks state and attributes now, or `within` seconds. `unchanged` is the state before the test. A `{min, max}` range fits values that drift. On a `group` it checks every member. |
 | `wait` | Sleeps. |
-| `sample` | Polls an attribute `for` seconds and expects it `rising`, `falling` or `steady`, optionally within `min`/`max`. |
+| `sample` | Polls `attribute` for `for` seconds and expects it `rising`, `falling` or `steady`, optionally within `min`/`max`. |
 | `observe` | Asks the person at the rig a y/N question. |
 | `restore` | Puts back the state from before the test. It also runs after every test, pass or fail. |
 

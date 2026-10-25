@@ -27,11 +27,14 @@ def _is_scope(node: ast.stmt) -> bool:
     return (func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)) == "AdapterScope"
 
 
+_DOCUMENTED = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+
+
 def _strip(node: ast.AST) -> None:
     for child in ast.walk(node):
         body = getattr(child, "body", None)
         if isinstance(body, list):
-            if body and _is_docstring(body[0]):
+            if isinstance(child, _DOCUMENTED) and body and _is_docstring(body[0]):
                 body.pop(0)
             body[:] = [stmt for stmt in body if not _is_scope(stmt)]
 
