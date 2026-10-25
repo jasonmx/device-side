@@ -15,7 +15,7 @@ A tier belongs to an **adapter** (action × integration) and covers its whole sc
 | Tier | Meaning | Bar |
 |---|---|---|
 | experimental | design in flux | `experimental=True` on the adapter; no coverage bar |
-| untested | design settled | >95% coverage of the adapter module; some of its scope not yet covered by a bench record |
+| untested | design settled | ≥95% line coverage of the adapter module; some of its scope not yet covered by a bench record |
 | beta | tested on hardware | at least one bench record (rig run or tester report) with the current fingerprint, and every capability and field in scope covered (below) |
 | stable | released | on `main`; everything on `main` is stable |
 
@@ -26,7 +26,7 @@ the `AdapterScope` declaration; any other change resets the adapter to `untested
 carries the new fingerprint. Regressions block promotion; they never demote.
 
 **Capabilities carry forward, fields don't.** A capability listed by any passing record (any
-fingerprint) stays covered while the adapter has a current-fingerprint record; a field needs a
+fingerprint) stays covered while the adapter has a current-fingerprint record that reached the device; a field needs a
 current-fingerprint record listing it.
 
 **Proof follows the call.** A bench record proves the call an adapter sends and the capability it

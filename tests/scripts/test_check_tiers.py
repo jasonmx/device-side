@@ -118,7 +118,7 @@ def test_untested_without_a_current_record(bench):
     bench("shelly/turn_on_for.md", record(fp=STALE, capabilities="`Light`, `Switch`"))
     [tier] = tiers(FakeRegistry({("turn_on_for", "shelly"): SHELLY}), bench.dir).values()
     assert tier.tier is Tier.UNTESTED
-    assert tier.uncovered == ("no record with the current fingerprint",)
+    assert tier.uncovered == ("no record with the current fingerprint that reached the device",)
 
 
 def test_a_field_needs_a_current_record(bench):
@@ -137,10 +137,17 @@ def test_a_capability_carries_forward_from_a_stale_record(bench):
 
 
 def test_a_stale_every_capability_record_carries_forward_every_capability(bench):
-    bench("shelly/turn_on_for.md", record(capabilities="none"))
+    bench("shelly/turn_on_for.md", record(capabilities="`Switch`"))
     bench("shelly/turn_on_for-issue-7.md", record(fp=STALE, capabilities=ct.ALL_CAPABILITIES))
     [tier] = tiers(FakeRegistry({("turn_on_for", "shelly"): SHELLY}), bench.dir).values()
     assert tier.tier is Tier.BETA
+
+
+def test_a_current_record_that_reached_nothing_carries_nothing_forward(bench):
+    bench("shelly/turn_on_for.md", record(capabilities="none"))
+    bench("shelly/turn_on_for-issue-7.md", record(fp=STALE, capabilities="`Light`, `Switch`"))
+    [tier] = tiers(FakeRegistry({("turn_on_for", "shelly"): SHELLY}), bench.dir).values()
+    assert tier.uncovered == ("no record with the current fingerprint that reached the device",)
 
 
 def test_an_unproven_capability_is_named(bench):

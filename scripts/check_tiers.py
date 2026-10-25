@@ -3,7 +3,8 @@
 
 Records are `docs/bench/<integration>/<action>.md` (a rig run) and `<action>-issue-<N>.md` (a tester report); an
 adapter's tier draws on all of them. A capability listed by any passing record stays covered while the adapter has
-at least one record with its current fingerprint; a field needs a current-fingerprint record listing it.
+at least one record with its current fingerprint that reached the device; a field needs a current-fingerprint
+record listing it.
 
 Exits 1 on a malformed record, a record with no adapter, a non-experimental adapter module under 95% line coverage
 (with --coverage), or, with --require-beta, any adapter that is not beta or experimental.
@@ -107,9 +108,14 @@ def read_records(registry: AdapterRegistry, bench_dir: Path) -> tuple[dict[tuple
 
 def uncovered(scope, current_hash: str, records: list[Record]) -> list[str]:
     """What in the scope no record covers, by the carry-forward rule in the module docstring."""
-    current = [record for record in records if record.fingerprint == current_hash]
+    # A record that reached nothing (every test unattended or skipped) proves no call, so it carries nothing forward.
+    current = [
+        record
+        for record in records
+        if record.fingerprint == current_hash and (record.capabilities is None or record.capabilities or record.fields)
+    ]
     if not current:
-        return ["no record with the current fingerprint"]
+        return ["no record with the current fingerprint that reached the device"]
     missing = []
     if scope.capabilities is None:
         if not any(record.capabilities is None for record in current):
