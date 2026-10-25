@@ -24,7 +24,7 @@ FAILED = frozenset({Status.UNSUPPORTED, Status.REJECTED})
 
 
 class Tier(StrEnum):
-    """Computed by gen_docs.py from coverage and bench records; never stored on an adapter."""
+    """Computed by check_tiers.py from coverage and bench records; never stored on an adapter."""
 
     STABLE = "stable"
     BETA = "beta"

@@ -32,8 +32,7 @@ If you're OK with these, let's dive in!
 |:---------------------- |:-----------------------:|:-----------:|:---:|:------:|:---:|
 | On With Timed Off      | ✨ switches<br>🙋 lights |     🔵      | 🔵  |   🔵   | 🔵  |
 | Off With Timed On      | ✨ switches<br>🙋 lights |     ❌      | ❌  |   ❌   | 🔵  |
-| Set Turn-On Levels     |           🔵            |     🔵      | 🔵  |   🔵   | 🔵  |
-| Hold-to-Dim            |           🔵            |     🔵      | 🔵  |   🔵   | ✅¹ |
+| Smooth Dimming         |           🔵            |     🔵      | 🔵  |   🔵   | ✅¹ |
 | Set Without Turning On |           🔵            |     🔵      | 🔵  |   🔵   | ✅¹ |
 
 ✨ New, tested on real hardware · ✅ Stable · 🙋 Needs a volunteer to test it
