@@ -1,0 +1,66 @@
+name: Cut release
+
+# The only way a vX.Y.Z tag is made (a tag ruleset refuses any other): from main, above the latest release, with
+# green CI on the head and every adapter beta (check_tiers --require-beta). Soak is the maintainer's call.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Tag to cut, vX.Y.Z"
+        required: true
+
+permissions: {}
+
+jobs:
+  cut:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    env:
+      VERSION: ${{ inputs.version }}
+      BRANCH: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Refuse a tag ref
+        if: github.ref_type != 'branch'
+        run: |
+          echo "::error::Dispatch from main, not a tag."
+          exit 1
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check the tag against the branch
+        run: python3 scripts/check_tag.py "$VERSION" "$BRANCH"
+
+      - name: Refuse a release candidate
+        run: |
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::$VERSION is not vX.Y.Z; RCs come from cut-release-candidate."
+            exit 1
+          fi
+
+      - name: Require green CI on the head
+        run: bash scripts/require_green.sh "$GITHUB_SHA"
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Require every adapter beta
+        run: .venv/bin/python scripts/check_tiers.py --require-beta
+
+      - name: Tag and publish the release
+        run: |
+          git tag "$VERSION" "$GITHUB_SHA"
+          git push origin "refs/tags/$VERSION"
+          gh release create "$VERSION" --verify-tag --latest --generate-notes --title "$VERSION"
