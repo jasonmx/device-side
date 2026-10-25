@@ -2,7 +2,8 @@
 
 Goal: no `vX.Y.ZrcN` tag exists unless `/audit-code` has been run over the code it ships and no
 Critical or High finding is left open. Lands as part of slice 9c of
-`2026-10-23-device-side-repo-plan.md` (it owns the tag-format check this reuses).
+`2026-10-23-device-side-repo-plan.md`; `2026-10-25-release-gates.md` amends it (workflow name, rc1 range,
+hotfix RCs from `main`, `cut-release`).
 
 ## Decisions
 
@@ -10,7 +11,7 @@ Critical or High finding is left open. Lands as part of slice 9c of
 |---|---|
 | Where the audit runs | Locally, by Jason's Claude session. CI only checks a committed record. No API key in CI, no vendored copy of the skill to drift from `~/.claude-ensio/skills/audit-code`. |
 | What blocks | Any Critical or High whose status is `open`. `waived` needs a `reason`. Medium/Low never block. |
-| Range | Previous RC tag of the same `vX.Y.Z` to the RC head; for `rc1`, merge-base with `main` (or the root commit while `main` has no code) to the RC head. |
+| Range | Previous RC tag of the same `vX.Y.Z` to the RC head; for `rc1`, the latest `vX.Y.Z` release tag that is an ancestor of the head (the root commit if none) to the RC head. That is the merge-base with `main` for a release branch, and also right for a hotfix RC on `main`. |
 | Timing | A `workflow_dispatch` job checks the record, then creates the tag. A failed audit means no tag. |
 
 ## Record: `docs/audits/vX.Y.ZrcN.md`
@@ -52,13 +53,14 @@ Stdlib plus PyYAML (already pulled in by the HA test deps). Tests in `tests/scri
 throwaway git repo in `tmp_path` and cover each failure plus the passing case. The script is not
 an adapter module, so the 95% adapter-coverage bar doesn't apply, but cover every branch anyway.
 
-## `.github/workflows/cut-rc.yml`
+## `.github/workflows/cut-release-candidate.yml`
 
-- `on: workflow_dispatch` with input `rc`; refuses to run unless `github.ref` is `release/**` and
-  `rc` matches `^v\d+\.\d+\.\d+rc\d+$` and its `X.Y.Z` matches the branch.
-- Steps: checkout with `fetch-depth: 0` → require every check run on `HEAD` concluded `success`
-  (same rule as `ci-green`: none attached is a failure) → `python scripts/check_audit.py "$RC"
-  "$GITHUB_SHA"` → `git tag "$RC" && git push origin "$RC"` → `gh release create "$RC"
+- `on: workflow_dispatch` with input `rc` matching `^v\d+\.\d+\.\d+rc\d+$`, from `release/vX.Y.Z` with a
+  matching `X.Y.Z`, or from `main` as a hotfix RC one patch above the latest release
+  (`scripts/check_tag.py`, shared with `cut-release`); never an existing tag.
+- Steps: checkout with `fetch-depth: 0` → `scripts/require_green.sh "$GITHUB_SHA"` (every workflow
+  run on the head but the `cut-*` ones concluded `success`; none attached is a failure) →
+  `scripts/check_audit.py "$RC" "$GITHUB_SHA"` → tag and push → `gh release create "$RC"
   --prerelease --generate-notes`.
 - `permissions: contents: write` on this job only.
 - Tags pushed with `GITHUB_TOKEN` don't trigger other workflows, so anything that must run on an
@@ -66,28 +68,28 @@ an adapter module, so the 95% adapter-coverage bar doesn't apply, but cover ever
 
 ## Bypass protection
 
-A tag ruleset on `v*rc*` restricting creation to GitHub Actions, so a manual `git push --tags`
-can't skip the gate. Check at implementation time whether rulesets are available on this private
-repo's plan; if not, note it as a step for the day the repo goes public (slice 5).
+A tag ruleset on `refs/tags/v*` (creation, update, deletion) that only GitHub Actions may bypass, so a
+manual `git push --tags` can't skip either gate. The repo is public, so rulesets are available.
 
 ## Local helper: `.claude/skills/rc-audit/SKILL.md`
 
-`/rc-audit vX.Y.ZrcN [--fix-pass]`: computes the range by the rule above, invokes `/audit-code
-<range>`, writes or appends the record (frontmatter + report), and lists the Critical/High it
-recorded as `open`. Jason then fixes or waives each, runs `--fix-pass`, commits the record, and
-dispatches `cut-rc`. Thin wrapper: all audit logic stays in the global skill.
+`/rc-audit vX.Y.ZrcN [--fix-pass]`: computes the range by the rule above
+(`scripts/check_audit.py --base`), invokes the project's `audit-code` skill on it, writes or appends
+the record (frontmatter + report), and lists the Critical/High it recorded as `open`. Jason then
+fixes or waives each, runs `--fix-pass`, commits the record, and dispatches
+`cut-release-candidate`. Thin wrapper: all audit logic stays in `audit-code`.
 
 ## CLAUDE.md change (Releases section)
 
 Replace "RCs are tagged `vX.Y.ZrcN` from it and run every tier." with:
 
-> RCs are tagged only by the `cut-rc` workflow, which requires `docs/audits/vX.Y.ZrcN.md`
+> RCs are tagged only by the `cut-release-candidate` workflow, which requires `docs/audits/vX.Y.ZrcN.md`
 > (`/rc-audit`) covering every commit since the previous RC with no open Critical/High. Every
 > tier runs on each RC.
 
 ## Done when
 
-- `check_audit.py` tests green; `cut-rc` dry-run on a scratch `release/v0.0.0` branch refuses a
+- `check_audit.py` tests green; `cut-release-candidate` dry-run on a scratch `release/v0.0.0` branch refuses a
   missing record, an open High, and a post-audit code commit, then tags once fixed.
 - Slice 9c row in the repo plan and the CLAUDE.md Releases line point at this gate.
 - `v0.0.2rc1` is the first real RC cut through it (v0.0.1 ships without an RC; see slice 5).

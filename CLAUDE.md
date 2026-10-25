@@ -51,7 +51,7 @@ a sibling's proof. Adding one after a tester report is a scope edit plus a recor
 - `custom_components/device_side/actions/`: one module per action
 - `custom_components/device_side/integrations/<integration>/`: one adapter module per action
 - `tests/{core,actions,integrations,rig}`: mirror the above; `rig/` drives the live HA, only via `scripts/rig.py`
-- `scripts/`: rig runner, household check, deploy
+- `scripts/`: rig runner, household check, deploy, release checks (tiers, tags, RC audits)
 - `docs/bench/<integration>/`: bench records. Design detail lives in the repo plan.
 
 ## Conventions
