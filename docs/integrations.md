@@ -180,18 +180,20 @@ ZHA group entities return `group_not_supported` for now; target the member light
 ### `turn_on_for`
 
 Sends `OnWithTimedOff` (OnOff cluster `0x0006`, command `0x42`) with `on_off_control: 0`,
-`on_time` in tenths of a second and `off_wait_time: 0`. With `brightness`, Device Side first calls
+`on_time` in tenths of a second and `off_wait_time: 0`. With a light field, Device Side first calls
 `light.turn_on`, then sends the timer.
 
 ZHA raises when the device can't be reached or answers with a failure status, and that target is
-`rejected`. Otherwise Device Side reads the OnTime attribute (`0x4001`) straight back, uncached.
-OnTime counts down live and a new timer replaces an old one, so the result is `confirmed` when OnTime
-is above 0, at most the requested tenths, and no more than 3 s under them. Otherwise it is `sent`,
-with detail `timer_not_reported` (the bulb answered with some other value) or `readback_failed`
-(the read itself failed).
+`rejected`. Otherwise Device Side reads the OnOff (`0x0000`) and OnTime (`0x4001`) attributes
+straight back in one uncached request. OnTime counts down live and a new timer replaces an old one,
+so the result is `confirmed` when the device reads on and OnTime is above 0, at most the requested
+tenths, and no more than 3 s under them. Otherwise it is `sent`, with detail `not_on` (the device
+reads off), `timer_not_reported` (OnTime holds some other value) or `readback_failed` (the read
+itself failed).
 
-Lights only, with `brightness` as the only field, until each is tested on hardware. Plugs
-(`switch`) are out of scope.
+Lights only, with `brightness` and `color_temp_kelvin` as the fields, until more are tested on
+hardware. Plugs (`switch`) are out of scope: the one tested, a Tuya TS011F, stores OnTime as its
+own countdown and never switches on, so it reads back `not_on`.
 
 ### Cancelling
 

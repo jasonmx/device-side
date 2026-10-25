@@ -48,6 +48,24 @@ def test_inventory_rejects_unknown_integration(tmp_path):
         Inventory.load(path)
 
 
+def test_inventory_maps_each_powered_entity_to_its_supply(tmp_path):
+    path = write(
+        tmp_path,
+        "inventory.yaml",
+        "zha:\n  - entity_id: light.bulb\n    roles: [light_ct]\n    powered_by: switch.plug\n"
+        "  - entity_id: switch.plug\n    roles: [switch_plug]\n",
+    )
+    assert Inventory.load(path).power() == {"light.bulb": "switch.plug"}
+
+
+def test_inventory_rejects_an_unlisted_supply(tmp_path):
+    path = write(
+        tmp_path, "inventory.yaml", "zha:\n  - entity_id: light.bulb\n    roles: [light_ct]\n    powered_by: switch.x\n"
+    )
+    with pytest.raises(ValueError, match="powered_by switch.x, which the inventory doesn't list"):
+        Inventory.load(path)
+
+
 def test_inventory_entity_by_role(inventory):
     assert inventory.entity("shelly", "switch_plug") == "switch.plug"
     assert inventory.entity("shelly", "light_dimmable") is None

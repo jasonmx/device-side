@@ -1,5 +1,5 @@
 """ZHA turn_on_for: optional light.turn_on for fields, OnWithTimedOff through zha.issue_zigbee_cluster_command,
-then an OnTime read-back."""
+then an OnOff and OnTime read-back."""
 
 import logging
 from typing import ClassVar
@@ -33,17 +33,19 @@ class ZHATurnOnFor(Adapter[TurnOnForRequest]):
     caller is refused by ZHA, not let through with Device Side's own rights. The zha library raises on a
     delivery failure or a non-success ZCL status, so a command that returns was accepted. A new timer replaces a
     running one, so reading OnTime straight back shows whether ours is running: CONFIRMED when it sits within
-    _READBACK_SLACK_TENTHS under the request, otherwise SENT with a detail.
+    _READBACK_SLACK_TENTHS under the request and OnOff reads on, otherwise SENT with a detail. OnTime alone is
+    not proof: a Tuya TS011F plug stores it as its own countdown and stays off.
     """
 
     action: ClassVar[str] = "turn_on_for"
     integration: ClassVar[str] = "zha"
     scope: ClassVar[AdapterScope] = AdapterScope(
         experimental=True,
-        # The rig has ZHA bulbs but no ZHA plug, so switch stays out of scope until someone tests one.
+        # The rig's ZHA plug (Tuya TS011F) stores OnTime as a countdown and never switches on, so switch stays
+        # out of scope until a plug that honors OnWithTimedOff is tested.
         domains=frozenset({"light"}),
         duration=_TIMER_LIMITS,
-        fields=frozenset({"brightness"}),
+        fields=frozenset({"brightness", "color_temp_kelvin"}),
         max_concurrency=2,
         confirmable=True,
     )
@@ -96,11 +98,16 @@ class ZHATurnOnFor(Adapter[TurnOnForRequest]):
 
             # The comparison sits in the try too: a value it can't compare is a failed read, not a failed command.
             try:
-                remaining = await zcl.read_attribute(hass, addr, zcl.ON_OFF_CLUSTER, zcl.ON_TIME)
+                read = await zcl.read_attributes(hass, addr, zcl.ON_OFF_CLUSTER, (zcl.ON_OFF, zcl.ON_TIME))
+                on_off, remaining = read[zcl.ON_OFF], read[zcl.ON_TIME]
+                if on_off not in (0, 1):  # zigpy's Bool and Python's bool both equal 0 or 1; anything else is no answer
+                    raise ValueError(f"OnOff read {on_off!r}")
                 running = 0 < remaining and on_time - _READBACK_SLACK_TENTHS <= remaining <= on_time
             except Exception as err:  # noqa: BLE001 - zha and zigpy errors can't be imported here; see zcl.py
                 _LOGGER.debug("%s read-back failed for %s: %s", self.action, target.entity_id, err)
                 return self.result(target, Status.SENT, detail="readback_failed")
+            if not on_off:
+                return self.result(target, Status.SENT, detail="not_on")
             if running:
                 return self.result(target, Status.CONFIRMED)
             return self.result(target, Status.SENT, detail="timer_not_reported")

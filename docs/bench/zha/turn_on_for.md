@@ -4,12 +4,12 @@
 |---|---|
 | Result | pass |
 | Date | 2026-10-25 |
-| Source | rig run (`scripts/rig.py`), commit `f2fbe79` |
-| Fingerprint | `a0fef920e49c0716` (`integrations/zha/turn_on_for.py`) |
+| Source | rig run (`scripts/rig.py`), commit `228d873` |
+| Fingerprint | `715f2c301a2ffd4e` (`integrations/zha/turn_on_for.py`) |
 | Home Assistant | 2026.10.2 |
 | Device | LTA004, firmware `0x01001416` |
 | Capabilities | every capability the adapter addresses |
-| Fields | `brightness` |
+| Fields | `brightness`, `color_temp_kelvin` |
 
 ## Tests
 
@@ -21,3 +21,4 @@
 | `refuses_brightness_on_a_wrapper[light_wrapped]` | light_wrapped: none in inventory | skipped |
 | `bulb_on_then_off[light_dimmable]` | `light` (light_dimmable) | pass |
 | `bulb_brightness_then_off[light_dimmable]` | `light` (light_dimmable) | pass |
+| `bulb_color_temp_then_off[light_ct]` | `light` (light_ct) | pass |

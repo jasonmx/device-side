@@ -42,6 +42,7 @@ TOLERANCE_S = {"shelly": 2.0, "hue": 2.0, "zigbee2mqtt": 3.0, "zha": 3.0, "matte
 class RigEntity:
     entity_id: str
     roles: frozenset[str]
+    powered_by: str | None = None  # the inventory switch this entity draws power through
 
 
 @dataclass(slots=True)
@@ -60,11 +61,19 @@ class Inventory:
                 roles = frozenset(item.get("roles", ()))
                 if unknown := roles - ROLES:
                     raise ValueError(f"{path.name}: {item['entity_id']} has unknown roles {sorted(unknown)}")
-                inventory.integrations[integration].append(RigEntity(item["entity_id"], roles))
+                inventory.integrations[integration].append(RigEntity(item["entity_id"], roles, item.get("powered_by")))
+        listed = {entity.entity_id for entities in inventory.integrations.values() for entity in entities}
+        for entity_id, supply in inventory.power().items():
+            if supply not in listed:
+                raise ValueError(f"{path.name}: {entity_id} is powered_by {supply}, which the inventory doesn't list")
         return inventory
 
     def entity(self, integration: str, role: str) -> str | None:
         return next((e.entity_id for e in self.integrations.get(integration, ()) if role in e.roles), None)
+
+    def power(self) -> dict[str, str]:
+        """Each entity that draws power through another, mapped to its supply, across every integration."""
+        return {e.entity_id: e.powered_by for entities in self.integrations.values() for e in entities if e.powered_by}
 
 
 def load_env(path: Path = ENV_FILE) -> dict[str, str]:

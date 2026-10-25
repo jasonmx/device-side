@@ -1,7 +1,7 @@
 # The device's own timer turns the target back off. A relay sends the same call whether HA shows it as a switch,
 # a light, or a switch_as_x light over the switch, so a pass on any of the three roles proves on/off for all.
 action: turn_on_for
-rig_seconds: 50
+rig_seconds: 60
 tests:
   - name: on_then_off
     roles: [switch_plug, light_onoff, light_wrapped]
@@ -54,6 +54,20 @@ tests:
       - call: {duration: 6, brightness: 128}
       - expect_response: {status: expected, integration: self}
       - expect_state: {state: on, brightness: {min: 120, max: 136}, within: tol}
+      - wait: duration - tol
+      - expect_state: {state: on}
+      - expect_state: {state: off, within: 2 * tol}
+
+  # Color temperature rides the same light.turn_on as brightness.
+  - name: bulb_color_temp_then_off
+    roles: [light_ct]
+    only: [zha, zigbee2mqtt]
+    steps:
+      - set: {state: off}
+      - wait: 2  # ZHA ignores a light's "on" report for 1.5 s after light.turn_off
+      - call: {duration: 6, color_temp_kelvin: 4000}
+      - expect_response: {status: expected, integration: self}
+      - expect_state: {state: on, color_temp_kelvin: {min: 3900, max: 4100}, within: tol}
       - wait: duration - tol
       - expect_state: {state: on}
       - expect_state: {state: off, within: 2 * tol}
