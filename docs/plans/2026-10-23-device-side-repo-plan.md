@@ -127,12 +127,14 @@ requires it.
     the transition cache holds for that light. Combined moves on Hue: verify on the rig
     whether per-attribute writes with separate durations run independently; if not, send one
     write with the longest duration and record `detail: shared_duration` (open item 12).
-- **Deferred, architecture must accommodate:** `set_turn_on_defaults` (wraps existing ZHA/Matter number
-  entities and Z2M `level_config`; no new entities), cross-integration `set_attributes`,
-  cross-integration `move`/`stop`, Shelly Gen1, further
+- **Deferred, architecture must accommodate:** cross-integration `set_attributes`, `get_attributes`
+  and `move`/`stop`, Shelly Gen1, further
   domains (cover, valve, lock), and one further integration: **Z-Wave JS**.
+- **`get_attributes` pairs with timed on/off and set-while-off:** every `turn_on_for`, `turn_off_for`
+  and `set_attributes` adapter needs a matching `get_attributes` capability on its integration, to
+  read the device state HA doesn't show (timer status; brightness, color and color temperature while off).
 - **Z-Wave JS (post-v1, decided 2026-10-23):** scope is `move`/`stop` via Multilevel Switch CC
-  Start/Stop Level Change (direction + duration), plus `set_turn_on_defaults` and auto-off only where a
+  Start/Stop Level Change (direction + duration), plus auto-off only where a
   device exposes them as config parameters (Inovelli, Zooz, GE/Jasco). Binary Switch CC has no
   `OnWithTimedOff` equivalent, so `turn_on_for` is not a Z-Wave goal. Jason no longer owns
   Z-Wave hardware, so **reach out to Inovelli** (who showed interest in the timer feature in a
@@ -143,6 +145,9 @@ requires it.
   ESPHome (too experimental; auto-off is compiled into device YAML, no runtime primitive),
   Tasmota (small, declining share), TP-Link Kasa (local, has a countdown module, but waits for
   someone to ask). A request with evidence reopens any of these.
+- **Set Turn-On Levels dropped (2026-10-25):** `set_turn_on_defaults` (the level and fade a device
+  remembers for a plain turn-on) is a big, complicated lift. Revisit once a large user base shows
+  whether it's needed and what it should look like.
 - **Naming convention (fixed now; it is a 0-to-1 decision):**
   1. `verb_object`, HA vocabulary only. Objects are the names HA's own services and state
      attributes use (`brightness`, `color_temp`, `attributes`, `scene`); protocol vocabulary
@@ -151,15 +156,7 @@ requires it.
      `move`, `stop`, `set_attributes` (write HA light attributes to the device
      without turning it on), `get_attributes`, `set_scene`.
   3. Persistent settings (change how the device behaves from now on) use `set_<behavior>` with
-     the trigger named in plain English. The former `set_on_level` becomes
-     **`set_turn_on_defaults`**: fields `brightness` and `transition`, exactly the two things
-     Zigbee/Matter Level Control let a device remember for a plain turn-on (`OnLevel`,
-     `OnTransitionTime`; Z2M `level_config.on_level` / `on_transition_time`). Its future sibling
-     for power-restore behavior (Zigbee/Matter `StartUp*`, Hue `powerup`, Shelly
-     `initial_state`) is `set_power_on_defaults` with `state` plus the same light fields. Both
-     read as "what the light defaults to when X happens", and "defaults" stays correct if more
-     attributes are added, where `set_turn_on_brightness` would not. (Confirmed by Jason,
-     2026-10-23.)
+     the trigger named in plain English, e.g. `set_power_on_defaults`. None are planned.
   4. Field names are the `light.turn_on` field names wherever one exists; a feature-specific
      field gets plain words (`duration`, `sweep_time`, `brightness_limit`).
   5. Field *values* are human terms for the outcome (`brighter`, `warmer`, a full-sweep time,
@@ -192,7 +189,7 @@ requires it.
   failed, so mixed rooms do not abort automations.
 - **Stability tiers** per adapter (action x integration): `experimental | untested | beta |
   stable`. Rules live in `CLAUDE.md` (Tiers, Releases); summary: only `experimental` is
-  declared (`AdapterScope.experimental`), the rest are computed by `gen_docs.py` from
+  declared (`AdapterScope.experimental`), the rest are computed by `scripts/check_tiers.py` from
   coverage and bench records keyed by the adapter's fingerprint; `stable` means on `main`. A
   tier covers the adapter's whole scope: there is no runtime tier gate and no options flow for
   it, and a capability or field nobody has tested is simply left out of
@@ -226,12 +223,10 @@ requires it.
      this record. **There is no dev HA; the live rig is the only HA.** The first time the
      integration loads in a real HA is the first approved rig deploy (slice 3); until then
      correctness rests on unit tests plus hassfest.
-- **Docs:** README is the front door (pitch, install, quick start, generated support matrix,
-  links). Start with a single `docs/integrations.md`, one section per integration on a fixed template
-  (what it talks to, how targets resolve, per-action notes, sharp edges, generated scope
-  block). `docs/actions/<action>.md` per action. `docs/contributing/add-an-action.md`,
-  `add-an-integration.md`, `testing.md`. MkDocs-ready layout, no site in v1; `integrations.md` splits into
-  per-integration pages only if it outgrows one file.
+- **Docs:** hand-written. README is the front door (pitch, install, feature table, usage). A
+  single `docs/integrations.md`, one section per integration on a fixed template (what it talks
+  to, how targets resolve, per-action notes, sharp edges), split into per-integration pages only
+  if it outgrows one file. `docs/contributing/testing.md`. No docs generator (slice 8 dropped).
 - **Repo:** private until v0.0.1 ships (slice 5), then public with contributor docs. MIT. American English in
   all user-facing text (matches HA).
 - **Versions:** minimum HA set to a release within the last six months (2026.x) so no compat
@@ -310,38 +305,34 @@ custom_components/device_side/
     hue/          __init__.py bridge.py transition_cache.py colors.py
                   set_attributes.py get_attributes.py set_scene.py move.py stop.py
 scripts/
-  gen_docs.py            matrix + per-page generated blocks from the registry; --check for CI
+  check_tiers.py         computed tiers, coverage and scope-coverage checks for CI (slice 9c)
   deploy.sh              the deploy sync command <branch>, then the deploy restart command (rig only)
   rig.py                 approval gate (inventory, adapters, duration, restart?) -> y/N -> deploy -> pytest -m rig
 docs/
   device_side_handoff-2026-10-23.md          existing
   plans/2026-10-23-device-side-repo-plan.md  this plan, saved in slice 0
-  matrix.md  matrix.yaml                     GENERATED
-  _notes.yaml                                note key -> Markdown footnote text
-  actions/<action>.md  integrations.md            fixed templates with <!-- generated:start/end --> blocks
-                                             (integrations.md: one section + one block each)
-  contributing/add-an-action.md  add-an-integration.md  bench-checklist-template.md  testing.md
+  integrations.md                            one section per integration, fixed template
+  contributing/testing.md
   bench/<integration>/<action>.md            per-adapter bench record; gates tier promotion
 tests/
   conftest.py            enable_custom_integrations autouse; setup_integration; fake_registry; call()
   fakes/fake_integration/ INTEGRATION "fake" + scripted adapters for dispatcher tests
   fixtures/{z2m,zha,matter,shelly,hue,groups}.py   fabricate registry entries + boundary mocks
-  core/   actions/   integrations/<i>/   docs/        one module per adapter; see Testing
+  core/   actions/   integrations/<i>/               one module per adapter; see Testing
   rig/    conftest.py (HA WS/REST client, inventory loader, snapshot/restore), inventory.yaml (gitignored),
           inventory.example.yaml, test_<integration>_<action>.py
 ```
 
-Repo root: README.md (matrix between `<!-- matrix:start/end -->`), hacs.json, pyproject.toml,
+Repo root: README.md (hand-written feature table), hacs.json, pyproject.toml,
 .pre-commit-config.yaml, requirements_test.txt, `.github/workflows/{lint,tests,hassfest,validate}.yml`
-copied from `/Users/jason/projects/hue-smooth-dimming`, plus `docs.yml` running
-`scripts/gen_docs.py --check`.
+copied from `/Users/jason/projects/hue-smooth-dimming`.
 
 ### Core contract
 
 ```python
 # core/models.py
 class Status(StrEnum): UNSUPPORTED, REJECTED, SENT, CONFIRMED
-class Tier(StrEnum): STABLE, BETA, UNTESTED, EXPERIMENTAL   # computed by gen_docs, never stored on an adapter
+class Tier(StrEnum): STABLE, BETA, UNTESTED, EXPERIMENTAL   # computed by check_tiers, never stored on an adapter
 class ActionKind(StrEnum): COMMAND, SETTING, QUERY
 
 @dataclass(frozen=True, slots=True)
@@ -388,7 +379,7 @@ class Adapter[RequestT](ABC):
 
 - **Registry:** `pkgutil.iter_modules` over `integrations/` and `actions/`; each package exports
   data (`INTEGRATION`, `ADAPTERS`, `ACTION`), not decorators, so import has no side effects, order is
-  deterministic (sorted), the docs generator can import without `hass`, and tests can build a
+  deterministic (sorted), the tier check and rig runner can import without `hass`, and tests can build a
   registry from an explicit module list. Each integration import is guarded: a failing import
   (library absent because the core integration is not installed) records
   `IntegrationInfo(available=False, unavailable_reason=...)` and setup continues. Discovery runs via
@@ -415,11 +406,7 @@ class Adapter[RequestT](ABC):
   failure (every result unsupported/rejected) raises
   `HomeAssistantError(translation_key="all_targets_failed")` with a per-entity summary; no
   targets raises `ServiceValidationError("no_targets")`.
-- **Setting-class actions** (future `set_turn_on_defaults`): same `Action`/`Adapter` contract
-  with `kind=SETTING`; ZHA/Matter adapters locate the sibling `number` entities on `target.device`
-  (Matter sets `translation_key="on_level"`; transition time likewise), call `number.set_value`
-  blocking, read back -> `CONFIRMED`; Z2M publishes `level_config` -> `SENT`. `kind` only
-  drives docs grouping.
+- **Setting-class actions** (none planned): same `Action`/`Adapter` contract with `kind=SETTING`.
 - **Query actions** (`get_attributes`): payload in `EntityResult.data`, `supports_response=ONLY`.
 - **Actions:** one `hass.services.async_register(DOMAIN, action.key, ...)` per discovered
   action in `async_setup`; `_call_if_loaded` raises `ServiceValidationError("not_loaded")` until
@@ -481,21 +468,17 @@ of an adapter's targets at once so native group commands stay possible. Hue `mov
   `tests/core/test_actions_setup.py` asserts all three exist for every discovered action and
   every schema field has a strings entry.
 
-### Docs generation
+### Tier computation
 
-`scripts/gen_docs.py` imports the registry without `hass`, emits `docs/matrix.yaml` (machine
-readable: per-adapter tier, fingerprint, domains, duration, capabilities, fields, confirmable, native_groups, notes,
-bench) and `docs/matrix.md`, and rewrites the generated block in README, in each
-`docs/actions/*.md`, and in each integration section of `docs/integrations.md` (one marker pair per
-section, `<!-- generated:<integration>:start/end -->`). Matrix adapter text: `tier · best status · duration
-range` with footnotes from `docs/_notes.yaml`. The generator fails on a missing or unused note
-key, a `bench` path that does not exist, or a non-experimental adapter under 95% coverage
-(`coverage.json`). CI runs `--check`. Fingerprint: AST hash of the adapter module, excluding
+`scripts/check_tiers.py` (slice 9c) imports the registry without `hass` and computes each adapter's
+tier. It fails on a `bench` path that does not exist or a non-experimental adapter under 95%
+coverage (`coverage.json`). CI runs it. It generates no docs: the README feature table and
+`docs/integrations.md` are hand-written. Fingerprint: AST hash of the adapter module, excluding
 docstrings and the `AdapterScope` declaration; bench records carry the fingerprint they
 tested and list the capabilities (Shelly: RPC components) and light fields they exercised. Proof
 follows the call: a record proves the device-side call, whatever HA domain the target shows, so a
 relay exposed as a `switch` or as an on/off `light` rides one record. `beta` needs every capability
-and field in scope covered by a record with the current fingerprint; the generator fails on a
+and field in scope covered by a record with the current fingerprint; the check fails on a
 scope entry no such record covers. Untested capabilities are left out of `AdapterScope.capabilities`
 and refused, not taken into scope on a sibling's proof. Adding a capability after a tester report is a
 scope edit plus a record listing it; the fingerprint, and so the existing records, survive it. Tier ladder: see `CLAUDE.md`. A release-workflow check rejects tags not matching
@@ -537,8 +520,7 @@ to hass (state patched LOADED), `device_registry.async_get_or_create(identifiers
 
 One test module per adapter under `tests/integrations/<i>/test_<action>.py` asserting the exact
 response dict and boundary call arguments; `tests/core/` (registry, resolver, groups, dispatcher,
-actions_setup) use only `tests/fakes/fake_integration`; `tests/docs/test_matrix_generated.py`
-regenerates into the scratch dir and diffs against committed output.
+actions_setup) use only `tests/fakes/fake_integration`.
 
 ### Rig (approval-gated, real HA)
 
@@ -594,20 +576,26 @@ in-use household lights.** Rig passes are recorded in `docs/bench/<integration>/
 | 2 | Shelly `turn_on_for` + `turn_off_for` | one RPC with fields; Gen1 -> unsupported; read-back -> confirmed under mock; Shelly section of `docs/integrations.md` on the template; adapter `experimental=True`. |
 | 3 | Rig harness | `scripts/rig.py`, `deploy.sh`, `tests/rig/conftest.py`, inventory example, `docs/contributing/testing.md`; **first approved deploy is the integration's first load in any HA**: confirm entry adds, actions appear with translated names, the brightness fields hide for a switch-only selection; then Shelly `turn_on_for` passes against the house; bench record written; Shelly `switch` and on/off `light` -> beta (shared on/off: a relay shown as a light sends the same `Switch.Set`); Shelly light fields and the `Light`/`CCT`/`RGB*` components out of scope until a tester reports. |
 | 4 | `turn_off_for` rig pass | rig test for `turn_off_for`; bench records written, so both Shelly adapters reach beta. (`toggle_for` was dropped.) |
-| 5 | First release (`v0.0.1`) + HACS submission | Detail in `2026-10-23-hacs-early-release.md`. Scope: Shelly `switch` and on/off `light` (shared on/off) for `turn_on_for` and `turn_off_for`. MIT `LICENSE`; `custom_components/device_side/brand/icon.png` (+ `@2x`); hand-written bench records and README feature table (no matrix markers; slice 8 decides how `gen_docs.py` handles it); README install via HACS custom repository; short `CONTRIBUTING.md`; full-history `gitleaks detect` clean; topics added; repo flipped public; `gh workflow enable validate.yml`, nightly schedule restored and private-repo guard removed; PR `release/v0.0.1` -> `main`, `ci-green` on `main` with hassfest + HACS validate green; tag `v0.0.1` and a full (not pre-) GitHub release; PR to `hacs/default` adding `jasonmx/device-side` to `integration`, from a personal fork; `release/v0.0.2` cut from `main`. **v0.0.1 ships without an RC soak to start the HACS review clock; from v0.0.2 the Releases rules apply in full.** |
+| 5 | First release (`v0.0.1`) + HACS submission | Detail in `2026-10-23-hacs-early-release.md`. Scope: Shelly `switch` and on/off `light` (shared on/off) for `turn_on_for` and `turn_off_for`. MIT `LICENSE`; `custom_components/device_side/brand/icon.png` (+ `@2x`); hand-written bench records and README feature table (no matrix markers); README install via HACS custom repository; short `CONTRIBUTING.md`; full-history `gitleaks detect` clean; topics added; repo flipped public; `gh workflow enable validate.yml`, nightly schedule restored and private-repo guard removed; PR `release/v0.0.1` -> `main`, `ci-green` on `main` with hassfest + HACS validate green; tag `v0.0.1` and a full (not pre-) GitHub release; PR to `hacs/default` adding `jasonmx/device-side` to `integration`, from a personal fork; `release/v0.0.2` cut from `main`. **v0.0.1 ships without an RC soak to start the HACS review clock; from v0.0.2 the Releases rules apply in full.** |
+| 9a | Rig step files | **plan in /plan first** (interview the maintainer before any code); rig tests converted to declarative YAML step files (set state → call action → expect → restore), keyed by inventory roles so a tester can later map roles to their own entities; the format is designed against every planned action (timed on/off, `move`/`stop` ramps from hue_dimmer's `RELEASE_CHECKLIST.md`, `set_attributes`/`get_attributes` while off), not just Shelly's; `scripts/rig.py` runs the step files, `--dry-run` prints the steps with entities filled in; adapter fingerprinting; each rig run prints the bench record fields (pass/fail per step, HA version, device model, firmware, adapter fingerprint). `testing.md` updated: dedicated non-admin HA user for the token; check whether ZHA admin context needs an exception. Lands before slice 6, so every later rig test is written as step files. |
 | 6 | Z2M `turn_on_for` | detect, addressing, publish; `light.turn_on` precedes when fields present; group topic when `native_groups`; rig test. |
+| 11 | Matter `turn_on_for` | LT check; `OnWithTimedOff`; optional read-back; rig test on bulb and plug. |
+| 10 | ZHA `turn_on_for` | addressing; admin context passthrough; ValueError -> rejected; rig test. |
 | 7 | Hue port | five adapters + bridge/transition_cache/colors; `move` across brightness, color_temp, hue, saturation; `grouped_light` native for move/stop, expanded for set/get_attributes; hue_dimmer tests ported to real-hass fixtures; rig parity with hue_dimmer `tests/RELEASE_CHECKLIST.md`; then Hue `turn_on_for`/`turn_off_for` once open item 10 is answered (`experimental=True`), with `cancel_delayed_toggle` across all integrations if the cancel contract needs it. |
-| 8 | Docs generator + templates | `gen_docs.py --check` in CI; matrix, README block, action pages, `integrations.md` sections; `_notes.yaml`; contributing guides. Lands before the first v0.0.2 RC. |
-| 9a | Bench + tiers + release gates | **plan in /plan first** (interview the maintainer before any code); fingerprinting and computed tiers in `gen_docs.py`, including the scope-coverage check; per-adapter coverage check; tag-format check; RC audit gate (`2026-10-23-rc-audit-gate.md`: `cut-rc` workflow, `check_audit.py`, `/rc-audit`); rig tests converted to declarative YAML step files (set state → call action → expect → restore), keyed by inventory roles so a tester can later map roles to their own entities; `scripts/rig.py` runs the step files, `--dry-run` prints the steps with entities filled in; each rig run prints the bench record fields (pass/fail per step, HA version, device model, firmware, adapter fingerprint); `test-report.yml` issue form (bug reports need it whenever 9b lands); `testing.md` updated: dedicated non-admin HA user for the token; check whether ZHA admin context needs an exception; bench files filled from rig runs. Lands before the first v0.0.2 RC, which is the project's first RC. |
-| 10 | ZHA `turn_on_for` | after Jason has ZHA running on the rig; addressing; admin context passthrough; ValueError -> rejected; rig test. |
-| 11 | Matter `turn_on_for` | after Jason has Matter running on the rig; LT check; `OnWithTimedOff`; optional read-back; rig test on bulb and plug. |
-| 12 | `v0.1.0` ("v1" names the scope, not the version) | feature complete for this plan; scope limited to what rig runs (and any tester reports) cover; matrix current; release checklist adapted from hue_dimmer. |
+| 9c | Release gates | **plan in /plan first**; computed tiers and the scope-coverage check in `scripts/check_tiers.py`, run in CI; per-adapter coverage check; tag-format check; RC audit gate (`2026-10-23-rc-audit-gate.md`: `cut-rc` workflow, `check_audit.py`, `/rc-audit`); `test-report.yml` issue form (bug reports need it whenever 9b lands); bench files filled from rig runs. Lands before the first RC (`v0.0.2rc1`), wherever in this sequence a release is first wanted. |
+| 12 | `v0.1.0` ("v1" names the scope, not the version) | feature complete for this plan; scope limited to what rig runs (and any tester reports) cover; README feature table current; release checklist adapted from hue_dimmer. |
 | 9b | Remote tester flow (after `v0.1.0`) | **plan in /plan first**; starts when an adapter needs hardware the rig lacks (a reported bug on someone else's device, a community integration such as Z-Wave JS). Standalone tester runner: one file (`uv run`, PEP 723 inline metadata, aiohttp WebSocket + PyYAML), talks to HA_URL + long-lived token, assumes integration installed via HACS or by hand (no deploy), runs 9a's YAML step files with a confirmation gate on every run; `tests/rig/client.py` moved to a location both the runner and `scripts/rig.py` import; runner prints a prefilled `test-report.yml` issue body; RC-only umbrella Repairs issue with multi-select flow and prefilled per-test links; bench files filled from tester reports. |
 
 Slice 9 was split on 2026-10-25. Color bulbs from Shelly and Hue let the maintainer's rig cover the v1
 integrations, so v0.1.0 needs no remote testers and the tester tooling moves to 9b. Hardware the rig still
 lacks (plugs on ZHA, Z2M and Matter; a Thread-native Matter bulb; Shelly components beyond the bulb's) stays
 out of scope until someone tests it.
+
+Re-planned later on 2026-10-25. Slice numbers are IDs; rows are in delivery order. Set Turn-On Levels was
+dropped (see Not planned). Slice 8 (docs generator) was dropped because the maintainer's rig now tests most
+devices: the README table stays hand-written and tier computation moves to 9c. Matter (11) and ZHA (10) moved
+ahead of the Hue port now that the rig can run both networks. 9a was split: rig step files land before slice 6
+so no later rig test is written twice, and the release gates (9c) land before the first RC.
 
 `v0.0.x` releases are cut between slices whenever a set of adapters reaches beta; one release may carry
 several integrations or actions.
@@ -661,7 +649,7 @@ the first action of that session is slice 0.
 
 ## Verification (end to end)
 
-- `pre-commit run --all-files`, `pytest` (unit), `python scripts/gen_docs.py --check` all green in CI
+- `pre-commit run --all-files`, `pytest` (unit), `scripts/check_tiers.py` all green in CI
   on every PR.
 - On the rig, with approval (there is no dev HA): first deploy adds the single entry, every
   action appears with translated names, light fields hide for switch-only selections; call

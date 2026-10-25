@@ -19,7 +19,7 @@ A tier belongs to an **adapter** (action × integration) and covers its whole sc
 | beta | tested on hardware | every capability and field in scope covered by a bench record (rig run or tester report) with the current fingerprint |
 | stable | released | on `main`; everything on `main` is stable |
 
-Only `experimental` is declared; `scripts/gen_docs.py` computes the rest and fails on scope no
+Only `experimental` is declared; `scripts/check_tiers.py` computes the rest and fails on scope no
 current-fingerprint record covers. Fingerprint = AST hash of the adapter module, excluding
 docstrings and the `AdapterScope` declaration; any other change resets the adapter to
 `untested`. Regressions block promotion; they never demote.

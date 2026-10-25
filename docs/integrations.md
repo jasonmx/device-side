@@ -1,9 +1,7 @@
 # Integrations
 
 One section per integration, each on the same template: what Device Side talks to, how a target
-entity becomes a device address, notes per action, sharp edges, and a scope block generated
-from the code. The generated blocks are rewritten by `scripts/gen_docs.py`; edit the prose around
-them, never inside them.
+entity becomes a device address, notes per action, and sharp edges.
 
 ## Shelly
 
@@ -87,7 +85,3 @@ input was not tested, and what it does may depend on the input mode.
 - **Only relays are in scope.** `Light`, `CCT`, `RGB`, `RGBW` and `RGBCCT` document `toggle_after`
   the same way as `Switch`, but they are different firmware and no hardware run has covered them,
   so they are refused until a tester reports one.
-
-<!-- generated:shelly:start -->
-_Generated from the code by `scripts/gen_docs.py` (slice 8)._
-<!-- generated:shelly:end -->
