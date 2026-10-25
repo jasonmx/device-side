@@ -734,7 +734,7 @@ async def run(
     out: Callable[[str], None] = print,
 ) -> RunResult:
     """Run every case in order and print the table; ADMIN_INTEGRATIONS run on `admin`. `ask=None` is --unattended."""
-    results = []
+    results, power = [], inventory.power()
     for suite in suites:
         adapter = registry.adapter(suite.action, suite.integration)
         if adapter is None:
@@ -750,8 +750,7 @@ async def run(
             if case.skip:
                 result = CaseResult(case.id, case.role, None, Outcome.SKIPPED, case.skip)
             else:
-                case_run = _CaseRun(case, client, registry, tolerance[suite.integration], ask, inventory.power())
-                result = await case_run.run()
+                result = await _CaseRun(case, client, registry, tolerance[suite.integration], ask, power).run()
             out(f"  {case.id}: {result.outcome}" + (f" ({result.detail})" if result.detail else ""))
             suite_result.cases.append(result)
         results.append(suite_result)

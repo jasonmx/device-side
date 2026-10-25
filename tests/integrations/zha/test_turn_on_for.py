@@ -1,4 +1,5 @@
-"""ZHA turn_on_for: optional light.turn_on, OnWithTimedOff through issue_zigbee_cluster_command, OnTime read-back."""
+"""ZHA turn_on_for: optional light.turn_on, OnWithTimedOff through issue_zigbee_cluster_command, then an OnOff and
+OnTime read-back."""
 
 from unittest.mock import AsyncMock
 
@@ -126,7 +127,8 @@ async def test_a_running_timer_on_a_device_that_stayed_off_is_sent(hass, setup_p
     [
         {"side_effect": ImportError("No module named 'zha'")},
         {"side_effect": LookupError("ZHA device not found")},
-        {"return_value": reads(None)},  # an uncomparable value
+        {"return_value": reads(None)},  # an uncomparable OnTime
+        {"return_value": reads(50, on=None)},  # an OnOff that is neither on nor off
         {"return_value": {}},  # a value missing
     ],
 )

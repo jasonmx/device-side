@@ -559,3 +559,21 @@ async def test_an_entity_unpowered_before_the_case_is_left_alone(tmp_path):
     await run_one(ha, suite(tmp_path, text, "zha"), powered_inventory(), admin=ha)
     assert ha.calls[-1] == ("switch", "turn_off", {"entity_id": "switch.plug"})
     assert not [call for call in ha.calls if call[0] == "light"]
+
+
+async def test_an_entity_that_never_rejoins_is_logged_after_the_deadline(tmp_path, monkeypatch, caplog):
+    monkeypatch.setattr(engine, "POWER_SETTLE_S", 0)
+    monkeypatch.setattr(engine, "POWER_REJOIN_S", 0.02)
+    monkeypatch.setattr(engine, "POWER_RETRY_S", 0.01)
+
+    class Gone(FakeHA):
+        async def call_service(self, domain, service, data=None, return_response=False):
+            if domain == "light":
+                raise OSError("no route")
+            return await super().call_service(domain, service, data, return_response)
+
+    ha = Gone({"light.bulb": {"state": "on"}, "switch.plug": {"state": "on"}})
+    text = header("switch_plug") + "      - set: {state: off}\n"
+    result = await run_one(ha, suite(tmp_path, text, "zha"), powered_inventory(), admin=ha)
+    assert outcomes(result)["t[switch_plug]"][0] is Outcome.PASS
+    assert "Could not restore light.bulb after power returned: no route" in caplog.text

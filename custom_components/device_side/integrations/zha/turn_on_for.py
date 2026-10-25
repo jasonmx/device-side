@@ -99,12 +99,14 @@ class ZHATurnOnFor(Adapter[TurnOnForRequest]):
             # The comparison sits in the try too: a value it can't compare is a failed read, not a failed command.
             try:
                 read = await zcl.read_attributes(hass, addr, zcl.ON_OFF_CLUSTER, (zcl.ON_OFF, zcl.ON_TIME))
-                is_on, remaining = bool(read[zcl.ON_OFF]), read[zcl.ON_TIME]
+                on_off, remaining = read[zcl.ON_OFF], read[zcl.ON_TIME]
+                if on_off not in (0, 1):  # zigpy's Bool and Python's bool both equal 0 or 1; anything else is no answer
+                    raise ValueError(f"OnOff read {on_off!r}")
                 running = 0 < remaining and on_time - _READBACK_SLACK_TENTHS <= remaining <= on_time
             except Exception as err:  # noqa: BLE001 - zha and zigpy errors can't be imported here; see zcl.py
                 _LOGGER.debug("%s read-back failed for %s: %s", self.action, target.entity_id, err)
                 return self.result(target, Status.SENT, detail="readback_failed")
-            if not is_on:
+            if not on_off:
                 return self.result(target, Status.SENT, detail="not_on")
             if running:
                 return self.result(target, Status.CONFIRMED)
