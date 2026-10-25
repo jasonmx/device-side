@@ -2,19 +2,26 @@
 
 [![HACS Default](https://img.shields.io/badge/HACS-Default-orange.svg)](https://hacs.xyz/) [![Latest Version](https://img.shields.io/github/v/release/jasonmx/device-side?sort=date)](https://github.com/jasonmx/device-side/releases) [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?logo=buymeacoffee&logoColor=black)](https://www.buymeacoffee.com/jasonmx)
 
-Device Side unlocks popular on-device features for lights and switches, like on-with-timed-off, via the Matter, Zigbee, Shelly and Hue integrations. Device-side features are more reliable than HA automations, as they run natively on the device and survive HA restarts.
+Device Side unlocks popular on-device features, like timed on/off, for Matter, Zigbee, Shelly and Hue lights and switches. Device-side features are more reliable than HA automations, as they run natively on devices and survive HA restarts.
 
 **Disclaimers:**
 
-1. **Device compatibility:** Some device makes and models act on commands but don't acknowledge them, and some acknowledge but don't act. Test Device Side's actions on your own devices before relying on them.
+1. **Compatibility warning:** Some device makes and models act on commands but don't acknowledge them, and some acknowledge but don't act. Test each of your devices with Device Side before relying on its features.
 
-2. **AI-assisted coding:** I code with AI. I've designed, coded and built products for 35 years, so have a rough idea what I'm doing. Every feature is only released after testing on real hardware.
+2. **AI-assisted coding:** I code with AI. I've designed, coded and built products for 35 years, so have a rough idea what I'm doing. All code changes are tested on real devices before release.
 
-If you're OK with these, let's dive in!
+If you're OK with that, let's dive in.
 
-# Get Started
+## Get Started
+
+### Requirements
+* At least one of these core integrations installed: Matter, ZHA, Z2M via MQTT, Shelly, Hue
+* Unsupported: Shelly Gen 1, Hue Bridge v1
 
 ### Install from HACS
+
+<details>
+<summary>Here's how</summary>
 
 1. Open the Device Side HACS repository
 
@@ -26,25 +33,24 @@ If you're OK with these, let's dive in!
 
    [![Add Device Side to your Home Assistant instance.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=device_side)
 
-# Feature Availability
+</details>
+
+## Feature Availability
 
 |                        |         Shelly          | Zigbee2MQTT | ZHA | Matter | Hue |
 |:---------------------- |:-----------------------:|:-----------:|:---:|:------:|:---:|
-| On With Timed Off      | ✨ switches<br>🙋 lights |     🔵      | 🔵  |   🔵   | 🔵  |
-| Off With Timed On      | ✨ switches<br>🙋 lights |     ❌      | ❌  |   ❌   | 🔵  |
-| Smooth Dimming         |           🔵            |     🔵      | 🔵  |   🔵   | ✅¹ |
-| Set Without Turning On |           🔵            |     🔵      | 🔵  |   🔵   | ✅¹ |
+| On With Timed Off      | ✨ switches<br>🙋 lights |          |   |      |   |
+| Off With Timed On      | ✨ switches<br>🙋 lights |     ❌      | ❌  |   ❌   |   |
+| Smooth Dimming         |                         |           |   |      | ✅¹ |
+| Set Without Turning On |                         |           |   |      | ✅¹ |
 
-✨ New, tested on real hardware · ✅ Stable · 🙋 Needs a volunteer to test it
-([help test](CONTRIBUTING.md)) · 🔵 Roadmap · ❌ Appears not possible
+✅ Stable · ✨ Newly released · 🙋 Ready for release once a [volunteer tests it](CONTRIBUTING.md) · ❌ Appears not possible
 
-¹ Available now in [Hue Smooth Dimming](https://github.com/jasonmx/hue-smooth-dimming), and moving into Device Side.
+¹ Available now in [Hue Smooth Dimming](https://github.com/jasonmx/hue-smooth-dimming). Details per integration are in [docs/integrations.md](docs/integrations.md).
 
-Details per integration are in [docs/integrations.md](docs/integrations.md).
+## Usage
 
-# Usage
-
-## Timed on/off
+### Timed on/off
 
 Timer runs on the device. Use it to:
 
@@ -105,6 +111,14 @@ actions:
           message: "Heater timer not confirmed: {{ result['switch.heater'].status }}"
 ```
 
-# License
+***
 
-MIT
+## Uninstall
+
+This integration follows standard integration removal.
+
+1. Open the integration
+
+[![Open the Hue Smooth Dimming integration in your Home Assistant instance.](https://my.home-assistant.io/badges/integration.svg)](https://my.home-assistant.io/redirect/integration/?domain=device_side)
+
+2. Open the ⋮ menu and choose **Delete**
