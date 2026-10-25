@@ -15,7 +15,7 @@ If you're OK with that, let's dive in.
 ## Get Started
 
 ### Requirements
-* At least one of these core integrations installed: Matter, ZHA, Z2M via MQTT, Shelly, Hue
+* Core integration(s) installed for Matter, ZHA, Z2M via MQTT, Shelly, or Philips Hue
 * Unsupported: Shelly Gen 1, Hue Bridge v1
 
 ### Install from HACS
