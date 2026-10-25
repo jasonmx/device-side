@@ -2,7 +2,7 @@
 
 [![HACS Default](https://img.shields.io/badge/HACS-Default-orange.svg)](https://hacs.xyz/) [![Latest Version](https://img.shields.io/github/v/release/jasonmx/device-side?sort=date)](https://github.com/jasonmx/device-side/releases) [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?logo=buymeacoffee&logoColor=black)](https://www.buymeacoffee.com/jasonmx)
 
-Device Side unlocks popular on-device features, like timed on/off, for Matter, Zigbee, Shelly and Hue lights and switches. Device-side features are more reliable than HA automations, as they run natively on devices and survive HA restarts.
+Device Side unlocks popular on-device features for lights and switches, like timed on/off, via Matter, Zigbee, Shelly or Hue. Device-side features run natively on your lights and switches, so survive HA restarts.
 
 **Disclaimers:**
 
@@ -14,14 +14,8 @@ If you're OK with that, let's dive in.
 
 ## Get Started
 
-### Requirements
-* Core integration(s) installed for Matter, ZHA, Z2M via MQTT, Shelly, or Philips Hue
-* Unsupported: Shelly Gen 1, Hue Bridge v1
-
-### Install from HACS
-
 <details>
-<summary>Here's how</summary>
+<summary>Install from HACS</summary>
 
 1. Open the Device Side HACS repository
 
@@ -34,6 +28,7 @@ If you're OK with that, let's dive in.
    [![Add Device Side to your Home Assistant instance.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=device_side)
 
 </details>
+Requires at least one core integration to be installed: Matter, ZHA, Z2M via MQTT, Shelly, or Philips Hue.
 
 ## Feature Availability
 
@@ -46,7 +41,9 @@ If you're OK with that, let's dive in.
 
 ✅ Stable · 🙋 Ready for release once a [volunteer tests it](CONTRIBUTING.md) · ❌ Appears not possible
 
-¹ Available now in [Hue Smooth Dimming](https://github.com/jasonmx/hue-smooth-dimming). Details per integration are in [docs/integrations.md](docs/integrations.md).
+¹ Available now in [Hue Smooth Dimming](https://github.com/jasonmx/hue-smooth-dimming). 
+
+Details per integration are in [docs/integrations.md](docs/integrations.md). Shelly Gen 1 & Hue Bridge v1 are unsupported. 
 
 ## Usage
 
