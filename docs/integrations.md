@@ -143,11 +143,10 @@ firmware. Most Z2M-supported lights cancel the timer on any state change.
 - **Duration limits.** Zigbee `on_time` is a uint16 in tenths of a second, so the maximum is
   65534 tenths = 6553.4 s (about 1.8 hours). A duration over 6553.4 s is clamped and the result
   carries `clamped_to`. Durations under 50 ms are floored to 50 ms.
-- **Renamed devices.** Z2M's MQTT command topic uses the device's *friendly name*, not its IEEE
-  address. Device Side derives the topic from the IEEE stored in the device identifier; this only
-  works when the device has never been renamed in Z2M (so the friendly name is still the IEEE).
-  If you renamed a device, the command topic won't match and the publish reaches nothing. Needs
-  verification on hardware; on the rig-verify list.
+- **Renamed devices.** Z2M names a device's topic after its IEEE address, or its `friendly_name`
+  if one is set. Device Side always publishes to the IEEE topic. Z2M's docs don't say whether
+  that topic still reaches a device after it is renamed, so this is unverified until a rig run
+  covers it.
 - **Custom base topic.** If Z2M is configured with a base topic other than `zigbee2mqtt`, the
   command topic Device Side builds will be wrong and the publish will reach no device. Check your
   Z2M configuration; there is no workaround in v1.
