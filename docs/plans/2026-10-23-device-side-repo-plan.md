@@ -71,8 +71,8 @@ requires it.
 ### Scope
 
 - **Integrations (v1):** Zigbee2MQTT via `mqtt`, ZHA, Matter, Shelly Gen2+, Hue v2. Hue is v1 for the
-  hue_dimmer port first; Hue `turn_on_for`/`turn_off_for` follow in slice 7, once the
-  cancel experiments (open item 10) pass.
+  hue_dimmer port. Hue `turn_on_for`/`turn_off_for` are `unsupported` (2026-10-26): the bridge
+  can't honor the cancel contract (open item 10).
 - **Actions (v1):**
   - `turn_on_for` on Z2M, ZHA, Matter, Shelly.
   - `turn_off_for` on Shelly only: it is Shelly-only natively (Zigbee/Matter `OnWithTimedOff` is
@@ -80,9 +80,10 @@ requires it.
   - **Cancel contract:** a regular `turn_on` or `turn_off` cancels the timed flip, on every
     integration. The action descriptions promise this. Shelly honors it natively (bench, 2026-10-24,
     Gen3/Gen4 fw 2.0.1: any `Set` without `toggle_after` cancels; a new `toggle_after` replaces;
-    `toggle_after: 0` is rejected). An integration that can't honor it natively adds a
-    `cancel_delayed_toggle` action, offered across all integrations, and the descriptions change to
-    point at it. No HA-side cancel hook: users who want one wire an automation to the action.
+    `toggle_after: 0` is rejected). Hue can't honor it, so it doesn't get the timed actions
+    (2026-10-26, open item 10): its bridge timers ignore every manual on/off, aren't visible in the
+    Hue app, and drop their action if the bulb is unpowered at expiry. No `cancel_delayed_toggle`
+    action and no HA-side cancel hook.
   - `toggle_for` dropped (2026-10-23): no use case. HA's `flash` covers a short toggle, and nobody
     needs a long one.
   - `turn_on_for` accepts `light.turn_on` fields (`brightness`, `color_temp_kelvin`, `hs_color`,
@@ -597,7 +598,7 @@ test-report issue).
 | 6 | Z2M `turn_on_for` | **Done** (#22, #23, #25). detect, addressing, publish; `light.turn_on` precedes when fields present; group topic when `native_groups`; rig test. |
 | 11 | Matter `turn_on_for` | **Done** (#24). LT check; `OnWithTimedOff`; optional read-back; rig test on bulb and plug. |
 | 10 | ZHA `turn_on_for` | **Done** (#31, #32, #34, #39). ZHA set up on the maintainer's rig first: a second Zigbee coordinator on its own channel, apart from Z2M's network; devices paired to it for the rig roles; steps in the private rig notes; addressing; admin context passthrough; ValueError -> rejected; rig test, run with an admin token (`.env.rig`) for ZHA suites only. |
-| 7 | Hue port | Plan: `docs/plans/2026-10-25-hue-port.md` (four PRs, 7a to 7d). five adapters + bridge/transition_cache/colors; `move` across brightness, color_temp, saturation (`hue` unsupported on Hue); `grouped_light` native for move/stop and get_attributes, expanded for set_attributes; hue_dimmer tests ported to real-hass fixtures; rig parity with hue_dimmer `tests/RELEASE_CHECKLIST.md`; then Hue `turn_on_for`/`turn_off_for` once open item 10 is answered (`experimental=True`), with `cancel_delayed_toggle` across all integrations if the cancel contract needs it. |
+| 7 | Hue port | Plan: `docs/plans/2026-10-25-hue-port.md` (three PRs, 7a to 7c). five adapters + bridge/transition_cache/colors; `move` across brightness, color_temp, saturation (`hue` unsupported on Hue); `grouped_light` native for move/stop and get_attributes, expanded for set_attributes; hue_dimmer tests ported to real-hass fixtures; rig parity with hue_dimmer `tests/RELEASE_CHECKLIST.md`. Hue `turn_on_for`/`turn_off_for` dropped after the open item 10 bench (2026-10-26): `unsupported`. |
 | 9c | Release gates | **Done** (#33, #35, #36, #37). Plan: `docs/plans/2026-10-25-release-gates.md`. Computed tiers and the scope-coverage check in `scripts/check_tiers.py`, run in CI; per-adapter coverage check; `test-report.yml` issue form (bug reports need it whenever 9b lands); every `v*` tag from a workflow (`cut-release-candidate` with the RC audit gate of `2026-10-23-rc-audit-gate.md`, `cut-release` with `check_tiers --require-beta`) behind a tag ruleset. Lands before the first RC (`v0.0.2rc1`), wherever in this sequence a release is first wanted. |
 | 9d | Rig coverage sweep | **plan in /plan first**; audit every adapter's scope (domains, capabilities, fields, native groups) against the maintainer's rig hardware; add inventory roles and step files for everything the rig can reach; rig runs leave a current-fingerprint bench record for each, so v0.1.0 launches with the widest scope the rig can prove. What the rig can't reach is listed for 9b and stays out of scope. |
 | 9e | Native groups survey | **plan in /plan first**; a short exploration of integration-native groups beyond Hue (Z2M and ZHA group entities; Matter and Shelly where HA exposes any): how each is detected and addressed, whether its native group command keeps the device-side behavior (timed off, transitions) across members, and a rig check of each candidate. Outcome: per integration, `native_groups` on or off for v0.1.0, recorded as a decision here, with bench records for those turned on. Hue's `grouped_light` ships in 7 regardless. |
@@ -661,12 +662,34 @@ the first action of that session is slice 0.
    names above are from memory.
 9. hassfest on custom components: accepts `services.yaml` without name/description when
    `strings.json` has `services`; `integration_type: service` + `single_config_entry`.
-10. Hue `turn_on_for`/`turn_off_for` (slice 7): bench handoff 7.1 (whether a one-shot
-    `behavior_instance` can express the timer), then the cancel experiments. Does a regular
-    `light.turn_on`/`turn_off` through the bridge cancel the instance? Does a Hue app or dimmer
-    switch press cancel it? Does deleting or disabling the instance cancel it? What happens to a
-    second `turn_on_for` while one is running? If the bridge can't honor the cancel contract, Hue's
-    `cancel_delayed_toggle` deletes the instance.
+10. Hue `turn_on_for`/`turn_off_for` (slice 7). Answered by bench spike 2026-10-26
+    (`docs/plans/2026-10-26-hue-timer-spike.md`): bridge BSB002 sw 6.1.1978418030, two LTA009 sw 1.163.1.
+    The bridge does **not** honor the cancel contract natively. **Decision:** Hue is `unsupported`
+    for both actions (Scope, cancel contract).
+    - **Expressible:** yes, as an instance of the built-in "Timers" `behavior_script` (raw
+      `POST clip/v2/resource/behavior_instance`). Configuration: `duration: {seconds: int}` (1 s
+      resolution; 0 fires at once), `where: [{group: room, items: [lights]}]`,
+      `what: [{group: room, actions: [{target: light, action: {on: {on: false}}}]}]`. Action targets
+      must be `light`: `room` and `grouped_light` are rejected, so a group needs one action per member.
+      `turn_off_for` is the same with `on: true` after an immediate off.
+    - **Start:** creating or enabling doesn't start it; `PUT {"trigger": {"start": {}}}` does (aiohue
+      `start`). POST rejects `trigger`, so it is always two calls. `state.next_trigger_time` appears once
+      started, a read-back for `confirmed`.
+    - **Accuracy:** fired within about 1 s of the duration at 1, 10, 12, 15, 45 and 60 s (1 s
+      sampling), inside `TOLERANCE_S`.
+    - **Plain on/off through HA:** no cancel. Off then on mid-timer, the timer still fired.
+    - **Hue app toggle, dimmer press:** no cancel. Both fired on time.
+    - **Delete, `stop` trigger:** both cancel. **Disable:** does not; a disabled started timer still fired.
+    - **Second call:** a second instance stacks (both fire). `metadata.name` isn't unique, so
+      find-and-replace by name is the adapter's job. Re-sending `start` restarts an instance from now;
+      a new duration is a `configuration` PUT (which stops it) then `start`, as the bridge refuses
+      both in one PUT.
+    - **Cleanup:** a fired instance stays (`timer_state: stopped`) until deleted. Not shown in the
+      Hue app. Cap: 43 `behavior_instance`s per bridge, shared with the app's own automations
+      (`507 Instance capacity limit error`).
+    - **Unreachable at expiry:** the bulb stays on. Power cut across expiry: the bridge still showed
+      it connected, sent the off, recorded it as off, and never retried; on power-up the bulb came on
+      and stayed on.
 11. Rig transport: WebSocket `call_service` `return_response` payload key and whether REST
     `?return_response` still exists in 2026.x (`websocket_api/commands.py:handle_call_service`,
     `api/__init__.py:APIDomainServicesView`); restart needs an admin token; SSH port and config
