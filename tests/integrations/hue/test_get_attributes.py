@@ -1,4 +1,7 @@
-"""Hue get_attributes: rows from aiohue's cache under HA's names and units; a room gets its own row and its lights'."""
+"""Hue get_attributes: one entry per target from aiohue's cache, keyed by entity_id as core's queries are.
+
+Brightness is percent and the shape flat, as on hue_dimmer, so its templates read these responses unchanged.
+"""
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError
@@ -8,11 +11,6 @@ from ...conftest import call
 from ...fixtures.hue import add_hue_entity, add_hue_group, hue_entry
 
 pytestmark = pytest.mark.usefixtures("setup_production")
-
-
-def row(attributes: dict, member_of: str | None = None) -> dict:
-    response = {"status": "confirmed", "integration": "hue", "attributes": attributes}
-    return response | ({"member_of": member_of} if member_of else {})
 
 
 def colors(xy: tuple[float, float]) -> dict:
@@ -37,7 +35,7 @@ async def test_light_row_uses_ha_attribute_names(hass, bridge):
 
     response = await call(hass, "get_attributes", {"entity_id": "light.lamp"})
 
-    assert response == {"light.lamp": row({"brightness": 102, "color_temp_kelvin": 2702, **colors((0.4, 0.4))})}
+    assert response == {"light.lamp": {"brightness": 40.0, "color_temp_kelvin": 2702, **colors((0.4, 0.4))}}
 
 
 async def test_light_without_features_reports_what_it_has(hass, bridge):
@@ -49,7 +47,7 @@ async def test_light_without_features_reports_what_it_has(hass, bridge):
 
     response = await call(hass, "get_attributes", {"entity_id": ["light.plug", "light.lamp"]})
 
-    assert response == {"light.plug": row({}), "light.lamp": row({"brightness": 128})}
+    assert response == {"light.plug": {}, "light.lamp": {"brightness": 50.0}}
 
 
 async def test_room_row_follows_the_bridge_while_lights_are_on(hass, bridge):
@@ -62,12 +60,7 @@ async def test_room_row_follows_the_bridge_while_lights_are_on(hass, bridge):
 
     response = await call(hass, "get_attributes", {"entity_id": "light.room"})
 
-    assert response == {
-        "light.room": row({"brightness": 153, "color_temp_kelvin": 3000}),
-        "light.one": row({"brightness": 51, "color_temp_kelvin": 4000}, member_of="light.room"),
-        "light.two": row({"brightness": 204, "color_temp_kelvin": 2000}, member_of="light.room"),
-    }
-    assert list(response) == ["light.room", "light.one", "light.two"]
+    assert response == {"light.room": {"brightness": 60.0, "color_temp_kelvin": 3000}}
 
 
 async def test_room_row_averages_every_light_while_all_are_off(hass, bridge):
@@ -75,7 +68,7 @@ async def test_room_row_averages_every_light_while_all_are_off(hass, bridge):
 
     response = await call(hass, "get_attributes", {"entity_id": "light.room"})
 
-    assert response["light.room"] == row({"brightness": 102, "color_temp_kelvin": 3000})
+    assert response["light.room"] == {"brightness": 40.0, "color_temp_kelvin": 3000}
 
 
 async def test_room_row_counts_only_the_lights_that_are_on(hass, bridge):
@@ -88,7 +81,7 @@ async def test_room_row_counts_only_the_lights_that_are_on(hass, bridge):
 
     response = await call(hass, "get_attributes", {"entity_id": "light.room"})
 
-    assert response["light.room"] == row({"brightness": 51, "color_temp_kelvin": 4000})
+    assert response["light.room"] == {"brightness": 20.0, "color_temp_kelvin": 4000}
 
 
 async def test_room_row_with_mixed_color_modes(hass, bridge):
@@ -104,16 +97,17 @@ async def test_room_row_with_mixed_color_modes(hass, bridge):
 
     response = await call(hass, "get_attributes", {"entity_id": "light.room"})
 
-    assert response["light.room"] == row({"brightness": 128, "color_temp_kelvin": 4000, **colors((0.45, 0.3))})
+    assert response["light.room"] == {"brightness": 50.0, "color_temp_kelvin": 4000, **colors((0.45, 0.3))}
 
 
-async def test_member_also_targeted_keeps_its_own_row(hass, bridge):
+async def test_one_entry_per_target(hass, bridge):
+    # A room's lights get entries only when targeted, as on hue_dimmer, so merge_response lists each target once.
     await room(hass, bridge, {"one": {}, "two": {}})
 
     response = await call(hass, "get_attributes", {"entity_id": ["light.room", "light.one"]})
 
-    assert response["light.one"] == row({"brightness": 128, "color_temp_kelvin": 2702})
-    assert response["light.two"]["member_of"] == "light.room"
+    assert set(response) == {"light.room", "light.one"}
+    assert response["light.one"] == {"brightness": 50.0, "color_temp_kelvin": 2702}
 
 
 async def test_empty_room_and_missing_light_fail(hass, bridge):
@@ -136,8 +130,8 @@ async def test_query_answers_when_only_some_targets_fail(hass, bridge):
 
     response = await call(hass, "get_attributes", {"entity_id": ["light.lamp", "light.gone"]})
 
-    assert response["light.lamp"]["status"] == "confirmed"
-    assert response["light.gone"] == {"status": "rejected", "integration": "hue", "detail": "not_on_bridge"}
+    # As core does for a target it cannot call, the one that failed is left out.
+    assert set(response) == {"light.lamp"}
 
 
 async def test_v1_bridge_is_refused(hass, bridge):

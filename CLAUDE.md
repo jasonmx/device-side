@@ -3,6 +3,8 @@
 Design and delivery plan: `docs/plans/2026-10-23-device-side-repo-plan.md`. Use its glossary's terms in code
 and docs; "platform", "backing" and "claim" are retired.
 
+When an action should raise, skip a target, or what its response holds: match core, per `docs/action-behavior.md`.
+
 **The repo is public:** no household entity IDs, device names, MACs or hostnames anywhere in it, commit messages included.
 
 **No personal tooling:** deploy hosts, SSH aliases, and private stacks belong in gitignored files (`.env.rig`, `notes/`, `CLAUDE.local.md`), not in committed code, docs or commit messages.

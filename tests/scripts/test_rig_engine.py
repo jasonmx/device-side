@@ -233,12 +233,34 @@ tests:
     assert ha.states["light.lamp"]["state"] == "on"
 
 
+@pytest.mark.parametrize(("brightness", "outcome"), [(40.0, Outcome.PASS), (60.0, Outcome.FAIL)])
+async def test_a_query_response_is_checked_without_a_status(tmp_path, brightness, outcome):
+    def device_side(ha, action, data):
+        return {data["entity_id"]: {"brightness": brightness}}
+
+    ha = FakeHA({"light.lamp": {"state": "on"}}, device_side)
+    text = """
+action: get_attributes
+rig_seconds: 5
+tests:
+  - name: reads
+    roles: [light_ct]
+    steps:
+      - call: {}
+      - expect_response: {attributes: {brightness: {min: 39, max: 41}}}
+"""
+    result = await run_one(ha, suite(tmp_path, text, "hue"), inventory("hue", light_ct="light.lamp"))
+
+    assert outcomes(result)["reads[light_ct]"][0] is outcome
+    assert result.suites[0].cases[0].reached
+
+
 async def test_an_off_light_gets_its_device_side_attributes_back(tmp_path):
     def device_side(ha, action, data):
         entity_id = data["entity_id"]
         if action == "get_attributes":
             attributes = {"brightness": 40, "color_temp_kelvin": 2700, "xy_color": [0.46, 0.41]}
-            return {entity_id: {"status": "confirmed", "attributes": attributes}}
+            return {entity_id: attributes}
         return {entity_id: {"status": "sent", "integration": "hue"}}
 
     ha = FakeHA({"light.lamp": {}, "light.room": {"attributes": {"entity_id": ["light.lamp"]}}}, device_side)
@@ -249,7 +271,7 @@ tests:
   - name: brightens_while_off
     roles: [group]
     steps:
-      - call: {brightness: 200}
+      - call: {brightness: 80}
 """
     result = await run_one(ha, suite(tmp_path, text, "hue"), inventory("hue", group="light.room"))
 

@@ -1,4 +1,4 @@
-"""Light fields between HA's terms and the Hue API's: brightness 0-255 and percent, kelvin and mirek, colors and xy."""
+"""Light fields between HA's terms and the Hue API's: kelvin and mirek, colors and xy."""
 
 from typing import TYPE_CHECKING
 
@@ -10,18 +10,8 @@ if TYPE_CHECKING:
     from aiohue.v2.models.light import Light
 
 
-def to_percent(brightness: float) -> float:
-    """HA's 0-255 brightness as Hue's percent, as core's hue integration converts it."""
-    return brightness / 255 * 100
-
-
-def from_percent(percent: float) -> int:
-    """Hue's percent brightness as HA's 0-255, as core's hue integration reports it."""
-    return round(percent / 100 * 255)
-
-
 def color_xy(fields: LightFields) -> tuple[float, float] | None:
-    """The requested color as CIE xy, whichever of rgb_color, hs_color and xy_color named it (the schema allows one)."""
+    """The requested color as CIE xy: rgb_color first, then hs_color, then xy_color, as hue_dimmer chose."""
     if fields.rgb_color is not None:
         return color_RGB_to_xy(*fields.rgb_color)
     if fields.hs_color is not None:

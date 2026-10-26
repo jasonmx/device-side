@@ -33,11 +33,11 @@ def _write_for(light: Light, request: SetAttributesRequest) -> tuple[dict, bool]
     fields = request.light
     write: dict = {}
     dropped = False
-    if fields.brightness is not None or request.min_brightness is not None or request.max_brightness is not None:
+    if request.brightness is not None or request.min_brightness is not None or request.max_brightness is not None:
         if light.dimming is None:
             dropped = True
-        elif fields.brightness is not None:
-            write["brightness"] = colors.to_percent(fields.brightness)
+        elif request.brightness is not None:
+            write["brightness"] = request.brightness
         elif (clamped := _clamp(light.dimming.brightness, request.min_brightness, request.max_brightness)) is not None:
             write["brightness"] = clamped
     if fields.color_temp_kelvin is not None:

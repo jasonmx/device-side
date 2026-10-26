@@ -10,5 +10,4 @@ tests:
       - set: {state: off}
       - call: {}
       - expect_response:
-          status: expected
-          attributes: {brightness: {min: 100, max: 104}, color_temp_kelvin: {min: 2650, max: 2750}}
+          attributes: {brightness: {min: 39, max: 41}, color_temp_kelvin: {min: 2650, max: 2750}}

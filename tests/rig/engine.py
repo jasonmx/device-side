@@ -428,7 +428,7 @@ class Snapshot:
                 response = await self.ha.call_service(
                     "device_side", "get_attributes", {"entity_id": entity_id}, return_response=True
                 )
-                if attributes := ((response or {}).get(entity_id) or {}).get("attributes"):
+                if attributes := (response or {}).get(entity_id):
                     self.stored[entity_id] = attributes
             for powered, supply in self.power.items():
                 if supply == entity_id:
@@ -539,6 +539,7 @@ class _CaseRun:
         self.response: dict | None = None
         self.error: HAError | None = None
         self.last_action = case.suite.action
+        self.query = False
         self.fields: set[str] = set()
         self.reached = False
         self.unobserved = False
@@ -632,6 +633,8 @@ class _CaseRun:
             elif key not in ("action", "target"):
                 data[key] = value
         self.last_action, self.response, self.error = action, None, None
+        # ActionKind is a StrEnum: compared by value so the engine needs no integration import.
+        self.query = getattr(getattr(self.registry, "actions", {}).get(action), "kind", None) == "query"
         try:
             self.response = await self.ha.call_service("device_side", action, data, return_response=True)
         except HAError as err:
@@ -642,7 +645,8 @@ class _CaseRun:
         if following == "expect_error":
             raise StepFailure(f"device_side.{action} succeeded where an error was expected: {self.response}")
         entries = [entry for entry in (self.response or {}).values() if isinstance(entry, dict)]
-        if any(entry.get("status") in _REACHED for entry in entries):
+        # A query returns only the targets it read, as core does, with no status to check.
+        if entries and (self.query or any(entry.get("status") in _REACHED for entry in entries)):
             self.reached = True
             if (adapter := self.registry.adapter(action, self.integration)) is not None:
                 self.fields |= set(data) & adapter.scope.fields
@@ -668,7 +672,7 @@ class _CaseRun:
                 if name == "target":
                     continue
                 if name == "attributes":
-                    got = entry.get("attributes") or {}
+                    got = entry if self.query else entry.get("attributes") or {}
                     if bad := [attr for attr, value in want.items() if not _matches(got.get(attr), value)]:
                         raise StepFailure(f"{key}: attributes {bad} are {got}, expected {want}")
                 elif not _matches(entry.get(name), expected := self.expected(name, want)):

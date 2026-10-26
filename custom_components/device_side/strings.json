@@ -34,45 +34,45 @@
   "services": {
     "get_attributes": {
       "name": "Get attributes",
-      "description": "Reads brightness, color temperature and color from the device side, even for lights that are off. A room or zone returns its own entry and one per light."
+      "description": "Get brightness, color temp, and color (RGB, HS, XY), even if lights are off. Returns one record per target."
     },
     "set_attributes": {
       "name": "Set attributes",
-      "description": "Sets brightness, color temperature or color without turning lights on or off. Lights that are off take the new settings when they next turn on.",
+      "description": "Set brightness, color temp, or color without changing on/off state.",
       "fields": {
         "brightness": {
-          "name": "Brightness value",
-          "description": "Brightness to set, from 1 (minimum) to 255 (maximum)."
-        },
-        "color_temp_kelvin": {
-          "name": "Color temperature",
-          "description": "Color temperature in Kelvin to set."
-        },
-        "hs_color": {
-          "name": "Hue/Sat color",
-          "description": "Color in hue/sat format to set. A list of two numbers: hue 0-360, saturation 0-100."
-        },
-        "rgb_color": {
-          "name": "Color",
-          "description": "Color in RGB format to set. A list of three integers between 0 and 255."
-        },
-        "xy_color": {
-          "name": "XY-color",
-          "description": "Color in XY format to set. A list of two decimal numbers between 0 and 1."
+          "name": "Brightness",
+          "description": "Brightness level (%)"
         },
         "min_brightness": {
           "name": "Minimum brightness",
-          "description": "Raises any light dimmer than this, in percent. Ignored when a brightness is given."
+          "description": "Enforce a minimum brightness (%)"
         },
         "max_brightness": {
           "name": "Maximum brightness",
-          "description": "Lowers any light brighter than this, in percent. Ignored when a brightness is given."
+          "description": "Enforce a maximum brightness (%)"
+        },
+        "color_temp_kelvin": {
+          "name": "Color temperature",
+          "description": "Color temperature (K)"
+        },
+        "rgb_color": {
+          "name": "RGB color",
+          "description": "Color as [red, green, blue] (0–255 each)"
+        },
+        "hs_color": {
+          "name": "Hue/Sat color",
+          "description": "Color as [hue, saturation] (0–360, 0–100)"
+        },
+        "xy_color": {
+          "name": "XY color",
+          "description": "Color as [x, y]"
         }
       }
     },
     "set_scene": {
       "name": "Set scene",
-      "description": "Sets a scene's brightness and colors on its lights without turning them on. Lights already on change straight away."
+      "description": "Set a Hue scene without turning on its lights."
     },
     "turn_off_for": {
       "name": "Turn off for",
