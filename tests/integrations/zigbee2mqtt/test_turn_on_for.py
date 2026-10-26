@@ -10,11 +10,15 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import async_mock_service
 
-from custom_components.device_side.integrations.zigbee2mqtt.addressing import command_topic, z2m_address
+from custom_components.device_side.integrations.zigbee2mqtt.addressing import (
+    command_topic,
+    is_z2m_group,
+    z2m_address,
+)
 from custom_components.device_side.integrations.zigbee2mqtt.detect import detect
 
 from ...conftest import call
-from ...fixtures.z2m import IEEE, add_z2m_entity, z2m_entry
+from ...fixtures.z2m import IEEE, add_z2m_entity, add_z2m_group, z2m_entry
 
 SENT = {"status": "sent", "integration": "zigbee2mqtt"}
 TOPIC = f"zigbee2mqtt/{IEEE}/set"
@@ -180,7 +184,75 @@ async def test_duration_below_50ms_is_clamped(hass, setup_production, publishes,
     assert json.loads(publishes[0].data["payload"]) == {"state": "ON", "on_time": 0.1}
 
 
+async def test_group_without_fields_publishes_to_group_id_topic(hass, setup_production, publishes, turn_ons):
+    add_z2m_group(hass, z2m_entry(hass), "light.downstairs", group_id=7)
+
+    response = await call(hass, "turn_on_for", {"entity_id": "light.downstairs", "duration": 5})
+
+    assert response == {"light.downstairs": SENT}
+    assert not turn_ons
+    assert len(publishes) == 1
+    assert publishes[0].data["topic"] == "zigbee2mqtt/7/set"
+    assert json.loads(publishes[0].data["payload"]) == {"state": "ON", "on_time": 5.0}
+
+
+async def test_group_with_fields_calls_turn_on_then_publishes(hass, setup_production, publishes, turn_ons):
+    add_z2m_group(hass, z2m_entry(hass), "light.downstairs", group_id=7)
+
+    response = await call(
+        hass, "turn_on_for", {"entity_id": "light.downstairs", "duration": 5, "brightness": 128}
+    )
+
+    assert response == {"light.downstairs": SENT}
+    assert turn_ons[0].data == {"entity_id": "light.downstairs", "brightness": 128}
+    assert publishes[0].data["topic"] == "zigbee2mqtt/7/set"
+
+
+async def test_group_on_custom_base_topic_is_not_addressable(hass, setup_production, publishes, turn_ons):
+    add_z2m_group(hass, z2m_entry(hass), "light.downstairs", group_id=7, base_topic="z2m")
+
+    with pytest.raises(HomeAssistantError) as raised:
+        await call(hass, "turn_on_for", {"entity_id": "light.downstairs", "duration": 5})
+
+    assert raised.value.translation_placeholders["summary"] == "light.downstairs: not_addressable"
+    assert not publishes
+
+
+async def test_device_and_group_each_get_their_own_topic(hass, setup_production, publishes, turn_ons):
+    entry = z2m_entry(hass)
+    add_z2m_entity(hass, entry, "light.kitchen")
+    add_z2m_group(hass, entry, "light.downstairs", group_id=7)
+
+    response = await call(
+        hass, "turn_on_for", {"entity_id": ["light.kitchen", "light.downstairs"], "duration": 5}
+    )
+
+    assert response == {"light.kitchen": SENT, "light.downstairs": SENT}
+    assert {p.data["topic"] for p in publishes} == {TOPIC, "zigbee2mqtt/7/set"}
+
+
 # --- Direct helper tests (covering edge-case guards) ---
+
+
+def _target(identifier: str) -> SimpleNamespace:
+    device = MagicMock()
+    device.identifiers = {("mqtt", identifier)}
+    return SimpleNamespace(device=device)
+
+
+def test_group_identifier_matches_z2m_encoding():
+    """Pinned to the literal Z2M writes, so the test checks Z2M's scheme rather than our own."""
+    assert command_topic(_target("zigbee2mqtt_1221051039810110150109113116116_7")) == "zigbee2mqtt/7/set"
+
+
+def test_is_z2m_group_true_for_any_base_topic(hass):
+    assert is_z2m_group(hass, _target("zigbee2mqtt_1221051039810110150109113116116_7"))
+    assert is_z2m_group(hass, _target("zigbee2mqtt_12250109_7"))
+
+
+def test_is_z2m_group_false_for_a_device(hass):
+    assert not is_z2m_group(hass, _target(f"zigbee2mqtt_{IEEE}"))
+    assert not is_z2m_group(hass, SimpleNamespace(device=None))
 
 
 def test_detect_returns_false_when_device_is_none(hass):
