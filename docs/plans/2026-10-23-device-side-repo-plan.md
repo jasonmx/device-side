@@ -78,7 +78,9 @@ requires it.
   - `turn_off_for` on Shelly only: it is Shelly-only natively (Zigbee/Matter `OnWithTimedOff` is
     on-then-off only; `off_wait_time` is a re-on guard). Other integrations return `unsupported`.
   - **Cancel contract:** a regular `turn_on` or `turn_off` cancels the timed flip, on every
-    integration. The action descriptions promise this. Shelly honors it natively (bench, 2026-10-24,
+    integration but ZHA, where only `turn_off` does (cancel spike 2026-10-26, open item 3: nothing stops
+    an LTA004 timer with the light left on). The action descriptions promise this, ZHA caveat included.
+    Shelly honors it natively (bench, 2026-10-24,
     Gen3/Gen4 fw 2.0.1: any `Set` without `toggle_after` cancels; a new `toggle_after` replaces;
     `toggle_after: 0` is rejected). Hue can't honor it, so it doesn't get the timed actions
     (2026-10-26, open item 10): its bridge timers ignore every manual on/off, aren't visible in the
@@ -642,6 +644,9 @@ the first action of that session is slice 0.
    down live; a new timer replaces the old), so `CONFIRMED` = OnTime at or just under the request.
    Built: `integrations/zha/zcl.py` reads it through ZHA internals (`get_zha_gateway`), since the
    public read is an admin websocket command. Per-device results: `docs/integrations.md`, ZHA, Tested behavior.
+   Cancel spike 2026-10-26 (`docs/plans/2026-10-26-zha-ontime-cancel-spike.md`), LTA004 fw `0x01001416`,
+   HA 2026.10.2: no flicker-free cancel. Writing `OnTime` = 0, `OnWithTimedOff` `on_time: 0` and
+   `turn_on_for` 0.05 s (clamped to 0.1 s) each end the timer by turning the bulb off.
 4. Z2M: `zigbee2mqtt_` identifier prefix [M]; IEEE as topic segment [M]; `command_topic` from the
    entity object vs base-topic derivation; whether `on_time` + `brightness` in one payload is
    safe (would remove the two-step on Z2M).
