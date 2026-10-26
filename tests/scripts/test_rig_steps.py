@@ -13,9 +13,9 @@ def test_every_shipped_step_file_parses(path):
     assert load_step_file(path).tests
 
 
-def test_load_step_files_skips_the_examples():
+def test_every_step_file_has_an_action():
     actions = {step_file.action for step_file in load_step_files()}
-    assert actions == {"get_attributes", "set_attributes", "set_scene", "turn_on_for", "turn_off_for"}
+    assert actions == {"get_attributes", "move", "set_attributes", "set_scene", "stop", "turn_on_for", "turn_off_for"}
     assert actions <= set(AdapterRegistry.discover().actions)
 
 
@@ -66,6 +66,7 @@ def observed(observe: str = "{see: s, watch: w, ask: a}", setup: str = "[{wait: 
         (HEADER + "      - expect_state: {brightness: {min: a}}\n", "range bounds must be numbers"),
         (HEADER + "      - expect_response: {attributes: 3}\n", "attributes must be a mapping"),
         (HEADER + "      - sample: {attribute: brightness, for: 1, expect: wobbly}\n", "rising, falling or steady"),
+        (HEADER + "      - sample: {attribute: brightness, for: 1, source: hue}\n", "source must be ha or device_side"),
         (HEADER + "      - observe: ok?\n", "step 1 (observe): the observe step is gone; give the test observe:"),
         (
             HEADER.replace("    steps:\n", "    brief: {see: s, watch: w}\n    steps:\n") + "      - wait: 0\n",

@@ -108,12 +108,12 @@ requires it.
     every feature): fields describe what the light should do in human terms, never how the
     device does it.** No rates, steps, mireds or cluster vocabulary; the adapter converts.
     `move` fields, all optional but at least one direction required:
-    - `brightness: brighter | dimmer`, `color_temp: warmer | cooler`,
-      `saturation: richer | paler`, `hue: forward | backward` (around the color wheel,
-      red → yellow → green …). One field per attribute, each with its own direction, so
-      "brighter and cooler" is one call with no ambiguity. Directions use the words a person
-      would say for that attribute; `up`/`down` is wrong for color temperature (Kelvin up is
-      cooler, mireds up is warmer) and `increase`/`decrease` inherits the same ambiguity.
+    - `brightness: up | down`, `color_temp: warmer | cooler`, `saturation: up | down`,
+      `hue: up | down` (`up` = the hue angle increases, red → yellow → green, wrapping at
+      360°). One field per attribute, each with its own direction, so "brighter and cooler" is
+      one call with no ambiguity. Rule: `up | down` wherever the direction is unambiguous;
+      color temperature is the exception (Kelvin up is cooler, mireds up is warmer). Why, and
+      why not `brighter | dimmer`: `docs/plans/2026-10-25-hue-port.md`, Decisions.
     - `sweep_time` (seconds; hue_dimmer's existing field): how long a **full-range sweep**
       takes, 0 → 100 % brightness, coolest → warmest of this light's range, 0 → 100 %
       saturation, 360° of hue. Speed is therefore constant whatever the start point, which is
@@ -121,9 +121,11 @@ requires it.
       hue_dimmer.
     - Limits in a collapsed "Limits" section (`services.yaml` sections): `brightness_limit`
       (%), `color_temp_limit` (K), `saturation_limit` (%). A limit is "stop here instead of
-      the range end"; hue has no limit (it is a cycle).
-    `stop` takes no fields and halts every move in flight on the target. A move that is
-    already at its range end returns `confirmed` with `detail: at_limit`. (Per-attribute
+      the range end". A move already at or past its limit (or range end) in its direction does
+      nothing and returns `unchanged` with `detail: at_limit`: `down` to 30 % from 20 % never
+      brightens (decided 2026-10-26). Hue has no limit: a wrapping hue range was considered and
+      dropped as needless complexity for a niche feature; revisit only if users ask.
+    `stop` takes no fields and halts every move in flight on the target. (Per-attribute
     direction words and the reserved `hue` field confirmed by Jason, 2026-10-23.)
     Hue implementation: target = limit or range end, `dynamics.duration` = sweep_time ×
     fraction of range still to travel; brightness and color_temp each as one write;
@@ -336,7 +338,7 @@ tests/
   fixtures/{z2m,zha,matter,shelly,hue,groups}.py   fabricate registry entries + boundary mocks
   core/   actions/   integrations/<i>/               one module per adapter; see Testing
   rig/    client.py (HA WS/REST client), inventory.py, engine.py (step runner, snapshot/restore, bench writer),
-          inventory.yaml (gitignored), inventory.example.yaml, steps/<action>.yaml, steps/examples/
+          inventory.yaml (gitignored), inventory.example.yaml, steps/<action>.yaml
 ```
 
 Repo root: README.md (hand-written feature table), hacs.json, pyproject.toml,
@@ -578,8 +580,7 @@ color of its entities (group members too) and restores in a `finally` (Hue will 
 `device_side.get_attributes` so off-light attributes restore). Timing assertions are windows:
 still on at `duration - tol`, off by `duration + tol`. Rig durations are 5 to 8 s. Rig tests cover one
 happy path and one refusal path per adapter; branches stay in unit tests, which never touch the rig.
-`tests/rig/steps/examples/` writes hue_dimmer's release checklist (§2-5) as step files the parser tests
-load, proving the format before those adapters exist.
+hue_dimmer's release checklist (§2-5) became the Hue step files.
 
 When every test of an adapter passes (no `-k`, nothing failed), the engine writes its bench record;
 Jason reviews and commits the diff. A test with an unobserved `observe` step proves no capability or field.
@@ -671,8 +672,8 @@ the first action of that session is slice 0.
     with `dynamics` (hue_dimmer only moved brightness on groups); whether a dimming dynamic and
     a color_temperature dynamic sent as separate writes run independently or the second cancels
     the first (decides per-attribute vs shared duration for combined moves); the bulb's gamut
-    from `colors.py` for the saturation end point; whether `sections:` with `collapsed: true`
-    in `services.yaml` passes hassfest for a custom component.
+    from `colors.py` for the saturation end point. Answered in 7b (#48): hassfest accepts
+    `sections:` with `collapsed: true` in a custom component's `services.yaml`.
 6. Frontend: does the `integration:` filter match entity registry platform (UI convenience only).
 7. Blocking-import detector vs `pkgutil` discovery in the executor job.
 8. `pytest-homeassistant-custom-component` version paired with the chosen HA 2026.x pin; fixture

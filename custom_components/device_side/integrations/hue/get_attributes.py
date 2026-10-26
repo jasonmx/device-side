@@ -8,12 +8,22 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util.color import color_temperature_mired_to_kelvin, color_xy_to_hs, color_xy_to_RGB
 
 from .bridge import bridge_api, resource_id
+from .move import BRIGHTNESS, lit
+from .transition_cache import TransitionCache, transition_cache
 from ...core.adapter import Adapter
 from ...core.models import EntityResult, Request, Status, Target
 from ...core.scope import AdapterScope
 
 if TYPE_CHECKING:
     from aiohue.v2.models.light import Light
+
+
+def light_row(cache: TransitionCache, light: Light) -> dict:
+    """One light's attributes, its brightness predicted while a move runs (the bridge reports the end value)."""
+    row = attributes([light])
+    if light.dimming:
+        row["brightness"] = round(cache.value(light.id, BRIGHTNESS, light.dimming.brightness), 1)
+    return row
 
 
 def attributes(lights: Iterable[Light]) -> dict:
@@ -46,7 +56,9 @@ class HueGetAttributes(Adapter[Request]):
 
     A room or zone row follows the bridge and core's hue integration: brightness is the grouped_light's (the
     average of the lights that are on), color temperature and color average the lights that are on. With every
-    light off the bridge reports nothing useful, so the row averages all the room's lights.
+    light off the bridge reports nothing useful, so the row averages all the room's lights. Brightness reads through
+    the transition cache, so a light or room mid-move reports where it is, not the end value the bridge reports; a
+    room then averages its lit lights' predictions.
     """
 
     action: ClassVar[str] = "get_attributes"
@@ -61,6 +73,7 @@ class HueGetAttributes(Adapter[Request]):
         return None
 
     async def execute(self, hass: HomeAssistant, request: Request, targets: list[Target]) -> list[EntityResult]:
+        cache = transition_cache(hass)
         results = []
         for target in targets:
             api = bridge_api(target)
@@ -68,7 +81,7 @@ class HueGetAttributes(Adapter[Request]):
                 if (light := api.lights.get(resource_id(target))) is None:
                     results.append(self.result(target, Status.REJECTED, detail="not_on_bridge"))
                 else:
-                    results.append(self.result(target, Status.CONFIRMED, data=attributes([light])))
+                    results.append(self.result(target, Status.CONFIRMED, data=light_row(cache, light)))
                 continue
 
             grouped = api.groups.grouped_light
@@ -77,7 +90,14 @@ class HueGetAttributes(Adapter[Request]):
                 continue
             on = [light for light in lights if light.on.on]
             row = attributes(on or lights)
-            if on and (group := grouped.get(resource_id(target))) is not None and group.dimming is not None:
+            dimmable = [light for light in lights if light.dimming]
+            if any(cache.tracks(light.id, BRIGHTNESS) for light in dimmable):
+                # Mid-move the bridge reports end values; average the lit lights' predictions instead. A light
+                # still moving counts as lit: a room moved up from all off is on before aiohue hears so.
+                lights_lit = lit(cache, dimmable) or dimmable
+                predicted = [cache.value(light.id, BRIGHTNESS, light.dimming.brightness) for light in lights_lit]
+                row["brightness"] = round(mean(predicted), 1)
+            elif on and (group := grouped.get(resource_id(target))) is not None and group.dimming is not None:
                 row["brightness"] = round(group.dimming.brightness, 1)
             results.append(self.result(target, Status.CONFIRMED, data=row))
         return results

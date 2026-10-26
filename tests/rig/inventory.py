@@ -37,6 +37,10 @@ ROLES = frozenset(
 # Seconds either side of a duration within which a device may flip. Zigbee and Matter hop through a mesh.
 TOLERANCE_S = {"shelly": 2.0, "hue": 2.0, "zigbee2mqtt": 3.0, "zha": 3.0, "matter": 3.0}
 
+# Seconds after a move ends, or a stop, that an integration's adapters still predict a light's brightness rather
+# than read it (Hue: API_SETTLE_SECONDS). A case waits them out on its lights, so it starts from what HA shows.
+SETTLE_S = {"hue": 15.0}
+
 
 @dataclass(frozen=True, slots=True)
 class RigEntity:

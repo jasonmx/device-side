@@ -70,19 +70,23 @@ tests:
 | `expect_error` | The call before it must fail, with this `key` and/or `summary`. |
 | `expect_state` | Checks state and attributes now, or `within` seconds. `unchanged` is the state before the test. A `{min, max}` range fits values that drift. On a `group` it checks every member. |
 | `wait` | Sleeps. |
-| `sample` | Polls `attribute` for `for` seconds and expects it `rising`, `falling` or `steady`, optionally within `min`/`max`. |
+| `sample` | Polls `attribute` for `for` seconds and expects it `rising`, `falling` or `steady`, optionally within `min`/`max`. `source: device_side` reads `device_side.get_attributes` instead of HA's state, in its units (brightness in percent), for a fade HA shows only the end of. |
 | `do` | Prints an instruction for the person and waits for Enter. Only in the `setup` of an observed test. |
 | `restore` | Puts back the state from before the test. It also runs after every test, pass or fail. |
 
 Any step takes `target: <role>` to act on another role the test lists. Durations accept numbers, `duration`
 (the last call's), `tol` (the integration's timing tolerance) and `+ - *`. `only: [<integration>]` limits a
-test to some integrations; when those pile up, split the file. `tests/rig/steps/examples/` shows the planned
-actions (ramps, attributes while off, scenes) and is only parsed, never run.
+test to some integrations; when those pile up, split the file.
+
+An integration in `SETTLE_S` (`tests/rig/inventory.py`) predicts a light's brightness for a while after a
+`move` or `stop`, so a later test on that light waits until it reads the device again.
 
 ### Observed tests
 
 Some things need eyes, such as a light climbing smoothly without flashing. A test asks for them with an
-`observe:` block and puts its start state in `setup:`:
+`observe:` block and puts its start state in `setup:`. Each question costs the person at the rig, so ask as
+few as cover everything a check can't measure: watch a behavior once, in the test that shows it best, and
+leave its other tests automated.
 
 ```yaml
   - name: raise
@@ -103,7 +107,7 @@ Such a test runs twice, so you are asked only what a machine can't check:
 1. **Automated**, with every other test first: setup and steps, every check applied. It has no automated run if
    its steps check nothing or its setup has a `do`.
 2. **Observed** (`<name>[<role>] observed`), after all automated runs. Setup runs and settles for 2 s, then the
-   runner prints `see` (in bold), `watch` and `ask` and waits for Enter. The steps run with their checks turned
+   runner prints `see` (in bold) and `watch` and waits for Enter. The steps run with their checks turned
    into waits, so the timing matches. Then you answer `ask`: Enter or `y` if you saw it, `n` if not, which fails
    the test and asks what you saw instead. It is skipped if its automated run failed, and if a step fails after Enter it prints
    `nothing to observe` and the reason.

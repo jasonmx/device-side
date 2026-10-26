@@ -1,7 +1,7 @@
-# hue_dimmer tests/RELEASE_CHECKLIST.md §4.1 as steps; §4.2 (a read mid-move) joins once move lands.
+# hue_dimmer tests/RELEASE_CHECKLIST.md §4 as steps.
 # On the group role the set gives every member the same values, so the room's own row reads them back too.
 action: get_attributes
-rig_seconds: 30
+rig_seconds: 60
 tests:
   - name: reads_while_off  # §4.1
     roles: [light_ct, group]
@@ -11,3 +11,12 @@ tests:
       - call: {}
       - expect_response:
           attributes: {brightness: {min: 39, max: 41}, color_temp_kelvin: {min: 2650, max: 2750}}
+
+  - name: predicts_mid_move  # §4.2: about 40% three seconds in, not the 100% the bridge reports
+    roles: [light_ct, group]
+    steps:
+      - set: {state: on, brightness_pct: 10}
+      - call: {action: move, brightness: up, sweep_time: 10}
+      - wait: 3
+      - call: {}
+      - expect_response: {attributes: {brightness: {min: 25, max: 55}}}

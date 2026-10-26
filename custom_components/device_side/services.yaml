@@ -54,7 +54,7 @@ turn_on_for:
           min: 2000
           max: 6500
     rgb_color: &rgb_color
-      filter:
+      filter: &color_modes
         attribute:
           supported_color_modes:
             - light.ColorMode.HS
@@ -142,6 +142,84 @@ set_attributes:
     rgb_color: *rgb_color
     hs_color: *hs_color
     xy_color: *xy_color
+
+move:
+  target:
+    entity:
+      - domain: light
+        integration: hue
+  fields:
+    brightness:
+      example: up
+      filter: *dimmable
+      selector:
+        select:
+          options: [up, down]
+          translation_key: brightness_direction
+    color_temp:
+      example: warmer
+      filter: *color_temp
+      selector:
+        select:
+          options: [warmer, cooler]
+          translation_key: color_temp_direction
+    saturation:
+      example: up
+      filter: *color_modes
+      selector:
+        select:
+          options: [up, down]
+          translation_key: saturation_direction
+    hue:
+      example: up
+      filter: *color_modes
+      selector:
+        select:
+          options: [up, down]
+          translation_key: hue_direction
+    sweep_time:
+      default: 5
+      selector:
+        number:
+          min: 0.1
+          max: 3600
+          step: any
+          unit_of_measurement: s
+          mode: box
+    limits:
+      collapsed: true
+      fields:
+        brightness_limit:
+          example: 30
+          filter: *dimmable
+          selector:
+            number:
+              min: 0
+              max: 100
+              step: 0.2
+              unit_of_measurement: "%"
+        color_temp_limit:
+          example: 2700
+          filter: *color_temp
+          selector:
+            color_temp:
+              unit: "kelvin"
+              min: 2000
+              max: 6500
+        saturation_limit:
+          example: 50
+          filter: *color_modes
+          selector:
+            number:
+              min: 0
+              max: 100
+              unit_of_measurement: "%"
+
+stop:
+  target:
+    entity:
+      - domain: light
+        integration: hue
 
 get_attributes:
   target:

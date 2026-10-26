@@ -2,8 +2,10 @@
 
 from .bridge import expand_group, is_hue_group
 from .get_attributes import HueGetAttributes
+from .move import HueMove
 from .set_attributes import HueSetAttributes
 from .set_scene import HueSetScene
+from .stop import HueStop
 from ...core.scope import IntegrationInfo
 
 INTEGRATION = IntegrationInfo(
@@ -16,4 +18,4 @@ INTEGRATION = IntegrationInfo(
     max_concurrency=2,
 )
 
-ADAPTERS = [HueGetAttributes, HueSetAttributes, HueSetScene]
+ADAPTERS = [HueGetAttributes, HueMove, HueSetAttributes, HueSetScene, HueStop]
