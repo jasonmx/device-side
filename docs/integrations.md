@@ -345,6 +345,14 @@ One failing light doesn't stop the rest: the result is `sent` with `some_lights_
 `rejected` if every light failed. All-Day (smart) scenes are `unsupported` with `smart_scene`;
 a scene the bridge no longer has is `rejected` with `scene_not_found`.
 
+### `turn_on_for`, `turn_off_for`
+
+`unsupported` with `no_adapter`. The bridge's own timers can do the flip, but nothing cancels
+them except removing them on the bridge: a plain on/off from Home Assistant, the Hue app or a dimmer switch
+leaves the timer running, and the Hue app doesn't show it. A bulb without power when its timer
+fires misses the flip and the bridge doesn't retry. For timed Hue bulbs, pair them through ZHA,
+Zigbee2MQTT or Matter.
+
 ### Sharp edges
 
 - **No gamut clamp.** `set_attributes` sends a color outside a bulb's gamut as is, and the bulb
