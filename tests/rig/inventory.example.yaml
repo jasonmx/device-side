@@ -5,6 +5,7 @@
 # Tests restore each entity's prior state afterwards, but every entity here will visibly change state.
 # powered_by names the inventory switch an entity draws power through: its cases need that switch on, and a case
 # that switches it puts the entity back once power returns.
+# members lists a group's lights, for a group light that has no entity_id attribute (a Zigbee2MQTT group).
 
 shelly:
   - entity_id: switch.office_plug
@@ -21,3 +22,10 @@ hue:
     roles: [group]
   - entity_id: scene.living_room_relax  # a scene in that room
     roles: [scene]
+
+zigbee2mqtt:
+  - entity_id: light.bulb_a  # also the single bulb
+    roles: [light_dimmable, light_ct]
+  - entity_id: light.bulb_group  # a Z2M group of bulb_a and bulb_b
+    roles: [group]
+    members: [light.bulb_a, light.bulb_b]

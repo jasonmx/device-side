@@ -43,6 +43,7 @@ class RigEntity:
     entity_id: str
     roles: frozenset[str]
     powered_by: str | None = None  # the inventory switch this entity draws power through
+    members: tuple[str, ...] = ()  # a group's member lights, for a group light without an entity_id attribute
 
 
 @dataclass(slots=True)
@@ -61,7 +62,15 @@ class Inventory:
                 roles = frozenset(item.get("roles", ()))
                 if unknown := roles - ROLES:
                     raise ValueError(f"{path.name}: {item['entity_id']} has unknown roles {sorted(unknown)}")
-                inventory.integrations[integration].append(RigEntity(item["entity_id"], roles, item.get("powered_by")))
+                members = item.get("members", [])
+                if not isinstance(members, list) or not all(isinstance(member, str) for member in members):
+                    raise ValueError(f"{path.name}: {item['entity_id']} members must be a list of entity IDs")
+                members = tuple(members)
+                if members and "group" not in roles:
+                    raise ValueError(f"{path.name}: {item['entity_id']} lists members but has no group role")
+                inventory.integrations[integration].append(
+                    RigEntity(item["entity_id"], roles, item.get("powered_by"), members)
+                )
         listed = {entity.entity_id for entities in inventory.integrations.values() for entity in entities}
         for entity_id, supply in inventory.power().items():
             if supply not in listed:
@@ -70,6 +79,9 @@ class Inventory:
 
     def entity(self, integration: str, role: str) -> str | None:
         return next((e.entity_id for e in self.integrations.get(integration, ()) if role in e.roles), None)
+
+    def members(self, integration: str, entity_id: str) -> tuple[str, ...]:
+        return next((e.members for e in self.integrations.get(integration, ()) if e.entity_id == entity_id), ())
 
     def power(self) -> dict[str, str]:
         """Each entity that draws power through another, mapped to its supply, across every integration."""

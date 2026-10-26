@@ -671,11 +671,45 @@ GROUP_REGISTRY = SimpleNamespace(
 )
 
 
+# Like Z2M: a turn_on_for adapter, and none for get_attributes or set_attributes.
+NO_ATTRIBUTES_REGISTRY = SimpleNamespace(
+    adapter=lambda action, integration: GROUP_REGISTRY.adapter(action, integration) if action == "turn_on_for" else None
+)
+
+
 async def test_a_group_checks_every_member(tmp_path):
     ha = group_ha(members_on("light.a", "light.b"))
     steps = suite(tmp_path, GROUP, "fake")
     result = await run_one(ha, steps, inventory("fake", group="light.room"), registry=GROUP_REGISTRY)
     assert outcomes(result) == {"every_member[group]": (Outcome.PASS, "")}
+
+
+async def test_a_group_without_the_attribute_uses_inventory_members(tmp_path):
+    ha = FakeHA({"light.room": {}, "light.a": {}, "light.b": {}}, members_on("light.a", "light.b"))
+    steps = suite(tmp_path, GROUP, "fake")
+    inv = Inventory({"fake": [RigEntity("light.room", frozenset({"group"}), members=("light.a", "light.b"))]})
+    result = await run_one(ha, steps, inv, registry=NO_ATTRIBUTES_REGISTRY)
+    assert outcomes(result) == {"every_member[group]": (Outcome.PASS, "")}
+    assert ha.states["light.a"]["state"] == "off"  # restored: the inventory's members were snapshotted too
+
+
+async def test_a_group_without_the_attribute_is_not_read_as_one_light(tmp_path):
+    """With get_attributes, the group's members are read one by one, never the group as if it were a bulb."""
+    ha = FakeHA({"light.room": {}, "light.a": {}, "light.b": {}}, lambda ha, action, data: {})
+    steps = suite(tmp_path, GROUP.replace("      - expect_response: {status: sent, integration: self}\n", ""), "fake")
+    inv = Inventory({"fake": [RigEntity("light.room", frozenset({"group"}), members=("light.a", "light.b"))]})
+    await run_one(ha, steps, inv, registry=GROUP_REGISTRY)
+    reads = [data["entity_id"] for domain, service, data in ha.calls if service == "get_attributes"]
+    assert reads == ["light.a", "light.b"]
+
+
+async def test_a_group_with_no_members_anywhere_fails(tmp_path):
+    ha = FakeHA({"light.room": {}}, members_on())
+    steps = suite(tmp_path, GROUP, "fake")
+    result = await run_one(ha, steps, inventory("fake", group="light.room"), registry=GROUP_REGISTRY)
+    outcome, detail = outcomes(result)["every_member[group]"]
+    assert outcome is Outcome.FAIL
+    assert "the inventory gives none" in detail
 
 
 async def test_a_group_fails_on_a_lagging_member(tmp_path):
