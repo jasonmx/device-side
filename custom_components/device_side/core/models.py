@@ -17,6 +17,7 @@ class Status(StrEnum):
     REJECTED = "rejected"
     SENT = "sent"
     CONFIRMED = "confirmed"
+    UNCHANGED = "unchanged"  # nothing sent: the target is already where the call would leave it; detail says why
 
 
 # Statuses that mean the command did not reach the device; a call where every target ends in one of these raises.

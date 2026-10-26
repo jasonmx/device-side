@@ -190,7 +190,7 @@ async def test_brightness_already_within_limits_writes_nothing(hass, bridge):
 
     response = await call(hass, "set_attributes", {"entity_id": "light.lamp", "min_brightness": 50})
 
-    assert response == {"light.lamp": {"status": "confirmed", "integration": "hue", "detail": "within_limits"}}
+    assert response == {"light.lamp": {"status": "unchanged", "integration": "hue", "detail": "within_limits"}}
     assert bridge.puts == []
 
 

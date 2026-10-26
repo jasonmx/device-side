@@ -34,7 +34,7 @@ _RESTORE_COLOR = ("color_temp_kelvin", "hs_color", "xy_color", "rgb_color")
 # HA_ADMIN_TOKEN. ZHA: issue_zigbee_cluster_command is registered with async_register_admin_service.
 ADMIN_INTEGRATIONS = frozenset({"zha"})
 
-# Statuses that mean the command reached the device.
+# Statuses that mean the command reached the device; unchanged sent nothing, so it proves no call.
 _REACHED = frozenset({"confirmed", "sent"})
 
 # An entity whose supply a case switched rejoins its network after power returns. ZHA keeps showing the last state

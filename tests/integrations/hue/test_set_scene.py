@@ -88,7 +88,7 @@ async def test_actions_with_nothing_to_write_are_skipped(hass, bridge, action):
 
     response = await call(hass, "set_scene", {"entity_id": "scene.relax"})
 
-    assert response == {"scene.relax": {"status": "confirmed", "integration": "hue", "detail": "nothing_to_set"}}
+    assert response == {"scene.relax": {"status": "unchanged", "integration": "hue", "detail": "nothing_to_set"}}
     assert bridge.puts == []
 
 

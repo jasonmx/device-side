@@ -31,6 +31,16 @@ async def test_response_shape(hass, fake, reset_script):
     assert request.duration_s == 5
 
 
+async def test_unchanged_everywhere_is_not_a_failure(hass, fake, reset_script):
+    # Nothing to do is a result, not an error: the call returns rather than stopping the automation.
+    add_fake_entity(hass, fake, "light.desk")
+    reset_script.outcomes["light.desk"] = Status.UNCHANGED
+
+    response = await call(hass, "turn_on_for", {"entity_id": "light.desk", "duration": 5})
+
+    assert response == {"light.desk": {"status": "unchanged", "integration": "fake"}}
+
+
 async def test_no_response_requested_returns_none(hass, fake):
     add_fake_entity(hass, fake, "light.desk")
 
