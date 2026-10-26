@@ -4,6 +4,8 @@
 
 Device Side unlocks popular on-device features for lights and switches, like timed on/off, via Matter, Zigbee, Shelly or Hue. Device-side features run natively on your lights and switches, so survive HA restarts.
 
+Device Side extends Home Assistant's shared light model. It lets you read a light's attributes while it's off, tracks each light's actual state during and after transitions, and handles protocol-specific quirks found in testing on real hardware.
+
 **Disclaimers:**
 
 1. **Compatibility warning:** Some device makes and models act on commands but don't acknowledge them, and some acknowledge but don't act. Test each of your devices with Device Side before relying on its features.
