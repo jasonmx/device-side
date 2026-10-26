@@ -1,15 +1,16 @@
 # One block per action: target filters and field selectors only. Names and descriptions live in strings.json.
 # Target filters are a UI convenience; adapters enforce support through supports(). Each filter lists exactly the
-# integrations with an adapter for that action (tests/core/test_actions_setup.py). Field filters are copied from
-# light/services.yaml so the light fields hide when no selected target is a light that can use them. They are
-# written out, not shared through top-level .anchor keys as core does: hassfest rejects those in a custom component.
+# integrations with an adapter for that action and the domains in their scope (tests/core/test_actions_setup.py).
+# Field filters are copied from light/services.yaml so the light fields hide when no selected target is a light that
+# can use them. They are written out, not shared through top-level .anchor keys as core does: hassfest rejects those
+# in a custom component.
 
 turn_on_for:
   target:
     entity:
       - domain: [light, switch]
         integration: shelly
-      - domain: [light, switch]
+      - domain: light
         integration: mqtt
       - domain: light
         integration: matter
