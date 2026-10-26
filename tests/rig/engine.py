@@ -806,7 +806,10 @@ class _CaseRun:
             raise StepFailure(f"device_side.{action} succeeded where an error was expected: {self.response}")
         await self.mark_busy(action, data)
         entries = [entry for entry in (self.response or {}).values() if isinstance(entry, dict)]
-        # A query returns only the targets it read, as core does, with no status to check.
+        # A query returns only the targets it read, as core does, with no status to check. Only the action under
+        # test counts: a move that sets up a stop proves nothing about the stop adapter.
+        if action != self.case.suite.action:
+            return
         if entries and (self.query or any(entry.get("status") in _REACHED for entry in entries)):
             self.reached = True
             if (adapter := self.registry.adapter(action, self.integration)) is not None:

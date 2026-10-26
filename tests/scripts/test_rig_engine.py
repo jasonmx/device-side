@@ -714,6 +714,33 @@ tests:
     assert (case.outcome, case.fields, case.reached) == (Outcome.PASS, frozenset({"brightness"}), True)
 
 
+async def test_a_call_to_another_action_proves_nothing_for_the_suite(tmp_path):
+    text = """
+action: stop
+rig_seconds: 5
+tests:
+  - name: halts
+    roles: [light_dimmable]
+    steps:
+      - call: {action: move, brightness: up}
+      - call: {}
+"""
+    scope = SimpleNamespace(confirmable=False, fields=frozenset({"brightness"}))
+    registry = SimpleNamespace(adapter=lambda action, integration: SimpleNamespace(scope=scope))
+
+    def respond(ha, action, data):
+        return {data["entity_id"]: {"status": "sent" if action == "move" else "unchanged"}}
+
+    result = await run_one(
+        FakeHA({"light.lamp": {"state": "on"}}, respond),
+        suite(tmp_path, text, "fake"),
+        inventory("fake", light_dimmable="light.lamp"),
+        registry=registry,
+    )
+    case = result.suites[0].cases[0]
+    assert (case.outcome, case.fields, case.reached) == (Outcome.PASS, frozenset(), False)
+
+
 SAMPLE = """
 action: turn_on_for
 rig_seconds: 5
