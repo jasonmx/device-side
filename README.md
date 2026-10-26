@@ -75,6 +75,7 @@ Timer runs on the device. Use it to:
 A field marked 🔒 is `unsupported` in the release, as it's awaiting testing on real hardware. You can test it for us: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 **Cancel:** to cancel a timer, send a new action (e.g. `turn_on`, `turn_off`, `toggle` or a new timed on/off).
+On ZHA, only `turn_off` or a new `turn_on_for` cancels; to keep the light on, turn it off, then on.
 
 #### Results
 

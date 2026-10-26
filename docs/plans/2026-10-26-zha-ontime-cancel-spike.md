@@ -62,3 +62,13 @@ Side cancel action, or the contract text left as is. No adapter code in this spi
 - Each of a to e has a recorded result, or is marked open with the reason.
 - The bulb ends in its prior on/off state with `OnTime` 0 (read it once at the end).
 - `git diff` holds no household identifiers; the household check passes.
+
+## Result (2026-10-26)
+
+No candidate works: a, b and c each ended the timer by turning the bulb off within 0.3 s, so none got a
+repeat. Candidate c never sent `on_time: 0`: the ZHA adapter's 0.1 s minimum clamps 0.05 s to `on_time: 1`.
+d changed nothing; e reset the remaining time to 10 s. The bulb ended off with `OnTime` 0, as before.
+Details: `docs/integrations.md`, ZHA, Tested behavior.
+
+**Decision (Jason, 2026-10-26):** narrow the contract. On ZHA only `turn_off` cancels; the repo plan's
+cancel-contract bullet, the `turn_on_for` description and the README say so. No code.

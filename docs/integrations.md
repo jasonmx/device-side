@@ -198,6 +198,9 @@ TS011F, stores OnTime as its own countdown and never switches on, so it reads ba
 Send `light.turn_off`. Turning the light on again does not cancel the timer on the one bulb tested
 (below), so don't rely on it. A second `turn_on_for` replaces the first.
 
+There is no way to stop the timer and keep the light on: on the tested bulb, every call that ends
+it early also turns the light off. Keeping it on means off, then on, which blinks.
+
 ### Tested behavior
 
 How a device treats a running timer is up to its firmware, so this holds only for the bulb it was
@@ -213,6 +216,13 @@ devices may differ.
   `brightness` (ZHA sends `move_to_level_with_on_off`) both left the timer running, and the bulb
   still turned off on time.
 - **`light.turn_off` cancels it.** After off then on, `OnTime` read 0.
+- **Nothing cancels it with the light left on.** Writing `OnTime` = 0 through
+  `zha.set_zigbee_cluster_attribute` (ZCL write status `SUCCESS`) and sending `OnWithTimedOff` with
+  `on_time: 0` each ended a running timer as if it had expired: the bulb turned off within 0.3 s.
+  `turn_on_for` with `duration: 0.05` is clamped to 0.1 s and did the same.
+- **Writing `OnTime` resets the remaining time.** Writing 100 with 15.6 s left set it to 10 s, and
+  the bulb turned off 10 s later.
+- **With no timer running, writing `OnTime` = 0 changes nothing,** whether the bulb is on or off.
 
 ### Sharp edges
 

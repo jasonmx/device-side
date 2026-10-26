@@ -86,7 +86,7 @@
     },
     "turn_on_for": {
       "name": "Turn on for",
-      "description": "Devices turn on, then off again after a delay. To cancel the timed off, send a regular turn on.",
+      "description": "Devices turn on, then off again after a delay. To cancel the timed off, send a regular turn on (on ZHA, a turn off).",
       "fields": {
         "duration": {
           "name": "Duration",
