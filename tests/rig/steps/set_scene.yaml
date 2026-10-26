@@ -2,42 +2,45 @@
 # The target is the scene; `target: group` points a step at the room the scene belongs to. §5.4-5.8 need
 # scene kinds (a light off, All-Day, dynamic), a large room and a second bridge that inventory roles don't name yet.
 action: set_scene
-rig_seconds: 60
+rig_seconds: 80
 tests:
   - name: sets_while_off  # §5.1
     roles: [scene]
-    brief:
-      see: The room goes cool white, then off; the scene is set while off, then the room turns on.
-      watch: 'Every light as it comes on: the scene''s colors and brightness, not cool white.'
-    steps:
+    setup:
       - set: {target: group, state: on, color_temp_kelvin: 6500}
       - set: {target: group, state: off}
+    steps:
       - call: {}
       - expect_response: {status: expected, integration: self}
       - wait: 1
       - expect_state: {target: group, state: off}
       - set: {target: group, state: on}
-      - observe: Did every light come on in the scene's colors and brightness?
+    observe:
+      see: The room, off since it was cool white, gets the scene set while off, then turns on.
+      watch: 'Every light as it comes on: the scene''s colors and brightness, not cool white.'
+      ask: Did every light come on in the scene's colors and brightness?
 
   - name: applies_while_on  # §5.2
     roles: [scene]
-    brief:
-      see: The room goes cool white, then the scene is set while it is on.
-      watch: 'The change: straight to the scene, with no light turning off.'
-    steps:
+    setup:
       - set: {target: group, state: on, color_temp_kelvin: 6500}
+    steps:
       - call: {}
       - expect_state: {target: group, state: on, within: tol}
-      - observe: Did the lights change to the scene straight away and stay on?
+    observe:
+      see: The room in cool white gets the scene set while it is on.
+      watch: 'The change: straight to the scene, with no light turning off.'
+      ask: Did the lights change to the scene straight away and stay on?
 
   - name: no_stale_snapshot  # §5.3
     roles: [scene]
-    brief:
-      see: 'Nothing at first: you''ll be asked to edit one light''s color in this scene in the Hue app. Then the room turns off, the scene is set, and the room turns on.'
-      watch: 'The light you edited as the room comes on: its new color, not the old one.'
+    setup:
+      - do: Change one light's color in this scene in the Hue app.
     steps:
-      - observe: Change one light's color in this scene in the Hue app. Done?
       - set: {target: group, state: off}
       - call: {}
       - set: {target: group, state: on}
-      - observe: Did that light come on in its edited color?
+    observe:
+      see: The room turns off, the scene is set, and the room turns on.
+      watch: 'The light you edited as the room comes on: its new color, not the old one.'
+      ask: Did that light come on in its edited color?

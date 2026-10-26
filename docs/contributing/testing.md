@@ -71,7 +71,7 @@ tests:
 | `expect_state` | Checks state and attributes now, or `within` seconds. `unchanged` is the state before the test. A `{min, max}` range fits values that drift. On a `group` it checks every member. |
 | `wait` | Sleeps. |
 | `sample` | Polls `attribute` for `for` seconds and expects it `rising`, `falling` or `steady`, optionally within `min`/`max`. |
-| `observe` | Asks the person at the rig a y/N question. |
+| `do` | Prints an instruction for the person and waits for Enter. Only in the `setup` of an observed test. |
 | `restore` | Puts back the state from before the test. It also runs after every test, pass or fail. |
 
 Any step takes `target: <role>` to act on another role the test lists. Durations accept numbers, `duration`
@@ -79,15 +79,36 @@ Any step takes `target: <role>` to act on another role the test lists. Durations
 test to some integrations; when those pile up, split the file. `tests/rig/steps/examples/` shows the planned
 actions (ramps, attributes while off, scenes) and is only parsed, never run.
 
-### Observe steps
+### Observed tests
 
-An `observe` step is for what the state can't show, such as a light climbing smoothly without flashing. The
-run pauses, prints the question and waits for you to answer: watch the device and answer `y` only if you saw
-it. Anything else fails the test. `--unattended` skips the questions and reports those tests as
-`not observed`; they don't fail, but their bench record proves nothing they cover.
+Some things need eyes, such as a light climbing smoothly without flashing. A test asks for them with an
+`observe:` block and puts its start state in `setup:`:
 
-A test with an `observe` step needs `brief: {see, watch}`: what the device will do, and what to watch for. The
-runner prints it, with the questions to come, and waits for Enter before the test starts.
+```yaml
+  - name: raise
+    roles: [light_ct, group]
+    setup:
+      - set: {state: on, brightness_pct: 20}
+    steps:
+      - call: {brightness: brighter, sweep_time: 5}
+      - sample: {attribute: brightness, for: 3, expect: rising}
+    observe:
+      see: The light at 20 %, climbing to full over 5 s.
+      watch: Steps or flashes on the way up.
+      ask: Did it climb smoothly to full?
+```
+
+Such a test runs twice, so you are asked only what a machine can't check:
+
+1. **Automated**, with every other test first: setup and steps, every check applied. It has no automated run if
+   its steps check nothing or its setup has a `do`.
+2. **Observed** (`<name>[<role>] observed`), after all automated runs. Setup runs, then the runner prints `see`,
+   `watch` and `ask` and waits for Enter. The steps run with their checks turned into waits, so the timing
+   matches, then you answer `ask`: `y` only if you saw it. Anything else fails the test. It is skipped if its
+   automated run failed, and if a step fails after Enter it prints `nothing to observe` and the reason.
+
+`--unattended` skips the observed runs and reports them `not observed`. They don't fail, but a test proves its
+fields and capabilities in a bench record only when both of its runs pass.
 
 ### Bench records
 
