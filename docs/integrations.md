@@ -366,6 +366,34 @@ leaves the timer running, and the Hue app doesn't show it. A bulb without power 
 fires misses the flip and the bridge doesn't retry. For timed Hue bulbs, pair them through ZHA,
 Zigbee2MQTT or Matter.
 
+### Tested behavior
+
+What the bridge reports during a transition (a write with a duration), measured 2026-10-26 on a
+BSB002 bridge (software 6.1.1978418030) and two LTA009 bulbs (firmware 1.163.1), with Home
+Assistant 2026.10.2 and aiohue 4.9.0. The Hue integration copies each event into Home Assistant as
+it arrives, so Home Assistant shows what is listed here.
+
+- **A transition reports its end value at the start.** One event per light, about 70 ms after the
+  write returns, holding the target the bridge stored (80 % reads 79.84). Nothing is sent when it
+  ends. A second transition to the value the bridge already holds sends no event.
+- **Where a stopped light halted is reported late, or not at all.** The report arrived 0.1 to 27 s
+  after the stop; its varying timing suggests it comes from the bulb, not a bridge timer. After 4 of
+  16 stops followed by 30 s of waiting, none came, and Home Assistant kept showing the end value.
+  When a report did come, it matched a straight-line interpolation within 0.3 % for brightness and
+  1 mirek for color temperature.
+- **A report can arrive in the middle of a transition**, for a stop that came before it or partway
+  through the transition itself, and may be the last one sent.
+- **Rooms and zones:** each light reports its end value at once, then the `grouped_light` reports
+  the average about 1 s later. After a stop the lights report separately, up to 16 s apart.
+- **A change from elsewhere is reported promptly:** a `light.turn_on` from Home Assistant within
+  0.25 s, and a Hue app slider with an event about once a second while it moves.
+- **Dimming to off:** `on: false` and brightness 0 are reported at the start. In 1 of 2 runs, a report
+  mid-transition then showed the light on at 17 % with nothing after it. A dimming stop is refused
+  while the light dims to off ("soft off").
+- **A color temperature write reports only `color_temperature`,** never `dimming`. Color
+  temperature transitions and their stop (`color_temperature_delta`) behave as brightness does
+  above, on a light and on a zone.
+
 ### Sharp edges
 
 - **No gamut clamp.** `set_attributes` sends a color outside a bulb's gamut as is, and the bulb
