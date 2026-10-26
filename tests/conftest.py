@@ -1,8 +1,10 @@
+import time
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
 from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.device_side import actions
 from custom_components.device_side.const import DOMAIN
@@ -53,3 +55,14 @@ async def call(hass: HomeAssistant, service: str, data: dict, return_response: b
     return await hass.services.async_call(
         DOMAIN, service, data, blocking=True, return_response=return_response
     )
+
+
+def wall_clock_now() -> datetime:
+    """Wall-clock now, which async_fire_time_changed measures against (dt_util.utcnow can be frozen)."""
+    return datetime.fromtimestamp(time.time(), UTC)
+
+
+async def advance(hass: HomeAssistant, start: datetime, seconds: float) -> None:
+    """Fire the timers due by start + seconds and let what they started finish."""
+    async_fire_time_changed(hass, start + timedelta(seconds=seconds))
+    await hass.async_block_till_done()

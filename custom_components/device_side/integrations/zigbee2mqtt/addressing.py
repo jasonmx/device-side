@@ -35,13 +35,13 @@ def is_z2m_group(hass: HomeAssistant, target: Target) -> bool:
     return _GROUP_ADDRESS.match(addr) is not None
 
 
-def command_topic(target: Target) -> str | None:
-    """MQTT command topic for this Z2M entity, or None when it cannot be addressed.
+def topic(target: Target, suffix: str) -> str | None:
+    """MQTT topic <base>/<address>/<suffix> for this Z2M entity, or None when it cannot be addressed.
 
-    A device is addressed by IEEE and a group by ID, both under the default base topic. A group's
-    identifier carries its base topic, so a group on any other base topic gets None rather than a
-    dead topic; a device's doesn't, so a custom base topic still misfires for devices (a sharp edge
-    documented in docs/integrations.md).
+    The suffix is "set" for a command and "get" for a read. A device is addressed by IEEE and a group
+    by ID, both under the default base topic. A group's identifier carries its base topic, so a group
+    on any other base topic gets None rather than a dead topic; a device's doesn't, so a custom base
+    topic still misfires for devices (a sharp edge documented in docs/integrations.md).
     """
     if target.device is None:
         return None
@@ -52,5 +52,5 @@ def command_topic(target: Target) -> str | None:
         encoded_base, group_id = group.groups()
         if encoded_base != _ENCODED_BASE_TOPIC:
             return None
-        return f"{_Z2M_BASE_TOPIC}/{group_id}/set"
-    return f"{_Z2M_BASE_TOPIC}/{addr}/set"
+        return f"{_Z2M_BASE_TOPIC}/{group_id}/{suffix}"
+    return f"{_Z2M_BASE_TOPIC}/{addr}/{suffix}"
