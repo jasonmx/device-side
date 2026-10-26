@@ -31,17 +31,13 @@ tests:
       watch: Steps on the way down, and that it ends off.
       ask: Did it fade smoothly and turn off at the end?
 
-  - name: raise_from_off  # §2.3
+  - name: raise_from_off  # §2.3; the start is watched in raise_after_soft_off
     roles: [light_ct, group]
     setup:
       - set: {state: off}
     steps:
       - call: {brightness: up, sweep_time: 5}
       - sample: {attribute: brightness, for: 1, expect: rising, max: 50, source: device_side}
-    observe:
-      see: The light, off, climbing from the bottom over 5 s.
-      watch: 'The first moment it lights: low, not its previous brightness.'
-      ask: Did it climb from the bottom, without jumping to its previous brightness first?
 
   - name: raise_after_soft_off  # a plain soft off keeps the stored brightness: does the next move up start there?
     roles: [light_ct, group]
@@ -85,7 +81,7 @@ tests:
       watch: 'The hold and the restart: no drift while held, no jump when it resumes.'
       ask: Did it hold where it stopped, then continue from that point?
 
-  - name: lower_stop_lower  # §2.5, repeated with lower
+  - name: lower_stop_lower  # §2.5 with lower; watched in stop.yaml (the cut) and raise_stop_raise
     roles: [light_ct, group]
     setup:
       - set: {state: on, brightness_pct: 90}
@@ -96,10 +92,6 @@ tests:
       - sample: {attribute: brightness, for: 4, expect: steady, source: device_side}
       - call: {brightness: down, sweep_time: 10}
       - sample: {attribute: brightness, for: 2, expect: falling, min: 12, source: device_side}
-    observe:
-      see: 'The light at 90 %: a slow fade for 3 s, a 4 s hold, then the fade again.'
-      watch: 'The hold and the restart: no drift while held, no jump when it resumes.'
-      ask: Did it hold where it stopped, then continue from that point?
 
   - name: light_moved_mid_room_move  # needs light_ct to be one of the group's lights
     roles: [group]

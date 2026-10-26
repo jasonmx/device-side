@@ -84,7 +84,9 @@ An integration in `SETTLE_S` (`tests/rig/inventory.py`) predicts a light's brigh
 ### Observed tests
 
 Some things need eyes, such as a light climbing smoothly without flashing. A test asks for them with an
-`observe:` block and puts its start state in `setup:`:
+`observe:` block and puts its start state in `setup:`. Each question costs the person at the rig, so ask as
+few as cover everything a check can't measure: watch a behavior once, in the test that shows it best, and
+leave its other tests automated.
 
 ```yaml
   - name: raise
