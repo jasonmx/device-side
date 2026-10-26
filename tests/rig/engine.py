@@ -360,7 +360,7 @@ def load_step_file(path: Path) -> StepFile:
 
 
 def load_step_files(steps_dir: Path = STEPS_DIR) -> list[StepFile]:
-    """Every `<action>.yaml` directly in steps_dir; `examples/` below it is for the parser tests only."""
+    """Every `<action>.yaml` directly in steps_dir."""
     return [load_step_file(path) for path in sorted(steps_dir.glob("*.yaml"))]
 
 

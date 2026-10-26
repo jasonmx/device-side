@@ -76,8 +76,7 @@ tests:
 
 Any step takes `target: <role>` to act on another role the test lists. Durations accept numbers, `duration`
 (the last call's), `tol` (the integration's timing tolerance) and `+ - *`. `only: [<integration>]` limits a
-test to some integrations; when those pile up, split the file. `tests/rig/steps/examples/` shows the planned
-actions (ramps, attributes while off, scenes) and is only parsed, never run.
+test to some integrations; when those pile up, split the file.
 
 ### Observed tests
 

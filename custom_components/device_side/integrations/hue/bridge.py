@@ -11,6 +11,8 @@ from ...core.runtime import get_runtime
 
 if TYPE_CHECKING:
     from aiohue.v2 import HueBridgeV2
+    from aiohue.v2.controllers.groups import GroupedLightController
+    from aiohue.v2.controllers.lights import LightsController
 
 
 def bridge_api(target: Target) -> HueBridgeV2 | None:
@@ -27,6 +29,11 @@ def bridge_api(target: Target) -> HueBridgeV2 | None:
 def resource_id(target: Target) -> str:
     """The bridge's id for the light, grouped_light or scene: core's hue integration uses it as the unique_id."""
     return target.entry.unique_id
+
+
+def controller(api: HueBridgeV2, target: Target) -> LightsController | GroupedLightController:
+    """The controller that reads and writes the target as one resource: the room's grouped_light, or the light."""
+    return api.groups.grouped_light if target.is_group else api.lights
 
 
 def is_hue_group(hass: HomeAssistant, target: Target) -> bool:

@@ -29,12 +29,61 @@
     },
     "nothing_to_set": {
       "message": "Nothing to set. Give a brightness, a color temperature, a color, or a brightness limit."
+    },
+    "nothing_to_move": {
+      "message": "Nothing to move. Give a direction for brightness, color temperature, saturation or hue."
+    },
+    "limit_without_direction": {
+      "message": "A limit needs a direction for the same attribute: {limits}."
     }
   },
   "services": {
     "get_attributes": {
       "name": "Get attributes",
       "description": "Get brightness, color temp, and color (RGB, HS, XY), even if lights are off. Returns one record per target."
+    },
+    "move": {
+      "name": "Move: dim, brighten, warm or cool",
+      "description": "Starts brightness, color temperature or saturation moving at a steady speed until it reaches its range end or a limit. Stop halts it where it is. Built for hold-to-dim buttons.",
+      "fields": {
+        "brightness": {
+          "name": "Brightness",
+          "description": "Direction to move brightness. Moving up turns the light on; moving down to 0% turns it off."
+        },
+        "color_temp": {
+          "name": "Color temperature",
+          "description": "Direction to move color temperature."
+        },
+        "saturation": {
+          "name": "Saturation",
+          "description": "Direction to move saturation: up is a richer color, down is paler, toward white."
+        },
+        "hue": {
+          "name": "Hue",
+          "description": "Direction to move around the color wheel: up is red to yellow to green."
+        },
+        "sweep_time": {
+          "name": "Sweep time",
+          "description": "Seconds a full sweep takes, such as 0% to 100% brightness. The speed is the same wherever the move starts."
+        },
+        "brightness_limit": {
+          "name": "Brightness limit",
+          "description": "Brightness to stop at instead of the range end, in percent. Moving down to 0% turns the light off."
+        },
+        "color_temp_limit": {
+          "name": "Color temperature limit",
+          "description": "Color temperature to stop at instead of the light's warmest or coolest, in Kelvin."
+        },
+        "saturation_limit": {
+          "name": "Saturation limit",
+          "description": "Saturation to stop at instead of the range end, in percent."
+        }
+      },
+      "sections": {
+        "limits": {
+          "name": "Limits"
+        }
+      }
     },
     "set_attributes": {
       "name": "Set attributes",
@@ -73,6 +122,10 @@
     "set_scene": {
       "name": "Set scene",
       "description": "Set a Hue scene without turning on its lights."
+    },
+    "stop": {
+      "name": "Stop",
+      "description": "Stops every move in flight on the target, where it is now."
     },
     "turn_off_for": {
       "name": "Turn off for",
@@ -116,6 +169,32 @@
           "name": "Transition",
           "description": "Seconds the light takes to reach the brightness and color above. Lights only."
         }
+      }
+    }
+  },
+  "selector": {
+    "brightness_direction": {
+      "options": {
+        "up": "Brighten",
+        "down": "Dim"
+      }
+    },
+    "color_temp_direction": {
+      "options": {
+        "warmer": "Warmer",
+        "cooler": "Cooler"
+      }
+    },
+    "saturation_direction": {
+      "options": {
+        "up": "Richer",
+        "down": "Paler"
+      }
+    },
+    "hue_direction": {
+      "options": {
+        "up": "Up (red to yellow to green)",
+        "down": "Down (red to magenta to blue)"
       }
     }
   }

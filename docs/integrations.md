@@ -358,6 +358,28 @@ One failing light doesn't stop the rest: the result is `sent` with `some_lights_
 `rejected` if every light failed. All-Day (smart) scenes are `unsupported` with `smart_scene`;
 a scene the bridge no longer has is `rejected` with `scene_not_found`.
 
+### `move` and `stop`
+
+`move` covers `brightness` for now; `color_temp` and `saturation` are refused with
+`fields_not_tested` until they are tested, and `hue` is refused because a hue rotation isn't a
+straight line the bridge can fade along. A brightness move is one write: the end point
+(`brightness_limit`, or 0 % or 100 %) with a duration of `sweep_time` × the fraction of the range
+left, which the bridge then runs on its own. Moving up turns the light on, from the bottom if it was
+off. Moving down to 0 % is a plain soft off: `on: false` with the duration, so the bridge keeps the
+stored brightness and the next plain on comes back at it. A light already at or past its limit is
+`unchanged` with `at_limit` and nothing is sent.
+
+A room moves with one write to its `grouped_light`, so its lights converge on the end point
+together. `stop` sends the bridge's dimming stop to the light or room. The bridge refuses that stop
+during a soft off, so a soft off Device Side started is cut by writing `on: true` with the predicted
+brightness and no duration, light by light for a room. A light that is off, or fading off from
+elsewhere, has nothing Device Side can stop: it is `unchanged` with `off` and nothing is sent.
+
+While a fade runs the bridge reports its end value, and after a stop it reports where the light
+halted late or not at all (Tested behavior, below). Device Side remembers each move and stop for its
+duration plus 15 seconds and predicts the brightness of each light meanwhile, so a move after a stop
+continues from where the light halted, and `get_attributes` returns the predicted brightness.
+
 ### `turn_on_for`, `turn_off_for`
 
 `unsupported` with `no_adapter`. The bridge's own timers can do the flip, but nothing cancels

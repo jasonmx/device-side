@@ -1,0 +1,42 @@
+# hue_dimmer tests/RELEASE_CHECKLIST.md §2.5 and §2.6 from the stop side; move.yaml checks the move that follows.
+action: stop
+rig_seconds: 100
+tests:
+  - name: halts_a_move  # §2.5
+    roles: [light_ct, group]
+    setup:
+      - set: {state: on, brightness_pct: 10}
+    steps:
+      - call: {action: move, brightness: up, sweep_time: 10}
+      - wait: 3
+      - call: {}
+      - expect_response: {status: expected, integration: self}
+      - sample: {attribute: brightness, for: 4, expect: steady, max: 200}
+    observe:
+      see: The light at 10 %, climbing slowly, stopped after 3 s.
+      watch: That it stops part way and holds.
+      ask: Did it stop part way up and hold there?
+
+  - name: halts_a_move_to_off  # the bridge refuses a dimming stop during a soft off; the cut is on + brightness
+    roles: [light_ct, group]
+    setup:
+      - set: {state: on, brightness_pct: 100}
+    steps:
+      - call: {action: move, brightness: down, sweep_time: 10}
+      - wait: 3
+      - call: {}
+      - expect_response: {status: expected, integration: self}
+      - expect_state: {state: on, within: tol}
+      - sample: {attribute: brightness, for: 4, expect: steady, min: 120, max: 210}
+    observe:
+      see: The light at full, fading slowly toward off, stopped after 3 s.
+      watch: 'The stop: it holds about two thirds up, with no flash, jump or blink off first.'
+      ask: Did it stop part way down and hold there, with no flash, jump or blink off?
+
+  - name: stop_when_idle  # §2.6
+    roles: [light_ct, group]
+    steps:
+      - set: {state: on, brightness_pct: 50}
+      - call: {}
+      - expect_response: {status: expected}
+      - sample: {attribute: brightness, for: 2, expect: steady}
