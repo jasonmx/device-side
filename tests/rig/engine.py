@@ -7,10 +7,11 @@ No pytest here: scripts/rig.py calls run(), and a tester's one-file runner can i
 
 import ast
 import asyncio
+import contextlib
 import logging
 import operator
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -117,11 +118,16 @@ class Step:
 
 
 @dataclass(frozen=True, slots=True)
-class Brief:
-    """What an attended test shows, told before it starts: what the lights will do and what to watch for."""
+class Observe:
+    """What an observed test asks of the person: what the lights will do, what to watch for, and the question."""
 
     see: str
     watch: str
+    ask: str
+
+
+# Steps that check something; an observed run turns them into the waits they imply.
+CHECKS = frozenset({"expect_response", "expect_error", "expect_state", "sample"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,15 +136,21 @@ class RigTest:
     roles: tuple[str, ...]
     only: frozenset[str] | None
     steps: tuple[Step, ...]
-    brief: Brief | None = None
+    setup: tuple[Step, ...] = ()
+    observe: Observe | None = None
 
     @property
-    def questions(self) -> list[str]:
-        return [step.args for step in self.steps if step.kind == "observe"]
+    def automated(self) -> bool:
+        """Whether the test has an automated case: always without `observe`, else when its steps check something
+        and its setup needs no one."""
+        if self.observe is None:
+            return True
+        return any(step.kind in CHECKS for step in self.steps) and not any(step.kind == "do" for step in self.setup)
 
     def roles_needed(self, role: str) -> list[str]:
         """The case's own role and every role a step targets, in first-use order."""
-        targets = (step.args.get("target") for step in self.steps if isinstance(step.args, dict))
+        steps = (*self.setup, *self.steps)
+        targets = (step.args.get("target") for step in steps if isinstance(step.args, dict))
         return list(dict.fromkeys([role, *filter(None, targets)]))
 
 
@@ -234,9 +246,9 @@ def _parse_sample(args: Any) -> dict:
     return args
 
 
-def _parse_observe(args: Any) -> str:
+def _parse_do(args: Any) -> str:
     if not isinstance(args, str) or not args.strip():
-        raise ValueError("observe takes the question to ask, as a string")
+        raise ValueError("do takes the instruction for the person, as a string")
     return args.strip()
 
 
@@ -253,16 +265,18 @@ PARSERS: dict[str, Callable[[Any], Any]] = {
     "expect_state": _parse_expect_state,
     "wait": Expr.parse,
     "sample": _parse_sample,
-    "observe": _parse_observe,
+    "do": _parse_do,
     "restore": _parse_restore,
 }
 
 
-def _parse_step(raw: Any, index: int) -> Step:
+def _parse_step(raw: Any, label: str) -> Step:
     if not isinstance(raw, dict) or len(raw) != 1:
-        raise ValueError(f"step {index}: expected one `kind: args` mapping, got {raw!r}")
+        raise ValueError(f"{label}: expected one `kind: args` mapping, got {raw!r}")
     ((kind, args),) = raw.items()
-    label = f"step {index} ({kind})"
+    label = f"{label} ({kind})"
+    if kind == "observe":
+        raise ValueError(f"{label}: the observe step is gone; give the test observe: {{see, watch, ask}}")
     if kind not in PARSERS:
         raise ValueError(f"{label}: unknown step; use one of {', '.join(PARSERS)}")
     try:
@@ -271,18 +285,30 @@ def _parse_step(raw: Any, index: int) -> Step:
         raise ValueError(f"{label}: {err}") from None
 
 
-def _parse_brief(raw: Any) -> Brief:
-    args = _mapping(raw, required=("see", "watch"), allowed=())
-    if not all(isinstance(value, str) and value.strip() for value in args.values()):
-        raise ValueError("brief see and watch must be non-empty strings")
-    return Brief(args["see"].strip(), args["watch"].strip())
+def _parse_steps(raw: Any, key: str) -> tuple[Step, ...]:
+    if not isinstance(raw, list) or not raw:
+        raise ValueError(f"{key} must be a non-empty list")
+    prefix = "setup step" if key == "setup" else "step"
+    return tuple(_parse_step(step, f"{prefix} {index}") for index, step in enumerate(raw, 1))
+
+
+def _parse_observe(raw: Any) -> Observe:
+    try:
+        args = _mapping(raw, required=("see", "watch", "ask"), allowed=())
+        if not all(isinstance(value, str) and value.strip() for value in args.values()):
+            raise ValueError("see, watch and ask must be non-empty strings")
+    except ValueError as err:
+        raise ValueError(f"observe: {err}") from None
+    return Observe(args["see"].strip(), args["watch"].strip(), args["ask"].strip())
 
 
 def _parse_test(raw: Any) -> RigTest:
     if not isinstance(raw, dict) or not isinstance(name := raw.get("name"), str):
         raise ValueError(f"a test needs a name, got {raw!r}")
     try:
-        if unknown := sorted(set(raw) - {"name", "roles", "only", "steps", "brief"}):
+        if "brief" in raw:
+            raise ValueError("brief is gone; give the test observe: {see, watch, ask}")
+        if unknown := sorted(set(raw) - {"name", "roles", "only", "setup", "steps", "observe"}):
             raise ValueError(f"unknown key(s) {', '.join(unknown)}")
         roles = raw.get("roles")
         if not isinstance(roles, list) or not roles:
@@ -292,18 +318,24 @@ def _parse_test(raw: Any) -> RigTest:
         only = raw.get("only")
         if only is not None and (not isinstance(only, list) or not only):
             raise ValueError("only must be a non-empty list of integration keys")
-        if not isinstance(steps := raw.get("steps"), list) or not steps:
-            raise ValueError("steps must be a non-empty list")
-        parsed = tuple(_parse_step(step, index) for index, step in enumerate(steps, 1))
-        observed = any(step.kind == "observe" for step in parsed)
-        if observed and "brief" not in raw:
-            raise ValueError("a test with an observe step needs a brief with see and watch")
-        if not observed and "brief" in raw:
-            raise ValueError("brief is only for a test with an observe step")
-        brief = _parse_brief(raw["brief"]) if observed else None
+        steps, setup, observe = _parse_phases(raw)
     except ValueError as err:
         raise ValueError(f"test {name}, {err}") from None
-    return RigTest(name, tuple(roles), frozenset(only) if only else None, parsed, brief)
+    return RigTest(name, tuple(roles), frozenset(only) if only else None, steps, setup, observe)
+
+
+def _parse_phases(raw: dict) -> tuple[tuple[Step, ...], tuple[Step, ...], Observe | None]:
+    """A test's steps, setup and observe block, with `do` only in the setup of an observed test."""
+    steps = _parse_steps(raw.get("steps"), "steps")
+    setup = _parse_steps(raw["setup"], "setup") if "setup" in raw else ()
+    observe = _parse_observe(raw["observe"]) if "observe" in raw else None
+    if observe is not None and not setup:
+        raise ValueError("a test with observe needs setup: the steps that bring the lights to where see begins")
+    if do := next((step for step in steps if step.kind == "do"), None):
+        raise ValueError(f"{do.label}: do belongs in setup, before the brief")
+    if observe is None and (do := next((step for step in setup if step.kind == "do"), None)):
+        raise ValueError(f"{do.label}: do is only for a test with observe")
+    return steps, setup, observe
 
 
 def load_step_file(path: Path) -> StepFile:
@@ -349,34 +381,46 @@ class Suite:
 
 @dataclass(frozen=True, slots=True)
 class Case:
-    """One test on one role: the entities it moves, or why it is skipped."""
+    """One run of a test on one role, automated or observed: the entities it moves, or why it is skipped."""
 
     suite: Suite
     test: RigTest
     role: str
     entities: dict[str, str]
     skip: str | None = None
+    observed: bool = False
 
     @property
     def id(self) -> str:
-        return f"{self.test.name}[{self.role}]"
+        return f"{self.test.name}[{self.role}]" + (" observed" if self.observed else "")
+
+    @property
+    def twin(self) -> str | None:
+        """The id of the test's other case on this role, when it has both: either proves nothing alone."""
+        if self.test.observe is None or not self.test.automated:
+            return None
+        return replace(self, observed=not self.observed).id
 
 
 def cases(suite: Suite, inventory: Inventory, keyword: str | None = None) -> list[Case]:
-    """The suite's cases in file order; `keyword` keeps only case ids containing it."""
+    """The suite's cases in file order, a test's automated case before its observed one; `keyword` keeps only case
+    ids containing it."""
     result = []
     for test in suite.file.tests:
         if test.only is not None and suite.integration not in test.only:
             continue
         for role in test.roles:
-            case = Case(suite, test, role, {})
-            if keyword and keyword not in case.id:
-                continue
-            entities = {needed: inventory.entity(suite.integration, needed) for needed in test.roles_needed(role)}
-            if missing := [needed for needed, entity_id in entities.items() if entity_id is None]:
-                result.append(Case(suite, test, role, {}, f"no {missing[0]} entity in inventory"))
-            else:
-                result.append(Case(suite, test, role, entities))
+            for observed in [False] * test.automated + [True] * (test.observe is not None):
+                case = Case(suite, test, role, {}, observed=observed)
+                if keyword and keyword not in case.id:
+                    continue
+                needed = test.roles_needed(role)
+                entities = {name: inventory.entity(suite.integration, name) for name in needed}
+                if missing := [name for name, entity_id in entities.items() if entity_id is None]:
+                    case = Case(suite, test, role, {}, f"no {missing[0]} entity in inventory", observed)
+                else:
+                    case = Case(suite, test, role, entities, observed=observed)
+                result.append(case)
     return result
 
 
@@ -401,6 +445,7 @@ class CaseResult:
     # Fields in the adapter's scope that a call carried to the device, and whether any call reached it.
     fields: frozenset[str] = frozenset()
     reached: bool = False
+    twin: str | None = None  # Case.twin
 
 
 @dataclass(slots=True)
@@ -418,8 +463,9 @@ class SuiteResult:
 
     @property
     def proven(self) -> list[CaseResult]:
-        """Cases whose every step was checked, observed ones included: only these go into a record's scope."""
-        return [case for case in self.cases if case.outcome is Outcome.PASS]
+        """Passed cases whose twin passed too: only these go into a record's scope."""
+        passed = {case.id for case in self.cases if case.outcome is Outcome.PASS}
+        return [case for case in self.cases if case.id in passed and (case.twin is None or case.twin in passed)]
 
 
 @dataclass(slots=True)
@@ -539,8 +585,16 @@ def _describe(state: dict | None, names: Iterable[str]) -> str:
     return ", ".join(f"{name}={_value(state, name)!r}" for name in names)
 
 
+class _NoOneThere(Exception):
+    """EOF at a prompt: nobody is at the rig, so the observed case ends not observed."""
+
+
 class _CaseRun:
-    """The steps of one case, against one HA connection, with what earlier steps left behind."""
+    """The steps of one case, against one HA connection, with what earlier steps left behind.
+
+    An observed case runs its setup, briefs the person and waits for Enter, runs its steps with every check relaxed to
+    the wait it implies (so the timing matches the automated case), then asks its question.
+    """
 
     def __init__(
         self,
@@ -550,8 +604,10 @@ class _CaseRun:
         tolerance: float,
         ask: Callable[[str], str] | None,
         power: dict[str, str] | None = None,
+        out: Callable[[str], None] = print,
+        position: str = "",
     ):
-        self.case, self.ha, self.registry, self.ask = case, ha, registry, ask
+        self.case, self.ha, self.registry, self.ask, self.out, self.position = case, ha, registry, ask, out, position
         self.integration = case.suite.integration
         self.names: dict[str, float] = {"tol": tolerance}
         self.snapshot = Snapshot(
@@ -568,7 +624,6 @@ class _CaseRun:
         self.query = False
         self.fields: set[str] = set()
         self.reached = False
-        self.unobserved = False
 
     def entity(self, args: Any) -> str:
         role = args.get("target") if isinstance(args, dict) else None
@@ -597,27 +652,69 @@ class _CaseRun:
     async def run(self) -> CaseResult:
         case = self.case
         domain = case.entities[case.role].partition(".")[0]
-        result = CaseResult(case.id, case.role, domain, Outcome.PASS, entity_ids=tuple(case.entities.values()))
-        steps = case.test.steps
+        result = CaseResult(
+            case.id, case.role, domain, Outcome.PASS, entity_ids=tuple(case.entities.values()), twin=case.twin
+        )
         try:
+            if case.observed:
+                self.out(f"--- {case.suite.action} / {case.test.name} on {case.role} ({self.position}) ---")
             await self.check_power()
-            for index, step in enumerate(steps):
-                following = steps[index + 1].kind if index + 1 < len(steps) else None
-                try:
-                    await getattr(self, f"_{step.kind}")(step.args, following)
-                except StepFailure as err:
-                    raise StepFailure(f"{step.label}: {err}") from None
-                except Exception as err:  # noqa: BLE001 - any error ends the case as a fail, not the run
-                    raise StepFailure(f"{step.label}: {type(err).__name__}: {err}") from None
+            await self.steps(case.test.setup)
+            if case.observed:
+                await self.observed()
+            else:
+                await self.steps(case.test.steps)
         except StepFailure as err:
             result.outcome, result.detail = Outcome.FAIL, str(err)
-        else:
-            if self.unobserved:
-                result.outcome = Outcome.NOT_OBSERVED
+        except _NoOneThere:
+            result.outcome = Outcome.NOT_OBSERVED
         finally:
             await self.snapshot.restore()
         result.fields, result.reached = frozenset(self.fields), self.reached
         return result
+
+    async def steps(self, steps: tuple[Step, ...], relaxed: bool = False) -> None:
+        for index, step in enumerate(steps):
+            following = steps[index + 1].kind if index + 1 < len(steps) else None
+            handler = getattr(self, f"_{step.kind}")
+            if relaxed:
+                handler = getattr(self, f"_relaxed_{step.kind}", handler)
+            try:
+                await handler(step.args, following)
+            except StepFailure as err:
+                raise StepFailure(f"{step.label}: {err}") from None
+            except _NoOneThere:
+                raise
+            except Exception as err:  # noqa: BLE001 - any error ends the case as a fail, not the run
+                raise StepFailure(f"{step.label}: {type(err).__name__}: {err}") from None
+
+    async def observed(self) -> None:
+        observe = self.case.test.observe
+        assert observe is not None  # only a test with observe has an observed case
+        self.out(f"You'll see: {observe.see}")
+        self.out(f"Watch for: {observe.watch}")
+        self.out(f"You'll be asked: {observe.ask}")
+        await self.prompt("Press Enter to start... ")
+        try:
+            await self.steps(self.case.test.steps, relaxed=True)
+        except StepFailure as err:
+            self.out(f"    nothing to observe: {err}")
+            with contextlib.suppress(EOFError):
+                await asyncio.to_thread(self.ask, "Press Enter to go on... ")
+            raise
+        try:
+            answer = await asyncio.to_thread(self.ask, f"    {observe.ask} [y/N] ")
+        except EOFError:
+            answer = ""
+        if answer.strip().lower() not in ("y", "yes"):
+            raise StepFailure(f"not seen: {observe.ask}")
+
+    async def prompt(self, text: str) -> None:
+        """Wait for Enter; EOF there means nobody is at the rig."""
+        try:
+            await asyncio.to_thread(self.ask, text)
+        except EOFError:
+            raise _NoOneThere from None
 
     async def check_power(self) -> None:
         """Fail up front if a target's supply is off: its state in HA is stale, so every step would mislead."""
@@ -778,19 +875,26 @@ class _CaseRun:
             case "steady" if len(set(readings)) > 1:
                 raise StepFailure(f"{entity_id}: {attribute} moved: {shown}")
 
-    async def _observe(self, question: str, _following: str | None) -> None:
-        if self.ask is None:
-            self.unobserved = True
-            return
-        try:
-            answer = await asyncio.to_thread(self.ask, f"    {question} [y/N] ")
-        except EOFError:
-            answer = ""
-        if answer.strip().lower() not in ("y", "yes"):
-            raise StepFailure(f"not seen: {question}")
+    async def _do(self, instruction: str, _following: str | None) -> None:
+        await self.prompt(f"    {instruction} Press Enter when done... ")
 
     async def _restore(self, _args: None, _following: str | None) -> None:
         await self.snapshot.restore()
+
+    # Observed mode: a check becomes the wait it implies, and never fails.
+
+    async def _relaxed_expect_response(self, _args: dict, _following: str | None) -> None:
+        pass
+
+    _relaxed_expect_error = _relaxed_expect_response
+
+    async def _relaxed_expect_state(self, args: dict, following: str | None) -> None:
+        if "within" in args:
+            with contextlib.suppress(StepFailure):
+                await self._expect_state(args, following)
+
+    async def _relaxed_sample(self, args: dict, _following: str | None) -> None:
+        await asyncio.sleep(max(args["for"].eval(self.names), 0))
 
 
 async def run(
@@ -805,11 +909,12 @@ async def run(
     tolerance: dict[str, float] = TOLERANCE_S,
     out: Callable[[str], None] = print,
 ) -> RunResult:
-    """Run every case in order and print the table; ADMIN_INTEGRATIONS run on `admin`. `ask=None` is --unattended.
+    """Run every case and print the table; ADMIN_INTEGRATIONS run on `admin`. `ask=None` is --unattended.
 
-    An attended case (one with an observe step) is briefed first and starts only when the person presses Enter.
+    Every automated case runs first, with nobody needed. Then each observed case runs, unless its automated twin
+    failed; unattended, they are reported not observed instead.
     """
-    results, power, planned = [], inventory.power(), []
+    planned = []
     for suite in suites:
         adapter = registry.adapter(suite.action, suite.integration)
         if adapter is None:
@@ -820,47 +925,79 @@ async def run(
             out(f"{suite.integration} / {suite.action}: needs HA_ADMIN_TOKEN, skipped")
             continue
         planned.append((suite, adapter, client, cases(suite, inventory, keyword)))
-    attended = [c for *_, suite_cases in planned for c in suite_cases if not c.skip and c.test.brief] if ask else []
-    # Cases hold dicts, so they're numbered by identity rather than hashed.
-    numbers = {id(case): number for number, case in enumerate(attended, 1)}
-    for suite, adapter, client, suite_cases in planned:
-        suite_result = SuiteResult(suite, adapter, [], complete=not keyword)
-        out(f"{suite.integration} / {suite.action}")
-        for case in suite_cases:
-            if case.skip:
-                result = CaseResult(case.id, case.role, None, Outcome.SKIPPED, case.skip)
-            else:
-                case_ask = ask
-                if number := numbers.get(id(case)):
-                    case_ask = await _brief(case, f"{number} of {len(attended)}", ask, out)
-                result = await _CaseRun(case, client, registry, tolerance[suite.integration], case_ask, power).run()
-            out(f"  {case.id}: {result.outcome}" + (f" ({result.detail})" if result.detail else ""))
-            suite_result.cases.append(result)
-        results.append(suite_result)
-    run_result = RunResult(results)
-    for suite_result in results:
+    rig_run = _Run(registry, tolerance, inventory.power(), ask, out)
+    waiting = [
+        case
+        for suite, _, client, suite_cases in planned
+        for case in await rig_run.automated(suite, client, suite_cases)
+    ]
+    await rig_run.observed(waiting)
+    suite_results = [
+        SuiteResult(suite, adapter, [rig_run.results[id(suite), case.id] for case in suite_cases], complete=not keyword)
+        for suite, adapter, _, suite_cases in planned
+    ]
+    for suite_result in suite_results:
         out("")
         out(f"{suite_result.suite.integration} / {suite_result.suite.action}")
         out("\n".join(table(suite_result, details=True)))
-    return run_result
+    return RunResult(suite_results)
 
 
-async def _brief(
-    case: Case, position: str, ask: Callable[[str], str], out: Callable[[str], None]
-) -> Callable[[str], str] | None:
-    """Tell the person what the case will show and wait for Enter; EOF there runs it unattended (None)."""
-    brief = case.test.brief
-    assert brief is not None  # an attended case has a brief: the parser requires one with an observe step
-    out(f"--- {case.suite.action} / {case.test.name} on {case.role} ({position}) ---")
-    out(f"You'll see: {brief.see}")
-    out(f"Watch for: {brief.watch}")
-    for question in case.test.questions:
-        out(f"You'll be asked: {question}")
-    try:
-        await asyncio.to_thread(ask, "Press Enter to start... ")
-    except EOFError:
-        return None
-    return ask
+@dataclass(slots=True)
+class _Run:
+    """The cases of one rig run, and their results by suite (by identity: a Suite holds dicts) and case id."""
+
+    registry: Any
+    tolerance: dict[str, float]
+    power: dict[str, str]
+    ask: Callable[[str], str] | None
+    out: Callable[[str], None]
+    results: dict[tuple[int, str], CaseResult] = field(default_factory=dict)
+
+    def report(self, case: Case, result: CaseResult) -> None:
+        self.results[id(case.suite), case.id] = result
+        self.out(f"  {case.id}: {result.outcome}" + (f" ({result.detail})" if result.detail else ""))
+
+    async def automated(self, suite: Suite, client: HAClient, suite_cases: list[Case]) -> list[tuple[Case, HAClient]]:
+        """Run the suite's automated cases; return the observed ones still to run, with their client."""
+        self.out(f"{suite.integration} / {suite.action}")
+        waiting = []
+        for case in suite_cases:
+            twin = self.results.get((id(suite), case.twin or ""))
+            if case.skip:
+                self.report(case, _not_run(case, Outcome.SKIPPED, case.skip))
+            elif not case.observed:
+                tolerance = self.tolerance[suite.integration]
+                self.report(case, await _CaseRun(case, client, self.registry, tolerance, None, self.power).run())
+            elif self.ask is None:
+                self.report(case, _not_run(case, Outcome.NOT_OBSERVED))
+            elif twin is not None and twin.outcome is Outcome.FAIL:
+                self.report(case, _not_run(case, Outcome.SKIPPED, "automated case failed"))
+            else:
+                waiting.append((case, client))
+        return waiting
+
+    async def observed(self, waiting: list[tuple[Case, HAClient]]) -> None:
+        """Run each observed case in turn; after an EOF at a prompt, the rest are not observed."""
+        if waiting:
+            self.out("")
+            self.out(f"{len(waiting)} test{'s need' if len(waiting) > 1 else ' needs'} you")
+        for number, (case, client) in enumerate(waiting, 1):
+            if self.ask is None:
+                self.report(case, _not_run(case, Outcome.NOT_OBSERVED))
+                continue
+            tolerance, position = self.tolerance[case.suite.integration], f"{number} of {len(waiting)}"
+            result = await _CaseRun(
+                case, client, self.registry, tolerance, self.ask, self.power, self.out, position
+            ).run()
+            self.report(case, result)
+            if result.outcome is Outcome.NOT_OBSERVED:
+                self.ask = None
+
+
+def _not_run(case: Case, outcome: Outcome, detail: str = "") -> CaseResult:
+    domain = case.entities[case.role].partition(".")[0] if case.entities else None
+    return CaseResult(case.id, case.role, domain, outcome, detail, twin=case.twin)
 
 
 # --- Bench records -------------------------------------------------------------------------------------------
@@ -928,7 +1065,7 @@ def render_record(
     lines += [f"| {name} | {value} |" for name, value in rows]
     lines += ["", "## Tests", "", *table(suite_result)]
     if any(case.outcome is Outcome.NOT_OBSERVED for case in suite_result.cases):
-        lines += ["", "Tests marked `not observed` ran unattended; their fields and capabilities are not listed."]
+        lines += ["", "Tests marked `not observed` had nobody watching; their fields and capabilities are not listed."]
     return "\n".join(lines) + "\n"
 
 

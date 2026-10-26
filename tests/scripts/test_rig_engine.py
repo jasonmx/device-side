@@ -20,6 +20,7 @@ from tests.rig.engine import (
     render_record,
     rig_facts,
     run,
+    table,
     write_records,
 )
 from tests.rig.inventory import Inventory, RigEntity
@@ -142,11 +143,13 @@ async def test_a_timed_on_off_passes_and_restores(tmp_path):
     assert not result.failed
 
 
-async def test_a_device_that_never_turns_off_fails_on_the_timeout(tmp_path):
-    def stuck(ha, action, data):
-        ha.set(data["entity_id"], "on")
-        return {data["entity_id"]: {"status": "confirmed", "integration": "shelly"}}
+def stuck(ha, action, data):
+    """A device whose timer never fires."""
+    ha.set(data["entity_id"], "on")
+    return {data["entity_id"]: {"status": "confirmed", "integration": "shelly"}}
 
+
+async def test_a_device_that_never_turns_off_fails_on_the_timeout(tmp_path):
     ha = FakeHA({"switch.plug": {}}, stuck)
     result = await run_one(ha, suite(tmp_path, ON_THEN_OFF), inventory(switch_plug="switch.plug"))
     outcome, detail = outcomes(result)["on_then_off[switch_plug]"]
@@ -286,72 +289,177 @@ tests:
     ]
 
 
-BRIEF = "    brief: {see: It clicks on then off., watch: Two clicks.}\n    steps:\n"
-OBSERVED = ON_THEN_OFF.replace("    steps:\n", BRIEF) + "      - observe: Did it click twice?\n"
+OBSERVED = """
+action: turn_on_for
+rig_seconds: 5
+tests:
+  - name: on_then_off
+    roles: [switch_plug]
+    setup:
+      - set: {state: off}
+    steps:
+      - call: {duration: 0.6}
+      - expect_response: {status: expected, integration: self}
+      - expect_state: {state: on, within: tol}
+      - wait: duration - tol
+      - expect_state: {state: off, within: 2 * tol}
+    observe: {see: It clicks on then off., watch: Two clicks., ask: 'Did it click twice?'}
+"""
+AUTOMATED, WATCHED = "on_then_off[switch_plug]", "on_then_off[switch_plug] observed"
 
 
-async def test_observe_unattended_reports_not_observed_and_proves_nothing(tmp_path):
-    ha = FakeHA({"switch.plug": {}}, timer_on)
-    result = await run_one(ha, suite(tmp_path, OBSERVED), inventory(switch_plug="switch.plug"), ask=None)
-    assert outcomes(result) == {"on_then_off[switch_plug]": (Outcome.NOT_OBSERVED, "")}
+def answers(*replies: str) -> tuple[list[str], Callable[[str], str]]:
+    """The prompts asked, and an `ask` that gives `replies` in turn, then EOF."""
+    asked, queue = [], list(replies)
+
+    def ask(prompt):
+        asked.append(prompt)
+        if not queue:
+            raise EOFError
+        return queue.pop(0)
+
+    return asked, ask
+
+
+def in_turn(*responders: Callable) -> Callable:
+    """The nth device_side call answered by the nth responder: the automated case's first, then the observed one's."""
+    responders_left = iter(responders)
+    return lambda ha, action, data: next(responders_left)(ha, action, data)
+
+
+async def test_unattended_reports_observed_cases_not_observed_and_proves_nothing(tmp_path):
+    ha, printed = FakeHA({"switch.plug": {}}, timer_on), []
+    inv = inventory(switch_plug="switch.plug")
+    result = await run(
+        [suite(tmp_path, OBSERVED)], inv, REGISTRY, ha, tolerance=TOLERANCE, out=printed.append, ask=None
+    )
+    assert outcomes(result) == {AUTOMATED: (Outcome.PASS, ""), WATCHED: (Outcome.NOT_OBSERVED, "")}
+    assert len([call for call in ha.calls if call[0] == "device_side"]) == 1
+    assert not [line for line in printed if line.startswith(("---", "You'll")) or "need" in line]
     assert result.suites[0].proven == []
     assert not result.suites[0].recordable
     record = render_record(result.suites[0], "Shelly", "2026.10.1", [], "2026-10-25", "test")
     assert "| Capabilities | none |" in record
-    assert "`not observed`" in record
+    assert "| `on_then_off[switch_plug] observed` | `switch` (switch_plug) | not observed |" in record
 
 
 @pytest.mark.parametrize(("answer", "outcome"), [("y", Outcome.PASS), ("", Outcome.FAIL)])
-async def test_observe_asks_and_a_no_fails(tmp_path, answer, outcome):
-    asked = []
-
-    def ask(prompt):
-        asked.append(prompt)
-        return answer
-
+async def test_observed_asks_and_proves_only_when_both_cases_pass(tmp_path, answer, outcome):
+    asked, ask = answers("", answer)
     ha = FakeHA({"switch.plug": {}}, timer_on)
     result = await run_one(ha, suite(tmp_path, OBSERVED), inventory(switch_plug="switch.plug"), ask=ask)
     assert asked == ["Press Enter to start... ", "    Did it click twice? [y/N] "]
-    assert outcomes(result)["on_then_off[switch_plug]"][0] is outcome
+    assert outcomes(result)[WATCHED][0] is outcome
+    assert [case.id for case in result.suites[0].proven] == ([AUTOMATED, WATCHED] if answer else [])
 
 
-async def test_an_attended_case_is_briefed_before_its_first_step(tmp_path):
-    ha, printed, events = FakeHA({"switch.plug": {}}, timer_on), [], []
+async def test_setup_runs_before_the_brief_and_the_steps_after_enter(tmp_path):
+    ha, printed, calls_at_enter = FakeHA({"switch.plug": {}}, timer_on), [], []
 
     def ask(prompt):
-        events.append((prompt, len(ha.calls)))
+        calls_at_enter.append(len(ha.calls))
         return "y"
 
     inv = inventory(switch_plug="switch.plug")
     await run([suite(tmp_path, OBSERVED)], inv, REGISTRY, ha, tolerance=TOLERANCE, out=printed.append, ask=ask)
-    assert printed[1:6] == [
+    start = printed.index("1 test needs you")
+    assert printed[start + 1 : start + 5] == [
         "--- turn_on_for / on_then_off on switch_plug (1 of 1) ---",
         "You'll see: It clicks on then off.",
         "Watch for: Two clicks.",
         "You'll be asked: Did it click twice?",
-        "  on_then_off[switch_plug]: pass",
     ]
-    assert events[0] == ("Press Enter to start... ", 0)
+    enter = calls_at_enter[0]
+    assert ha.calls[enter - 1] == ("switch", "turn_off", {"entity_id": "switch.plug"})
+    assert ha.calls[enter][:2] == ("device_side", "turn_on_for")
 
 
-async def test_eof_at_the_brief_runs_the_case_unattended(tmp_path):
-    asked = []
+async def test_an_observed_case_relaxes_its_checks(tmp_path):
+    def flat(ha, action, data):
+        for pending in PENDING:  # the automated run's ramp
+            pending.cancel()
+        ha.set(data["entity_id"], "on", brightness=100)
+        return {data["entity_id"]: {"status": "sent"}}
 
-    def ask(prompt):
-        asked.append(prompt)
-        raise EOFError
+    text = """
+action: turn_on_for
+rig_seconds: 5
+tests:
+  - name: ramps
+    roles: [light_dimmable]
+    setup:
+      - set: {state: off}
+    steps:
+      - call: {duration: 6}
+      - expect_response: {status: expected}
+      - sample: {attribute: brightness, for: 0.2, every: 0.05, expect: rising}
+      - expect_state: {brightness: {min: 105}}
+      - expect_state: {brightness: {min: 110}, within: tol}
+    observe: {see: s, watch: w, ask: 'ok?'}
+"""
+    # The observed run's call gets a sent status and a flat brightness: every check would fail.
+    ha, (asked, ask), prompted = FakeHA({"light.lamp": {}}, in_turn(ramp(5), flat)), answers("", "y"), []
+    loop = asyncio.get_running_loop()
 
-    ha = FakeHA({"switch.plug": {}}, timer_on)
-    result = await run_one(ha, suite(tmp_path, OBSERVED), inventory(switch_plug="switch.plug"), ask=ask)
-    assert asked == ["Press Enter to start... "]
-    assert outcomes(result) == {"on_then_off[switch_plug]": (Outcome.NOT_OBSERVED, "")}
+    def timed(prompt):
+        prompted.append(loop.time())
+        return ask(prompt)
+
+    result = await run_one(ha, suite(tmp_path, text), inventory(light_dimmable="light.lamp"), ask=timed)
+    assert outcomes(result) == {
+        "ramps[light_dimmable]": (Outcome.PASS, ""),
+        "ramps[light_dimmable] observed": (Outcome.PASS, ""),
+    }
+    assert asked[-1] == "    ok? [y/N] "
+    # The sample still takes its 0.2 s, and the expect_state that never holds its whole `within`.
+    assert prompted[1] - prompted[0] >= 0.2 + TOL
 
 
-async def test_unattended_prints_no_brief(tmp_path):
-    ha, printed = FakeHA({"switch.plug": {}}, timer_on), []
+async def test_a_failed_automated_case_skips_its_observed_twin(tmp_path):
+    ha, printed = FakeHA({"switch.plug": {}}, stuck), []
+    asked, ask = answers()
     inv = inventory(switch_plug="switch.plug")
-    await run([suite(tmp_path, OBSERVED)], inv, REGISTRY, ha, tolerance=TOLERANCE, out=printed.append, ask=None)
-    assert not [line for line in printed if line.startswith(("---", "You'll"))]
+    result = await run([suite(tmp_path, OBSERVED)], inv, REGISTRY, ha, tolerance=TOLERANCE, out=printed.append, ask=ask)
+    assert outcomes(result)[WATCHED] == (Outcome.SKIPPED, "automated case failed")
+    assert asked == []
+    assert not [line for line in printed if "need" in line]
+    assert table(result.suites[0])[-1] == "| `on_then_off[switch_plug] observed` | `switch` (switch_plug) | skipped |"
+
+
+async def test_a_call_that_raises_after_enter_says_there_is_nothing_to_observe(tmp_path):
+    ha, printed = FakeHA({"switch.plug": {}}, in_turn(timer_on, refuse("device_offline"))), []
+    asked, ask = answers("", "")
+    inv = inventory(switch_plug="switch.plug")
+    result = await run([suite(tmp_path, OBSERVED)], inv, REGISTRY, ha, tolerance=TOLERANCE, out=printed.append, ask=ask)
+    assert asked == ["Press Enter to start... ", "Press Enter to go on... "]
+    outcome, detail = outcomes(result)[WATCHED]
+    assert outcome is Outcome.FAIL
+    assert detail.startswith("step 1 (call): device_side.turn_on_for raised all_targets_failed")
+    assert f"    nothing to observe: {detail}" in printed
+
+
+TWO_SUITES = OBSERVED.replace("integration: self", "integration: shelly")
+
+
+async def test_every_automated_case_runs_before_the_first_brief(tmp_path):
+    ha, printed = FakeHA({"switch.plug": {}, "switch.other": {}}, timer_on), []
+    inv = Inventory(
+        {
+            "shelly": [RigEntity("switch.plug", frozenset({"switch_plug"}))],
+            "zha": [RigEntity("switch.other", frozenset({"switch_plug"}))],
+        }
+    )
+    steps = suite(tmp_path, TWO_SUITES)
+    suites = [steps, Suite(steps.file, "zha")]
+    await run(suites, inv, REGISTRY, ha, admin=ha, tolerance=TOLERANCE, out=printed.append, ask=lambda _: "y")
+    automated = [index for index, line in enumerate(printed) if line == f"  {AUTOMATED}: pass"]
+    briefs = [index for index, line in enumerate(printed) if line.startswith("---")]
+    assert len(automated) == 2
+    assert max(automated) < printed.index("2 tests need you") < min(briefs)
+    assert [printed[index] for index in briefs] == [
+        "--- turn_on_for / on_then_off on switch_plug (1 of 2) ---",
+        "--- turn_on_for / on_then_off on switch_plug (2 of 2) ---",
+    ]
 
 
 ONLY = """
@@ -360,26 +468,105 @@ rig_seconds: 5
 tests:
   - name: everywhere
     roles: [switch_plug]
-    brief: {see: s, watch: w}
-    steps: [{observe: 'ok?'}]
+    setup: [{wait: 0}]
+    steps: [{wait: 0}]
+    observe: {see: s, watch: w, ask: 'ok?'}
   - name: elsewhere
     roles: [switch_plug]
     only: [zha]
-    brief: {see: s, watch: w}
-    steps: [{observe: 'ok?'}]
+    setup: [{wait: 0}]
+    steps: [{wait: 0}]
+    observe: {see: s, watch: w, ask: 'ok?'}
   - name: needs_a_dimmer
     roles: [light_dimmable]
-    brief: {see: s, watch: w}
-    steps: [{observe: 'ok?'}]
+    setup: [{wait: 0}]
+    steps: [{wait: 0}]
+    observe: {see: s, watch: w, ask: 'ok?'}
 """
+
+
+async def test_eof_at_a_brief_leaves_it_and_every_later_one_not_observed(tmp_path):
+    asked, ask = answers()
+    text = ONLY.replace("needs_a_dimmer", "again").replace("light_dimmable", "switch_plug")
+    result = await run_one(
+        FakeHA({"switch.plug": {}}), suite(tmp_path, text), inventory(switch_plug="switch.plug"), ask=ask
+    )
+    assert asked == ["Press Enter to start... "]
+    assert outcomes(result) == {
+        "everywhere[switch_plug] observed": (Outcome.NOT_OBSERVED, ""),
+        "again[switch_plug] observed": (Outcome.NOT_OBSERVED, ""),
+    }
+
+
+async def test_a_setup_failure_fails_before_the_brief(tmp_path):
+    asked, ask = answers()
+    text = ONLY.split("  - name: elsewhere")[0].replace("setup: [{wait: 0}]", "setup: [{expect_state: {state: on}}]")
+    result = await run_one(
+        FakeHA({"switch.plug": {}}), suite(tmp_path, text), inventory(switch_plug="switch.plug"), ask=ask
+    )
+    outcome, detail = outcomes(result)["everywhere[switch_plug] observed"]
+    assert (outcome, detail.split(":")[0]) == (Outcome.FAIL, "setup step 1 (expect_state)")
+    assert asked == []
+
+
+async def test_do_waits_for_enter_before_the_brief(tmp_path):
+    asked, ask = answers("", "", "y")
+    text = ONLY.split("  - name: elsewhere")[0].replace("setup: [{wait: 0}]", "setup: [{do: Flip it.}]")
+    result = await run_one(
+        FakeHA({"switch.plug": {}}), suite(tmp_path, text), inventory(switch_plug="switch.plug"), ask=ask
+    )
+    assert asked == ["    Flip it. Press Enter when done... ", "Press Enter to start... ", "    ok? [y/N] "]
+    assert outcomes(result) == {"everywhere[switch_plug] observed": (Outcome.PASS, "")}
+
+
+async def test_eof_at_do_leaves_the_case_not_observed(tmp_path):
+    asked, ask = answers()
+    text = ONLY.split("  - name: elsewhere")[0].replace("setup: [{wait: 0}]", "setup: [{do: Flip it.}]")
+    result = await run_one(
+        FakeHA({"switch.plug": {}}), suite(tmp_path, text), inventory(switch_plug="switch.plug"), ask=ask
+    )
+    assert asked == ["    Flip it. Press Enter when done... "]
+    assert outcomes(result) == {"everywhere[switch_plug] observed": (Outcome.NOT_OBSERVED, "")}
+
+
+async def test_eof_at_the_question_fails_the_case(tmp_path):
+    asked, ask = answers("")
+    text = ONLY.split("  - name: elsewhere")[0]
+    result = await run_one(
+        FakeHA({"switch.plug": {}}), suite(tmp_path, text), inventory(switch_plug="switch.plug"), ask=ask
+    )
+    assert asked == ["Press Enter to start... ", "    ok? [y/N] "]
+    assert outcomes(result) == {"everywhere[switch_plug] observed": (Outcome.FAIL, "not seen: ok?")}
+
+
+async def test_an_observed_case_relaxes_expect_error(tmp_path):
+    text = """
+action: turn_on_for
+rig_seconds: 5
+tests:
+  - name: refuses
+    roles: [light_wrapped]
+    setup: [{wait: 0}]
+    steps:
+      - call: {duration: 6}
+      - expect_error: {key: all_targets_failed, summary: fields_not_supported}
+    observe: {see: s, watch: w, ask: 'ok?'}
+"""
+    # The observed run's refusal names another summary: the automated check would fail it.
+    ha = FakeHA({"light.lamp": {}}, in_turn(refuse("fields_not_supported"), refuse("fields_not_tested")))
+    result = await run_one(ha, suite(tmp_path, text), inventory(light_wrapped="light.lamp"), ask=answers("", "y")[1])
+    assert outcomes(result) == {
+        "refuses[light_wrapped]": (Outcome.PASS, ""),
+        "refuses[light_wrapped] observed": (Outcome.PASS, ""),
+    }
 
 
 async def test_only_and_missing_roles_narrow_the_cases(tmp_path):
     ha = FakeHA({"switch.plug": {}})
     result = await run_one(ha, suite(tmp_path, ONLY), inventory(switch_plug="switch.plug"), ask=lambda _: "y")
     assert outcomes(result) == {
-        "everywhere[switch_plug]": (Outcome.PASS, ""),
-        "needs_a_dimmer[light_dimmable]": (Outcome.SKIPPED, "no light_dimmable entity in inventory"),
+        "everywhere[switch_plug] observed": (Outcome.PASS, ""),
+        "needs_a_dimmer[light_dimmable] observed": (Outcome.SKIPPED, "no light_dimmable entity in inventory"),
     }
 
 
@@ -387,11 +574,11 @@ async def test_a_keyword_runs_a_subset_and_marks_the_suite_partial(tmp_path):
     ha = FakeHA({"switch.plug": {}})
     inv = inventory(switch_plug="switch.plug")
     result = await run_one(ha, suite(tmp_path, ONLY), inv, ask=lambda _: "y", keyword="everywhere")
-    assert list(outcomes(result)) == ["everywhere[switch_plug]"]
+    assert list(outcomes(result)) == ["everywhere[switch_plug] observed"]
     assert not result.suites[0].recordable
 
 
-async def test_the_brief_counts_only_the_attended_cases_that_run(tmp_path):
+async def test_the_brief_counts_only_the_observed_cases_that_run(tmp_path):
     ha, printed = FakeHA({"switch.plug": {}}), []
     steps = suite(tmp_path, ONLY + ON_THEN_OFF.split("tests:\n")[1])
     inv = inventory(switch_plug="switch.plug")
@@ -473,7 +660,9 @@ tests:
         return {data["entity_id"]: {"status": "sent"}}
 
     result = await run_one(
-        FakeHA({"light.lamp": {}}, sent), suite(tmp_path, text, "fake"), inventory("fake", light_dimmable="light.lamp"),
+        FakeHA({"light.lamp": {}}, sent),
+        suite(tmp_path, text, "fake"),
+        inventory("fake", light_dimmable="light.lamp"),
         registry=registry,
     )
     case = result.suites[0].cases[0]

@@ -220,7 +220,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-restart", action="store_true", help="sync the integration but do not restart HA")
     parser.add_argument("--integration", action="append", help="limit to an integration key (repeatable)")
     parser.add_argument("-k", dest="keyword", help="run only test cases whose id contains this text")
-    parser.add_argument("--unattended", action="store_true", help="skip observe steps, reporting them not observed")
+    parser.add_argument("--unattended", action="store_true", help="skip observed tests, reporting them not observed")
     args = parser.parse_args(argv)
 
     if not args.dry_run:
