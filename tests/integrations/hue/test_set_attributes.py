@@ -2,7 +2,7 @@
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
-from homeassistant.util.color import GamutType, XYPoint, check_point_in_lamps_reach, color_hs_to_xy, color_RGB_to_xy
+from homeassistant.util.color import color_hs_to_xy, color_RGB_to_xy
 
 from ...conftest import call
 from ...fixtures.hue import add_hue_entity, add_hue_group, hue_entry
@@ -219,9 +219,7 @@ async def test_color_outside_the_gamut_is_sent_at_the_nearest_edge(hass, bridge)
 
     ((_, put),) = bridge.puts
     sent = (put["color"]["xy"]["x"], put["color"]["xy"]["y"])
-    assert check_point_in_lamps_reach(sent, GamutType(*(XYPoint(**GAMUT_C[k]) for k in ("red", "green", "blue"))))
-    assert sent != (0.1, 0.9)
-    assert sent[1] < 0.9
+    assert sent == pytest.approx((0.17, 0.7))  # the gamut's nearest point is its green corner
 
 
 async def test_color_is_sent_as_is_when_the_light_reports_no_gamut(hass, bridge):
