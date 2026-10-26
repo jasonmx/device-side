@@ -393,6 +393,7 @@ class Case:
     entities: dict[str, str]
     skip: str | None = None
     observed: bool = False
+    members: tuple[str, ...] = ()  # the inventory's members for the group role, if it lists them
 
     @property
     def id(self) -> str:
@@ -423,7 +424,8 @@ def cases(suite: Suite, inventory: Inventory, keyword: str | None = None) -> lis
                 if missing := [name for name, entity_id in entities.items() if entity_id is None]:
                     case = Case(suite, test, role, {}, f"no {missing[0]} entity in inventory", observed)
                 else:
-                    case = Case(suite, test, role, entities, observed=observed)
+                    members = inventory.members(suite.integration, entities["group"]) if "group" in entities else ()
+                    case = Case(suite, test, role, entities, observed=observed, members=members)
                 result.append(case)
     return result
 
@@ -496,11 +498,11 @@ class Snapshot:
     taken: dict[str, dict | None] = field(default_factory=dict)
     stored: dict[str, dict] = field(default_factory=dict)
 
-    async def take(self, entity_id: str) -> dict | None:
+    async def take(self, entity_id: str, group: bool = False) -> dict | None:
         """The entity's state before the case moved it, and that of every entity it powers."""
         if entity_id not in self.taken:
             state = self.taken[entity_id] = await self.ha.get_state(entity_id)
-            if self.device_side and _is_off_light(entity_id, state):
+            if self.device_side and not group and _is_off_light(entity_id, state):
                 response = await self.ha.call_service(
                     "device_side", "get_attributes", {"entity_id": entity_id}, return_response=True
                 )
@@ -641,18 +643,21 @@ class _CaseRun:
         return self.case.entities.get("group") == entity_id
 
     async def members(self, entity_id: str) -> list[str]:
-        """A group's member lights, from its `entity_id` attribute; any other entity is its own one member."""
+        """A group's member lights, from its `entity_id` attribute, else the inventory's `members:` (a Z2M group light
+        has no such attribute); any other entity is its own one member."""
         if not self.is_group(entity_id):
             return [entity_id]
         state = await self.ha.get_state(entity_id)
         members = state and state["attributes"].get("entity_id")
-        if not isinstance(members, list) or not members:
-            raise StepFailure(f"{entity_id} lists no members in its entity_id attribute")
-        return members
+        if isinstance(members, list) and members:
+            return members
+        if self.case.members:
+            return list(self.case.members)
+        raise StepFailure(f"{entity_id} lists no members in its entity_id attribute, and the inventory gives none")
 
     async def touch(self, entity_id: str) -> None:
         """Snapshot the entity, and a group's members after it, so a restore puts each member back last."""
-        await self.snapshot.take(entity_id)
+        await self.snapshot.take(entity_id, group=self.is_group(entity_id))
         if self.is_group(entity_id):
             for member in await self.members(entity_id):
                 await self.snapshot.take(member)

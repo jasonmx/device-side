@@ -66,6 +66,33 @@ def test_inventory_rejects_an_unlisted_supply(tmp_path):
         Inventory.load(path)
 
 
+def test_inventory_reads_a_groups_members(tmp_path):
+    path = write(
+        tmp_path,
+        "inventory.yaml",
+        "zigbee2mqtt:\n  - entity_id: light.g\n    roles: [group]\n    members: [light.a, light.b]\n",
+    )
+    inventory = Inventory.load(path)
+    assert inventory.members("zigbee2mqtt", "light.g") == ("light.a", "light.b")
+    assert inventory.members("zigbee2mqtt", "light.other") == ()
+
+
+def test_inventory_rejects_members_without_the_group_role(tmp_path):
+    path = write(
+        tmp_path, "inventory.yaml", "zha:\n  - entity_id: light.a\n    roles: [light_ct]\n    members: [light.b]\n"
+    )
+    with pytest.raises(ValueError, match="lists members but has no group role"):
+        Inventory.load(path)
+
+
+def test_inventory_rejects_members_given_as_one_string(tmp_path):
+    path = write(
+        tmp_path, "inventory.yaml", "zha:\n  - entity_id: light.g\n    roles: [group]\n    members: light.a\n"
+    )
+    with pytest.raises(ValueError, match="members must be a list of entity IDs"):
+        Inventory.load(path)
+
+
 def test_inventory_entity_by_role(inventory):
     assert inventory.entity("shelly", "switch_plug") == "switch.plug"
     assert inventory.entity("shelly", "light_dimmable") is None
