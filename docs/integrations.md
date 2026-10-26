@@ -347,9 +347,9 @@ a scene the bridge no longer has is `rejected` with `scene_not_found`.
 
 ### Sharp edges
 
-- **Large scenes are slow.** `set_scene` sends one write per light, one after another, and the
-  bridge refuses more than 3 requests at once (aiohue retries with a growing wait), so a scene on a
-  large room can take seconds to land.
+- **One write per light.** `set_scene` writes a scene's lights one after another; an 8-light scene
+  takes under a second. The bridge refuses more than 3 requests at once and aiohue retries, so a
+  much larger scene may take longer.
 - **Lights with no entity in Home Assistant are skipped.** A light in a room whose light entity was
   deleted gets no write from `set_attributes` on the room and no row from `get_attributes`, though
   `set_scene` writes it. A disabled entity still counts: its light is written and reported.
