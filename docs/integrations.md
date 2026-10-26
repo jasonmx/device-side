@@ -322,26 +322,29 @@ One write per light, with brightness, color temperature or color and never `on`,
 is off stays off and comes on with the new settings. A room is written light by light, with one
 result per light, because a write to the room's `grouped_light` misses the lights that are off.
 
-`brightness` converts to Hue's percent as the Hue integration does; `color_temp_kelvin`
-is clamped to the light's range; colors convert to xy. `min_brightness` and `max_brightness` are
-percent and move the brightness the bridge last stored into that range, so they work while off; a
-light already inside it is `confirmed` with `within_limits` and nothing is written. An explicit
-`brightness` overrides both.
+The fields, units and names are hue_dimmer's, so its calls work unchanged under `device_side`.
+`brightness` is percent, as Hue stores it; `color_temp_kelvin` is clamped to the light's range;
+colors convert to xy, and given more than one, `rgb_color` wins, then `hs_color`, then `xy_color`.
+`min_brightness` and `max_brightness` are percent and move the brightness the bridge last stored
+into that range, so they work while off; a light already inside it is `confirmed` with
+`within_limits` and nothing is written. An explicit `brightness` overrides both. A `0` leaves
+`min_brightness`, `max_brightness` or `color_temp_kelvin` unset.
 
 A field a light can't take (color on a white bulb) is dropped and the result is `sent` with
 `fields_dropped`. A light that can take none of them is `unsupported` with `fields_not_supported`.
 
 ### `get_attributes`
 
-Returns `brightness` (0 to 255), `color_temp_kelvin`, `xy_color`, `rgb_color` and `hs_color` under
-Home Assistant's names, for lights that are off too. `color_temp_kelvin` is left out while a light
-is in color mode, since the value the bridge keeps is stale.
+Returns `brightness` (percent, to one decimal), `color_temp_kelvin`, `xy_color`, `rgb_color` and
+`hs_color` under Home Assistant's names, for lights that are off too. The response is hue_dimmer's
+and core's shape, each target's attributes under its entity ID (`response['light.desk'].brightness`),
+so `merge_response` works on it; a target that can't be read is left out. `color_temp_kelvin` is
+left out while a light is in color mode, since the value the bridge keeps is stale.
 
-A room returns its own row, then one per light marked `member_of` the room. While any light is on,
-the room's brightness is the bridge's (the average of the lights that are on) and its color
-temperature and color average the lights that are on, matching what the Hue integration shows for
-the room. With every light off the bridge reports nothing useful, so the room row averages all of
-its lights.
+A room returns one entry, as any target does. While any light is on, the room's brightness is the
+bridge's (the average of the lights that are on) and its color temperature and color average the
+lights that are on, matching what the Hue integration shows for the room. With every light off the
+bridge reports nothing useful, so the room's entry averages all of its lights.
 
 ### `set_scene`
 

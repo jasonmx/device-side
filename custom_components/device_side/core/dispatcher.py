@@ -10,7 +10,7 @@ from . import duration
 from .action import Action
 from .adapter import Adapter
 from .groups import expand_ha_groups
-from .models import FAILED, EntityResult, Request, Status, Target, TimedRequest
+from .models import FAILED, ActionKind, EntityResult, Request, Status, Target, TimedRequest
 from .registry import AdapterRegistry
 from .resolver import resolve
 from ..const import ADAPTER_TIMEOUT_S, DOMAIN
@@ -55,13 +55,7 @@ class Dispatcher:
 
         results = (await action.run(self.hass, request, targets, self) if targets else []) + early
         order = {entity_id: index for index, entity_id in enumerate([*members, *empty_groups])}
-        # A member row follows its group's row.
-        results.sort(
-            key=lambda result: (
-                order.get(result.entity_id, order.get(result.member_of, len(order))),
-                result.member_of is not None,
-            )
-        )
+        results.sort(key=lambda result: order.get(result.entity_id, len(order)))
 
         if all(result.status in FAILED for result in results):
             summary = ", ".join(f"{result.entity_id}: {result.detail or result.status}" for result in results)
@@ -72,13 +66,15 @@ class Dispatcher:
             )
         if not call.return_response:
             return None
+        if action.kind is ActionKind.QUERY:
+            # Core's shape for data, as weather.get_forecasts returns it: each target's own data under its entity_id.
+            return {result.entity_id: result.data or {} for result in results if result.status not in FAILED}
         return {result.entity_id: result.as_response() for result in results}
 
     async def run_adapters(self, action_key: str, request: Request, targets: list[Target]) -> list[EntityResult]:
         """Bucket targets by adapter, expand native groups an adapter can't address, run every adapter concurrently.
 
-        Returns exactly one result per (expanded) target, plus any member rows a native_groups adapter reports for
-        the groups it addressed.
+        Returns exactly one result per (expanded) target.
         """
         results: list[EntityResult] = []
         buckets: dict[str, tuple[Adapter, list[Target]]] = {}
@@ -149,15 +145,10 @@ class Dispatcher:
         clamped_to: float | None,
     ) -> list[EntityResult]:
         by_id: dict[str, EntityResult] = {}
-        member_rows: dict[str, EntityResult] = {}
         expected = {target.reported_id for target in targets}
-        groups = {target.reported_id for target in targets if target.is_group} if adapter.scope.native_groups else set()
         for result in raw:
             if result.entity_id in expected and result.entity_id not in by_id:
                 by_id[result.entity_id] = result
-            elif result.member_of in groups and not (result.entity_id in expected or result.entity_id in member_rows):
-                # A member the caller also targeted keeps its own row.
-                member_rows[result.entity_id] = result
             else:
                 _LOGGER.debug(
                     "%s on %s: dropping stray result for %s", adapter.action, adapter.integration, result.entity_id
@@ -169,7 +160,6 @@ class Dispatcher:
             if ignored and target.domain != "light" and result.detail is None:
                 result = replace(result, detail="light_fields_ignored")
             out.append(result)
-        out += member_rows.values()
         if clamped_to is None:
             return out
         return [

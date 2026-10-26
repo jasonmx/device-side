@@ -10,4 +10,4 @@ tests:
       - call: {action: move, brightness: brighter, sweep_time: 10}
       - wait: 3
       - call: {}
-      - expect_response: {attributes: {brightness: {min: 64, max: 140}}}
+      - expect_response: {attributes: {brightness: {min: 25, max: 55}}}

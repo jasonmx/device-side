@@ -24,7 +24,7 @@ turn_on_for:
         duration:
           enable_millisecond: true
     brightness: &brightness
-      filter:
+      filter: &dimmable
         attribute:
           supported_color_modes:
             - light.ColorMode.BRIGHTNESS
@@ -39,7 +39,7 @@ turn_on_for:
           min: 1
           max: 255
     color_temp_kelvin: &color_temp_kelvin
-      filter:
+      filter: &color_temp
         attribute:
           supported_color_modes:
             - light.ColorMode.COLOR_TEMP
@@ -113,30 +113,35 @@ set_attributes:
       - domain: light
         integration: hue
   fields:
-    brightness: *brightness
-    color_temp_kelvin: *color_temp_kelvin
-    rgb_color: *rgb_color
-    hs_color: *hs_color
-    xy_color: *xy_color
-    min_brightness: &percent
-      example: 20
-      filter:
-        attribute:
-          supported_color_modes:
-            - light.ColorMode.BRIGHTNESS
-            - light.ColorMode.COLOR_TEMP
-            - light.ColorMode.HS
-            - light.ColorMode.XY
-            - light.ColorMode.RGB
-            - light.ColorMode.RGBW
-            - light.ColorMode.RGBWW
-      selector:
+    brightness:
+      example: 50
+      filter: *dimmable
+      selector: &percent
         number:
           min: 0.4
           max: 100
           step: 0.2
           unit_of_measurement: "%"
-    max_brightness: *percent
+    min_brightness:
+      example: 20
+      filter: *dimmable
+      selector: *percent
+    max_brightness:
+      example: 80
+      filter: *dimmable
+      selector: *percent
+    color_temp_kelvin:
+      example: 2800
+      filter: *color_temp
+      selector:
+        number:
+          min: 2200
+          max: 6535
+          step: 10
+          unit_of_measurement: K
+    rgb_color: *rgb_color
+    hs_color: *hs_color
+    xy_color: *xy_color
 
 get_attributes:
   target:

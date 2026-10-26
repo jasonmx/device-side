@@ -114,12 +114,10 @@ class EntityResult:
     clamped_to: float | None = None
     detail: str | None = None
     data: dict | None = None
-    # The native group this row belongs to, when a native_groups adapter reports members beside the group.
-    member_of: str | None = None
 
     def as_response(self) -> dict:
         response: dict[str, Any] = {"status": self.status.value}
-        for name in ("integration", "clamped_to", "detail", "member_of"):
+        for name in ("integration", "clamped_to", "detail"):
             if (value := getattr(self, name)) is not None:
                 response[name] = value
         if self.data is not None:

@@ -65,6 +65,11 @@ requires it.
 - **No HA-side help.** Every feature runs on the device or bridge; nothing Device Side does
   depends on HA staying up. Emulation is never shipped; docs show how to build it with
   `set_attributes` plus an automation.
+- **Drop-in for hue_dimmer users.** `set_attributes`, `get_attributes` and `set_scene` take hue_dimmer's
+  field names, units (brightness in percent), names and descriptions, and return its response shape, so a
+  user changes only the domain. `move`/`stop` replace raise/lower by design and are the exception.
+- **Behave as core does.** When to raise, what to skip and what a response looks like follow HA core's own
+  actions: `docs/action-behavior.md`.
 - **Audience:** automation authors and dashboard users from v1. Actions for everything; entities
   only where a feature is a persistent setting, not a command.
 
@@ -193,8 +198,9 @@ requires it.
     minimize radio traffic and popcorning by sending to the largest unit the device accepts.
 - **Results:** `SupportsResponse.OPTIONAL`. Response maps entity_id to
   `{status: unsupported|rejected|sent|confirmed, integration, clamped_to?, detail?}`. Tier is not in the response: it is a subjective label about the code, not a fact
-  about this call. Raise `HomeAssistantError` only on invalid input or when every target
-  failed, so mixed rooms do not abort automations.
+  about this call. A query returns core's shape instead: each target's data under its entity_id, with
+  targets that could not be read left out. Raise `HomeAssistantError` only on invalid input or when every
+  target failed, so mixed rooms do not abort automations, until slice 9f moves the raise rule to core's.
 - **Stability tiers** per adapter (action x integration): `experimental | untested | beta |
   stable`. Rules live in `CLAUDE.md` (Tiers, Releases); summary: only `experimental` is
   declared (`AdapterScope.experimental`), the rest are computed by `scripts/check_tiers.py` from
@@ -263,7 +269,8 @@ Load-bearing facts read from HA core 2026.2.1 (hue_dimmer venv) during planning:
   `entry.runtime_data`; `bridge.api` is `HueBridgeV2`.
 - Re-read against 2026.10.2 in slice 1: validators are `probatio` (voluptuous fork), so schemas import
   `probatio` and reuse `light.const.LIGHT_TURN_ON_SCHEMA` entries verbatim (`brightness` is 0-255 as in
-  `light.turn_on`); `async_extract_entity_ids(call, expand_group)` is a coroutine; `helpers/group.py` gained a
+  `light.turn_on`), except `set_attributes`, which keeps hue_dimmer's percent brightness and several-colors
+  rule so its calls work unchanged; `async_extract_entity_ids(call, expand_group)` is a coroutine; `helpers/group.py` gained a
   group-entity registry (`GenericGroup`) that no component uses yet, so group helpers still need our expansion.
 
 ### Directory layout
@@ -353,7 +360,7 @@ class Target: entity_id, domain, integration, entry: er.RegistryEntry, device, c
 
 @dataclass(slots=True)
 class EntityResult: entity_id, status, integration, clamped_to, detail, data
-    def as_response(self) -> dict   # drops None; data under "attributes"; no tier
+    def as_response(self) -> dict   # drops None; data under "attributes"; no tier (a query returns data alone)
 
 # core/scope.py
 @dataclass(frozen=True) class DurationLimits: min_s, max_s
@@ -416,7 +423,9 @@ class Adapter[RequestT](ABC):
   `HomeAssistantError(translation_key="all_targets_failed")` with a per-entity summary; no
   targets raises `ServiceValidationError("no_targets")`.
 - **Setting-class actions** (none planned): same `Action`/`Adapter` contract with `kind=SETTING`.
-- **Query actions** (`get_attributes`): payload in `EntityResult.data`, `supports_response=ONLY`.
+- **Query actions** (`get_attributes`): payload in `EntityResult.data`, `supports_response=ONLY`. The
+  response is `{entity_id: data}` for every target that was read, one entry per target, as core's
+  `weather.get_forecasts` returns, so templates index it by entity_id and `merge_response` flattens it.
 - **Actions:** one `hass.services.async_register(DOMAIN, action.key, ...)` per discovered
   action in `async_setup`; `_call_if_loaded` raises `ServiceValidationError("not_loaded")` until
   the entry is loaded.
@@ -604,6 +613,7 @@ test-report issue).
 | 9c | Release gates | **Done** (#33, #35, #36, #37). Plan: `docs/plans/2026-10-25-release-gates.md`. Computed tiers and the scope-coverage check in `scripts/check_tiers.py`, run in CI; per-adapter coverage check; `test-report.yml` issue form (bug reports need it whenever 9b lands); every `v*` tag from a workflow (`cut-release-candidate` with the RC audit gate of `2026-10-23-rc-audit-gate.md`, `cut-release` with `check_tiers --require-beta`) behind a tag ruleset. Lands before the first RC (`v0.0.2rc1`), wherever in this sequence a release is first wanted. |
 | 9d | Rig coverage sweep | **plan in /plan first**; audit every adapter's scope (domains, capabilities, fields, native groups) against the maintainer's rig hardware; add inventory roles and step files for everything the rig can reach; rig runs leave a current-fingerprint bench record for each, so v0.1.0 launches with the widest scope the rig can prove. What the rig can't reach is listed for 9b and stays out of scope. |
 | 9e | Native groups survey | **plan in /plan first**; a short exploration of integration-native groups beyond Hue (Z2M and ZHA group entities; Matter and Shelly where HA exposes any): how each is detected and addressed, whether its native group command keeps the device-side behavior (timed off, transitions) across members, and a rig check of each candidate. Outcome: per integration, `native_groups` on or off for v0.1.0, recorded as a decision here, with bench records for those turned on. Hue's `grouped_light` ships in 7 regardless. |
+| 9f | Core-aligned failure behavior | **plan in /plan first**; move the dispatcher's raise rule from "raise when every target failed" to core's, per `docs/action-behavior.md`: unavailable or missing targets skipped with core's warning; a field a target can't take dropped; a target the caller named that the action can never support raises (as `ServiceNotSupported`); a device or bridge error raises; a query that reads nothing raises. Decide whether command actions keep their optional status response, which core's commands don't have, and whether `nothing_to_set` becomes a warning (a hue_dimmer call passing only zeros did nothing). Every action's tests and the rig's `expect_error` steps follow. |
 | 12 | `v0.1.0` ("v1" names the scope, not the version) | feature complete for this plan; scope limited to what rig runs (and any tester reports) cover; README feature table current; release checklist adapted from hue_dimmer. |
 | 9b | Remote tester flow (after `v0.1.0`) | **plan in /plan first**; starts when an adapter needs hardware the rig lacks (a reported bug on someone else's device, a community integration such as Z-Wave JS). Standalone tester runner: one file (`uv run`, PEP 723 inline metadata, aiohttp WebSocket + PyYAML), talks to HA_URL + long-lived token, assumes integration installed via HACS or by hand (no deploy), runs 9a's YAML step files with a confirmation gate on every run; `tests/rig/client.py` moved to a location both the runner and `scripts/rig.py` import; runner prints a prefilled `test-report.yml` issue body; RC-only umbrella Repairs issue with multi-select flow and prefilled per-test links; bench files filled from tester reports. |
 
@@ -618,6 +628,8 @@ devices: the README table stays hand-written and tier computation moves to 9c. M
 ahead of the Hue port now that the rig can run both networks. 9a was split: rig step files land before slice 6
 so no later rig test is written twice, and the release gates (9c) land before the first RC.
 9d (rig coverage sweep) and 9e (native groups survey) were added on 2026-10-25, between 9c and v0.1.0.
+9f (core-aligned failure behavior) was added on 2026-10-26, after the Hue port showed device_side's raise rule
+differs from both core's and hue_dimmer's.
 
 `v0.0.x` releases are cut between slices whenever a set of adapters reaches beta; one release may carry
 several integrations or actions.
