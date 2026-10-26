@@ -22,6 +22,7 @@ from tests.rig.engine import (
     run,
     table,
     write_records,
+    write_report,
 )
 from tests.rig.inventory import Inventory, RigEntity
 
@@ -45,6 +46,11 @@ tests:
       - expect_state: {state: on}
       - expect_state: {state: off, within: 2 * tol}
 """
+
+
+@pytest.fixture(autouse=True)
+def _no_settle(monkeypatch):
+    monkeypatch.setattr(engine, "SETUP_SETTLE_S", 0)
 
 
 @pytest.fixture(autouse=True)
@@ -343,14 +349,52 @@ async def test_unattended_reports_observed_cases_not_observed_and_proves_nothing
     assert "| `on_then_off[switch_plug] observed` | `switch` (switch_plug) | not observed |" in record
 
 
-@pytest.mark.parametrize(("answer", "outcome"), [("y", Outcome.PASS), ("", Outcome.FAIL)])
+@pytest.mark.parametrize(("answer", "outcome"), [("", Outcome.PASS), (" Y", Outcome.PASS), ("n", Outcome.FAIL)])
 async def test_observed_asks_and_proves_only_when_both_cases_pass(tmp_path, answer, outcome):
     asked, ask = answers("", answer)
     ha = FakeHA({"switch.plug": {}}, timer_on)
     result = await run_one(ha, suite(tmp_path, OBSERVED), inventory(switch_plug="switch.plug"), ask=ask)
-    assert asked == ["Press Enter to start... ", "    Did it click twice? [y/N] "]
+    assert asked[:2] == ["Press Enter to start... ", "    Did it click twice? [Y/n] "]
     assert outcomes(result)[WATCHED][0] is outcome
-    assert [case.id for case in result.suites[0].proven] == ([AUTOMATED, WATCHED] if answer else [])
+    assert [case.id for case in result.suites[0].proven] == ([AUTOMATED, WATCHED] if outcome is Outcome.PASS else [])
+
+
+@pytest.mark.parametrize(("saw", "detail"), [("Red, then  blue ", "; saw: Red, then  blue"), ("", "")])
+async def test_a_no_records_what_the_person_saw(tmp_path, saw, detail):
+    asked, ask = answers("", "n", saw)
+    ha = FakeHA({"switch.plug": {}}, timer_on)
+    result = await run_one(ha, suite(tmp_path, OBSERVED), inventory(switch_plug="switch.plug"), ask=ask)
+    assert asked[-1] == "    What did you see? (Enter to skip) "
+    assert outcomes(result)[WATCHED] == (Outcome.FAIL, "not seen: Did it click twice?" + detail)
+
+
+async def test_eof_at_what_was_seen_still_fails_the_case(tmp_path):
+    _, ask = answers("", "n")
+    result = await run_one(
+        FakeHA({"switch.plug": {}}, timer_on), suite(tmp_path, OBSERVED), inventory(switch_plug="switch.plug"), ask=ask
+    )
+    assert outcomes(result)[WATCHED] == (Outcome.FAIL, "not seen: Did it click twice?")
+
+
+async def test_a_report_lists_every_suite_with_its_reasons(tmp_path):
+    ha = FakeHA({"switch.plug": {}}, stuck)
+    result = await run_one(ha, suite(tmp_path, OBSERVED), inventory(switch_plug="switch.plug"), ask=answers()[1])
+    path = write_report(result, tmp_path / "reports", "rig run 2026-10-26 14:03:05")
+    assert path == tmp_path / "reports" / "rig-run-2026-10-26-140305.md"
+    text = path.read_text()
+    assert text.startswith("# rig run 2026-10-26 14:03:05\n\n## shelly / turn_on_for\n")
+    assert "| fail: step 5 (expect_state): switch.plug: expected {'state': 'off'}" in text
+    assert "| skipped: automated case failed |" in text
+
+
+async def test_an_answer_other_than_yes_or_no_is_asked_again(tmp_path):
+    asked, ask = answers("", "maybe", "n")
+    ha, printed = FakeHA({"switch.plug": {}}, timer_on), []
+    inv = inventory(switch_plug="switch.plug")
+    result = await run([suite(tmp_path, OBSERVED)], inv, REGISTRY, ha, tolerance=TOLERANCE, out=printed.append, ask=ask)
+    assert asked[1:3] == ["    Did it click twice? [Y/n] "] * 2
+    assert "    Answer y or n." in printed
+    assert outcomes(result)[WATCHED] == (Outcome.FAIL, "not seen: Did it click twice?")
 
 
 async def test_setup_runs_before_the_brief_and_the_steps_after_enter(tmp_path):
@@ -363,9 +407,10 @@ async def test_setup_runs_before_the_brief_and_the_steps_after_enter(tmp_path):
     inv = inventory(switch_plug="switch.plug")
     await run([suite(tmp_path, OBSERVED)], inv, REGISTRY, ha, tolerance=TOLERANCE, out=printed.append, ask=ask)
     start = printed.index("1 test needs you")
-    assert printed[start + 1 : start + 5] == [
+    assert printed[start + 1 : start + 6] == [
+        "",
         "--- turn_on_for / on_then_off on switch_plug (1 of 1) ---",
-        "You'll see: It clicks on then off.",
+        "You'll see: \033[1mIt clicks on then off.\033[0m",
         "Watch for: Two clicks.",
         "You'll be asked: Did it click twice?",
     ]
@@ -410,7 +455,7 @@ tests:
         "ramps[light_dimmable]": (Outcome.PASS, ""),
         "ramps[light_dimmable] observed": (Outcome.PASS, ""),
     }
-    assert asked[-1] == "    ok? [y/N] "
+    assert asked[-1] == "    ok? [Y/n] "
     # The sample still takes its 0.2 s, and the expect_state that never holds its whole `within`.
     assert prompted[1] - prompted[0] >= 0.2 + TOL
 
@@ -515,7 +560,7 @@ async def test_do_waits_for_enter_before_the_brief(tmp_path):
     result = await run_one(
         FakeHA({"switch.plug": {}}), suite(tmp_path, text), inventory(switch_plug="switch.plug"), ask=ask
     )
-    assert asked == ["    Flip it. Press Enter when done... ", "Press Enter to start... ", "    ok? [y/N] "]
+    assert asked == ["    Flip it. Press Enter when done... ", "Press Enter to start... ", "    ok? [Y/n] "]
     assert outcomes(result) == {"everywhere[switch_plug] observed": (Outcome.PASS, "")}
 
 
@@ -529,14 +574,14 @@ async def test_eof_at_do_leaves_the_case_not_observed(tmp_path):
     assert outcomes(result) == {"everywhere[switch_plug] observed": (Outcome.NOT_OBSERVED, "")}
 
 
-async def test_eof_at_the_question_fails_the_case(tmp_path):
+async def test_eof_at_the_question_leaves_the_case_not_observed(tmp_path):
     asked, ask = answers("")
     text = ONLY.split("  - name: elsewhere")[0]
     result = await run_one(
         FakeHA({"switch.plug": {}}), suite(tmp_path, text), inventory(switch_plug="switch.plug"), ask=ask
     )
-    assert asked == ["Press Enter to start... ", "    ok? [y/N] "]
-    assert outcomes(result) == {"everywhere[switch_plug] observed": (Outcome.FAIL, "not seen: ok?")}
+    assert asked == ["Press Enter to start... ", "    ok? [Y/n] "]
+    assert outcomes(result) == {"everywhere[switch_plug] observed": (Outcome.NOT_OBSERVED, "")}
 
 
 async def test_an_observed_case_relaxes_expect_error(tmp_path):

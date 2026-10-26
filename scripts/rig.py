@@ -19,6 +19,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -41,6 +42,7 @@ from tests.rig.engine import (  # noqa: E402
     load_step_files,
     run,
     write_records,
+    write_report,
 )
 from tests.rig.inventory import INVENTORY, Inventory, load_env  # noqa: E402
 
@@ -49,6 +51,8 @@ SERVICE = ("device_side", "turn_on_for")
 READY_TIMEOUT_S = 180
 RESTART_ESTIMATE_S = 90
 LOCK_NAME = "device_side-rig.lock"
+# Run reports go where the OS clears old files: they are for reviewing a run, not for keeping.
+REPORT_DIR = Path(tempfile.gettempdir()) / "device_side-rig"
 
 
 @dataclass(slots=True)
@@ -202,7 +206,7 @@ def wait_until_ready(
                 services = {entry["domain"]: entry["services"] for entry in _get(f"{url}/api/services", token)}
                 if SERVICE[1] in services.get(SERVICE[0], {}):
                     return
-        except (urllib.error.URLError, OSError, ValueError, TypeError, KeyError, AttributeError):
+        except urllib.error.URLError, OSError, ValueError, TypeError, KeyError, AttributeError:
             pass
         sleep(3)
     if running:
@@ -323,6 +327,8 @@ async def run_rig(
         result = await run(
             suites, inventory, registry, ha, admin=admin, keyword=keyword, ask=None if unattended else input
         )
+        stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"\nReport: {write_report(result, REPORT_DIR, f'rig run {stamp}')}")
         source = f"rig run (`scripts/rig.py`), commit `{git('rev-parse', '--short', 'HEAD')}`"
         today = datetime.date.today().isoformat()
         for path in await write_records(result, ha, registry, BENCH_DIR, today, source):

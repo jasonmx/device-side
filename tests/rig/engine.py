@@ -44,6 +44,10 @@ POWER_SETTLE_S = 5.0
 POWER_REJOIN_S = 60.0
 POWER_RETRY_S = 3.0
 
+# A light reports off as its fade starts: an observed case waits this long after setup, so the brief comes once the
+# lights have reached the start state it describes.
+SETUP_SETTLE_S = 2.0
+
 
 class SchemaError(ValueError):
     """A step file that does not parse; the message names the file, test and step."""
@@ -585,6 +589,10 @@ def _describe(state: dict | None, names: Iterable[str]) -> str:
     return ", ".join(f"{name}={_value(state, name)!r}" for name in names)
 
 
+def _bold(text: str) -> str:
+    return f"\033[1m{text}\033[0m"
+
+
 class _NoOneThere(Exception):
     """EOF at a prompt: nobody is at the rig, so the observed case ends not observed."""
 
@@ -657,6 +665,7 @@ class _CaseRun:
         )
         try:
             if case.observed:
+                self.out("")
                 self.out(f"--- {case.suite.action} / {case.test.name} on {case.role} ({self.position}) ---")
             await self.check_power()
             await self.steps(case.test.setup)
@@ -691,10 +700,11 @@ class _CaseRun:
     async def observed(self) -> None:
         observe = self.case.test.observe
         assert observe is not None  # only a test with observe has an observed case
-        self.out(f"You'll see: {observe.see}")
+        await asyncio.sleep(SETUP_SETTLE_S)
+        self.out(f"You'll see: {_bold(observe.see)}")
         self.out(f"Watch for: {observe.watch}")
         self.out(f"You'll be asked: {observe.ask}")
-        await self.prompt("Press Enter to start... ")
+        await self.answer("Press Enter to start... ")
         try:
             await self.steps(self.case.test.steps, relaxed=True)
         except StepFailure as err:
@@ -702,17 +712,19 @@ class _CaseRun:
             with contextlib.suppress(EOFError):
                 await asyncio.to_thread(self.ask, "Press Enter to go on... ")
             raise
-        try:
-            answer = await asyncio.to_thread(self.ask, f"    {observe.ask} [y/N] ")
-        except EOFError:
-            answer = ""
-        if answer.strip().lower() not in ("y", "yes"):
-            raise StepFailure(f"not seen: {observe.ask}")
+        while (answer := (await self.answer(f"    {observe.ask} [Y/n] ")).lower()) not in ("", "y", "yes", "n", "no"):
+            self.out("    Answer y or n.")
+        if answer in ("n", "no"):
+            try:
+                saw = await self.answer("    What did you see? (Enter to skip) ")
+            except _NoOneThere:
+                saw = ""
+            raise StepFailure(f"not seen: {observe.ask}" + (f"; saw: {saw}" if saw else ""))
 
-    async def prompt(self, text: str) -> None:
-        """Wait for Enter; EOF there means nobody is at the rig."""
+    async def answer(self, text: str) -> str:
+        """The person's reply, stripped; EOF there means nobody is at the rig."""
         try:
-            await asyncio.to_thread(self.ask, text)
+            return (await asyncio.to_thread(self.ask, text)).strip()
         except EOFError:
             raise _NoOneThere from None
 
@@ -876,7 +888,7 @@ class _CaseRun:
                 raise StepFailure(f"{entity_id}: {attribute} moved: {shown}")
 
     async def _do(self, instruction: str, _following: str | None) -> None:
-        await self.prompt(f"    {instruction} Press Enter when done... ")
+        await self.answer(f"    {instruction} Press Enter when done... ")
 
     async def _restore(self, _args: None, _following: str | None) -> None:
         await self.snapshot.restore()
@@ -1008,7 +1020,7 @@ def table(suite_result: SuiteResult, details: bool = False) -> list[str]:
     lines = ["| Test | Target | Result |", "|---|---|---|"]
     for case in suite_result.cases:
         target = f"`{case.domain}` ({case.role})" if case.domain else f"{case.role}: none in inventory"
-        outcome = str(case.outcome) + (f": {case.detail}" if details and case.outcome is Outcome.FAIL else "")
+        outcome = str(case.outcome) + (f": {case.detail}" if details and case.detail else "")
         lines.append(f"| `{case.id}` | {target} | {outcome} |")
     return lines
 
@@ -1067,6 +1079,18 @@ def render_record(
     if any(case.outcome is Outcome.NOT_OBSERVED for case in suite_result.cases):
         lines += ["", "Tests marked `not observed` had nobody watching; their fields and capabilities are not listed."]
     return "\n".join(lines) + "\n"
+
+
+def write_report(result: RunResult, directory: Path, title: str) -> Path:
+    """Every suite's table with each failure's and skip's reason, for any run: failed, partial or unattended."""
+    lines = [f"# {title}"]
+    for suite_result in result.suites:
+        suite = suite_result.suite
+        lines += ["", f"## {suite.integration} / {suite.action}", "", *table(suite_result, details=True)]
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{title.replace(' ', '-').replace(':', '')}.md"
+    path.write_text("\n".join(lines) + "\n")
+    return path
 
 
 async def write_records(

@@ -101,18 +101,22 @@ are not detected.
 ### How targets resolve
 
 An entity belongs to this integration when its device carries the identifier
-`("mqtt", "zigbee2mqtt_<address>")` that Z2M writes during MQTT discovery. The address is
-the device's IEEE address for individual devices.
-
-Device Side builds the command topic from the identifier: `zigbee2mqtt/<address>/set`. This assumes
-the default Z2M base topic; see Sharp edges if you changed it.
+`("mqtt", "zigbee2mqtt_<address>")` that Z2M writes during MQTT discovery. For a device, the
+address is its IEEE address and the command topic is `zigbee2mqtt/<ieee>/set`. For a group, the
+address is `<encoded base topic>_<group ID>`, the base topic written as character codes with no
+separator (`1221051039810110150109113116116` for `zigbee2mqtt`; `getEncodedBaseTopic` in
+[`lib/extension/homeassistant.ts`](https://github.com/Koenkk/zigbee2mqtt/blob/master/lib/extension/homeassistant.ts)),
+and the command topic is `zigbee2mqtt/<group ID>/set`. Both assume the default Z2M base topic; see
+Sharp edges if you changed it.
 
 The topic uses the IEEE address, which Z2M accepts alongside the `friendly_name`, so it still
 reaches a renamed device (`resolveEntity` in
 [`lib/zigbee.ts`](https://github.com/Koenkk/zigbee2mqtt/blob/master/lib/zigbee.ts) looks the
 segment up with `getDevice` in
 [`lib/util/settings.ts`](https://github.com/Koenkk/zigbee2mqtt/blob/master/lib/util/settings.ts),
-which matches the IEEE-keyed `devices` map before `friendly_name`).
+which matches the IEEE-keyed `devices` map before `friendly_name`). A group's ID topic likewise
+survives a rename: `resolveEntity` falls back to `getGroup`, which matches the ID-keyed `groups` map
+before `friendly_name`.
 
 ### `turn_on_for`
 
@@ -135,9 +139,9 @@ available.
 
 ### Groups
 
-Z2M group entities are passed through to the adapter as a single target when `native_groups` is
-supported. The adapter publishes to the group's command topic. Detection of group entities in the
-HA registry needs verification on hardware; see the rig verification list.
+A Z2M group entity is one target: Device Side publishes once to the group's ID topic, and Z2M
+sends one `OnWithTimedOff` to the Zigbee group, so every member starts its timer at once. With
+fields, `light.turn_on` goes to the group entity first, as for a device.
 
 ### Cancelling
 
@@ -151,9 +155,13 @@ firmware. Most Z2M-supported lights cancel the timer on any state change.
 - **Duration limits.** Zigbee `on_time` is a uint16 in tenths of a second, so the maximum is
   65534 tenths = 6553.4 s (about 1.8 hours). A duration over 6553.4 s is clamped and the result
   carries `clamped_to`. Durations under 50 ms are floored to 50 ms.
-- **Custom base topic.** If Z2M is configured with a base topic other than `zigbee2mqtt`, the
-  command topic Device Side builds will be wrong and the publish will reach no device. Check your
-  Z2M configuration; there is no workaround in v1.
+- **Custom base topic.** A group's identifier carries its base topic, so a group on any base
+  topic other than `zigbee2mqtt` is refused as `not_addressable`. A device's identifier doesn't,
+  so for a device the command topic is wrong and the publish reaches nothing, while the result
+  still says `sent`. Check your Z2M configuration; there is no workaround yet.
+- **A device named after a group's ID.** Z2M accepts a purely numeric friendly name and looks up
+  devices before groups, so a device whose friendly name is exactly a group's ID takes that
+  group's command. Don't name a device with a bare number.
 - **No confirmation.** Z2M's MQTT interface does not synchronously confirm the timer started.
   The result is always `sent`, never `confirmed`, regardless of whether the device accepted the
   command.

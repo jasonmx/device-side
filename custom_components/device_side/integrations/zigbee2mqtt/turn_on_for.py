@@ -39,7 +39,7 @@ class Z2MTurnOnFor(Adapter[TurnOnForRequest]):
         fields=frozenset({"brightness", "color_temp_kelvin", "hs_color", "rgb_color", "xy_color", "transition"}),
         capabilities=None,  # All Z2M devices that accept on_time; no hardware capability to restrict yet.
         confirmable=False,
-        native_groups=True,  # Z2M group entities receive commands on their group topic.
+        native_groups=True,  # Z2M group entities receive commands on <base>/<group ID>/set.
     )
 
     def supports(self, hass: HomeAssistant, request: TurnOnForRequest, target: Target) -> str | None:

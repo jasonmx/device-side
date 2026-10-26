@@ -101,13 +101,20 @@ Such a test runs twice, so you are asked only what a machine can't check:
 
 1. **Automated**, with every other test first: setup and steps, every check applied. It has no automated run if
    its steps check nothing or its setup has a `do`.
-2. **Observed** (`<name>[<role>] observed`), after all automated runs. Setup runs, then the runner prints `see`,
-   `watch` and `ask` and waits for Enter. The steps run with their checks turned into waits, so the timing
-   matches, then you answer `ask`: `y` only if you saw it. Anything else fails the test. It is skipped if its
-   automated run failed, and if a step fails after Enter it prints `nothing to observe` and the reason.
+2. **Observed** (`<name>[<role>] observed`), after all automated runs. Setup runs and settles for 2 s, then the
+   runner prints `see` (in bold), `watch` and `ask` and waits for Enter. The steps run with their checks turned
+   into waits, so the timing matches. Then you answer `ask`: Enter or `y` if you saw it, `n` if not, which fails
+   the test and asks what you saw instead. It is skipped if its automated run failed, and if a step fails after Enter it prints
+   `nothing to observe` and the reason.
 
 `--unattended` skips the observed runs and reports them `not observed`. They don't fail, but a test proves its
 fields and capabilities in a bench record only when both of its runs pass.
+
+### Run reports
+
+Every run, failed, partial or unattended, ends by writing a report to `device_side-rig/` in the system temp
+folder and printing its path: each suite's results with the reason for every failure and skip. The OS clears it
+out in time.
 
 ### Bench records
 

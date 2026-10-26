@@ -38,6 +38,7 @@ tests:
       - do: Change one light's color in this scene in the Hue app.
     steps:
       - set: {target: group, state: off}
+      - wait: 2  # the room reads off as its fade starts: let it finish, as see promises
       - call: {}
       - set: {target: group, state: on}
     observe:
