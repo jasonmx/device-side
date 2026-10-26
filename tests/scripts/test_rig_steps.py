@@ -27,6 +27,7 @@ def test_the_step_files_keep_their_roles():
         "light_wrapped",
         "light_dimmable",
         "light_ct",
+        "light_color",
         "group",
     )
     assert by_action["turn_off_for"].roles == ("switch_plug", "light_onoff", "light_wrapped", "light_dimmable")
