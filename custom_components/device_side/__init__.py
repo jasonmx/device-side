@@ -7,7 +7,7 @@ from .const import DOMAIN
 from .core.actions import async_setup_services
 from .core.dispatcher import Dispatcher
 from .core.registry import AdapterRegistry
-from .core.runtime import DATA, DeviceSideData
+from .core.runtime import DATA, DeviceSideData, get_runtime
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
@@ -26,4 +26,5 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
+    get_runtime(hass).cancel_pending()
     return True

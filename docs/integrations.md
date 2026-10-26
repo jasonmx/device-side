@@ -137,11 +137,29 @@ so a timer sent to one usually does nothing. If you have one that does, open an 
 Returns `sent` (fire-and-forget). Z2M does not report the timer back; confirmation is not
 available.
 
+**State read-backs.** Z2M publishes no state for a timed command (the `on_time` branch of `on_off`
+in zigbee-herdsman-converters returns none), and Z2M turns reporting off for Hue bulbs on purpose,
+so without help Home Assistant shows a light that is on as off, or one that turned itself off as
+still on. Device Side asks Z2M to read the state back by publishing `{"state":""}` to
+`zigbee2mqtt/<address>/get`:
+
+- 1 s after the timer starts, without fields only (with fields, `light.turn_on` already updated
+  the state);
+- at the end of the timer plus 1 s, and again plus 5 s or 2% of the duration, whichever is
+  longer, in case the bulb's clock runs slow on a long timer.
+
+A new call on the same entity replaces its pending reads. The reads never change the result, and a
+failed read is logged at debug level. We don't use or recommend configuring attribute reporting
+instead: it would have to be set up on every bulb, and Z2M's maintainers turned it off for Hue to
+avoid reports that conflict with its optimistic state.
+
 ### Groups
 
 A Z2M group entity is one target: Device Side publishes once to the group's ID topic, and Z2M
 sends one `OnWithTimedOff` to the Zigbee group, so every member starts its timer at once. With
-fields, `light.turn_on` goes to the group entity first, as for a device.
+fields, `light.turn_on` goes to the group entity first, as for a device. The state read-backs go
+to the group's own topic, `zigbee2mqtt/<group ID>/get`; Z2M rebuilds the group's state from its
+members' answers and shows it off only once every member is off.
 
 ### Cancelling
 
@@ -162,6 +180,11 @@ firmware. Most Z2M-supported lights cancel the timer on any state change.
 - **A device named after a group's ID.** Z2M accepts a purely numeric friendly name and looks up
   devices before groups, so a device whose friendly name is exactly a group's ID takes that
   group's command. Don't name a device with a bare number.
+- **Restart during a timer.** Pending state reads are lost when Home Assistant restarts or Device
+  Side unloads, so the light's state stays stale until the device next reports or is next
+  commanded.
+- **Zigbee traffic.** Each call adds up to three Zigbee reads per target, spread over the timer.
+  A group read is one groupcast that every member answers.
 - **No confirmation.** Z2M's MQTT interface does not synchronously confirm the timer started.
   The result is always `sent`, never `confirmed`, regardless of whether the device accepted the
   command.
