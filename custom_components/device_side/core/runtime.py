@@ -54,9 +54,9 @@ class DeviceSideData:
         self, hass: HomeAssistant, key: str, handles: list[CALLBACK_TYPE], delay: float, job: Job
     ) -> CALLBACK_TYPE:
         async def fire(_now) -> None:
-            # A cancelled handle never fires, so this one is still in the list scheduled under key.
             handles.remove(unsub)
-            if not handles:
+            # A reschedule may have replaced this list since the timer fired; leave the new one alone.
+            if not handles and self.pending.get(key) is handles:
                 del self.pending[key]
             await job()
 
