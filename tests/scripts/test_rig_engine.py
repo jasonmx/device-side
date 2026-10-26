@@ -407,12 +407,11 @@ async def test_setup_runs_before_the_brief_and_the_steps_after_enter(tmp_path):
     inv = inventory(switch_plug="switch.plug")
     await run([suite(tmp_path, OBSERVED)], inv, REGISTRY, ha, tolerance=TOLERANCE, out=printed.append, ask=ask)
     start = printed.index("1 test needs you")
-    assert printed[start + 1 : start + 6] == [
+    assert printed[start + 1 : start + 5] == [
         "",
         "--- turn_on_for / on_then_off on switch_plug (1 of 1) ---",
         "You'll see: \033[1mIt clicks on then off.\033[0m",
         "Watch for: Two clicks.",
-        "You'll be asked: Did it click twice?",
     ]
     enter = calls_at_enter[0]
     assert ha.calls[enter - 1] == ("switch", "turn_off", {"entity_id": "switch.plug"})

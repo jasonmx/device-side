@@ -719,7 +719,6 @@ class _CaseRun:
         await asyncio.sleep(SETUP_SETTLE_S)
         self.out(f"You'll see: {_bold(observe.see)}")
         self.out(f"Watch for: {observe.watch}")
-        self.out(f"You'll be asked: {observe.ask}")
         await self.answer("Press Enter to start... ")
         try:
             await self.steps(self.case.test.steps, relaxed=True)

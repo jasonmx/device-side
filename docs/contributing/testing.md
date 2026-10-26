@@ -107,7 +107,7 @@ Such a test runs twice, so you are asked only what a machine can't check:
 1. **Automated**, with every other test first: setup and steps, every check applied. It has no automated run if
    its steps check nothing or its setup has a `do`.
 2. **Observed** (`<name>[<role>] observed`), after all automated runs. Setup runs and settles for 2 s, then the
-   runner prints `see` (in bold), `watch` and `ask` and waits for Enter. The steps run with their checks turned
+   runner prints `see` (in bold) and `watch` and waits for Enter. The steps run with their checks turned
    into waits, so the timing matches. Then you answer `ask`: Enter or `y` if you saw it, `n` if not, which fails
    the test and asks what you saw instead. It is skipped if its automated run failed, and if a step fails after Enter it prints
    `nothing to observe` and the reason.
