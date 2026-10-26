@@ -6,6 +6,9 @@ rig_seconds: 60
 tests:
   - name: sets_while_off  # §5.1
     roles: [scene]
+    brief:
+      see: The room goes cool white, then off; the scene is set while off, then the room turns on.
+      watch: 'Every light as it comes on: the scene''s colors and brightness, not cool white.'
     steps:
       - set: {target: group, state: on, color_temp_kelvin: 6500}
       - set: {target: group, state: off}
@@ -18,6 +21,9 @@ tests:
 
   - name: applies_while_on  # §5.2
     roles: [scene]
+    brief:
+      see: The room goes cool white, then the scene is set while it is on.
+      watch: 'The change: straight to the scene, with no light turning off.'
     steps:
       - set: {target: group, state: on, color_temp_kelvin: 6500}
       - call: {}
@@ -26,6 +32,9 @@ tests:
 
   - name: no_stale_snapshot  # §5.3
     roles: [scene]
+    brief:
+      see: 'Nothing at first: you''ll be asked to edit one light''s color in this scene in the Hue app. Then the room turns off, the scene is set, and the room turns on.'
+      watch: 'The light you edited as the room comes on: its new color, not the old one.'
     steps:
       - observe: Change one light's color in this scene in the Hue app. Done?
       - set: {target: group, state: off}

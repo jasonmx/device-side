@@ -117,11 +117,24 @@ class Step:
 
 
 @dataclass(frozen=True, slots=True)
+class Brief:
+    """What an attended test shows, told before it starts: what the lights will do and what to watch for."""
+
+    see: str
+    watch: str
+
+
+@dataclass(frozen=True, slots=True)
 class RigTest:
     name: str
     roles: tuple[str, ...]
     only: frozenset[str] | None
     steps: tuple[Step, ...]
+    brief: Brief | None = None
+
+    @property
+    def questions(self) -> list[str]:
+        return [step.args for step in self.steps if step.kind == "observe"]
 
     def roles_needed(self, role: str) -> list[str]:
         """The case's own role and every role a step targets, in first-use order."""
@@ -258,11 +271,18 @@ def _parse_step(raw: Any, index: int) -> Step:
         raise ValueError(f"{label}: {err}") from None
 
 
+def _parse_brief(raw: Any) -> Brief:
+    args = _mapping(raw, required=("see", "watch"), allowed=())
+    if not all(isinstance(value, str) and value.strip() for value in args.values()):
+        raise ValueError("brief see and watch must be non-empty strings")
+    return Brief(args["see"].strip(), args["watch"].strip())
+
+
 def _parse_test(raw: Any) -> RigTest:
     if not isinstance(raw, dict) or not isinstance(name := raw.get("name"), str):
         raise ValueError(f"a test needs a name, got {raw!r}")
     try:
-        if unknown := sorted(set(raw) - {"name", "roles", "only", "steps"}):
+        if unknown := sorted(set(raw) - {"name", "roles", "only", "steps", "brief"}):
             raise ValueError(f"unknown key(s) {', '.join(unknown)}")
         roles = raw.get("roles")
         if not isinstance(roles, list) or not roles:
@@ -275,9 +295,15 @@ def _parse_test(raw: Any) -> RigTest:
         if not isinstance(steps := raw.get("steps"), list) or not steps:
             raise ValueError("steps must be a non-empty list")
         parsed = tuple(_parse_step(step, index) for index, step in enumerate(steps, 1))
+        observed = any(step.kind == "observe" for step in parsed)
+        if observed and "brief" not in raw:
+            raise ValueError("a test with an observe step needs a brief with see and watch")
+        if not observed and "brief" in raw:
+            raise ValueError("brief is only for a test with an observe step")
+        brief = _parse_brief(raw["brief"]) if observed else None
     except ValueError as err:
         raise ValueError(f"test {name}, {err}") from None
-    return RigTest(name, tuple(roles), frozenset(only) if only else None, parsed)
+    return RigTest(name, tuple(roles), frozenset(only) if only else None, parsed, brief)
 
 
 def load_step_file(path: Path) -> StepFile:
@@ -779,8 +805,11 @@ async def run(
     tolerance: dict[str, float] = TOLERANCE_S,
     out: Callable[[str], None] = print,
 ) -> RunResult:
-    """Run every case in order and print the table; ADMIN_INTEGRATIONS run on `admin`. `ask=None` is --unattended."""
-    results, power = [], inventory.power()
+    """Run every case in order and print the table; ADMIN_INTEGRATIONS run on `admin`. `ask=None` is --unattended.
+
+    An attended case (one with an observe step) is briefed first and starts only when the person presses Enter.
+    """
+    results, power, planned = [], inventory.power(), []
     for suite in suites:
         adapter = registry.adapter(suite.action, suite.integration)
         if adapter is None:
@@ -790,13 +819,21 @@ async def run(
         if client is None:
             out(f"{suite.integration} / {suite.action}: needs HA_ADMIN_TOKEN, skipped")
             continue
+        planned.append((suite, adapter, client, cases(suite, inventory, keyword)))
+    attended = [c for *_, suite_cases in planned for c in suite_cases if not c.skip and c.test.brief] if ask else []
+    # Cases hold dicts, so they're numbered by identity rather than hashed.
+    numbers = {id(case): number for number, case in enumerate(attended, 1)}
+    for suite, adapter, client, suite_cases in planned:
         suite_result = SuiteResult(suite, adapter, [], complete=not keyword)
         out(f"{suite.integration} / {suite.action}")
-        for case in cases(suite, inventory, keyword):
+        for case in suite_cases:
             if case.skip:
                 result = CaseResult(case.id, case.role, None, Outcome.SKIPPED, case.skip)
             else:
-                result = await _CaseRun(case, client, registry, tolerance[suite.integration], ask, power).run()
+                case_ask = ask
+                if number := numbers.get(id(case)):
+                    case_ask = await _brief(case, f"{number} of {len(attended)}", ask, out)
+                result = await _CaseRun(case, client, registry, tolerance[suite.integration], case_ask, power).run()
             out(f"  {case.id}: {result.outcome}" + (f" ({result.detail})" if result.detail else ""))
             suite_result.cases.append(result)
         results.append(suite_result)
@@ -806,6 +843,24 @@ async def run(
         out(f"{suite_result.suite.integration} / {suite_result.suite.action}")
         out("\n".join(table(suite_result, details=True)))
     return run_result
+
+
+async def _brief(
+    case: Case, position: str, ask: Callable[[str], str], out: Callable[[str], None]
+) -> Callable[[str], str] | None:
+    """Tell the person what the case will show and wait for Enter; EOF there runs it unattended (None)."""
+    brief = case.test.brief
+    assert brief is not None  # an attended case has a brief: the parser requires one with an observe step
+    out(f"--- {case.suite.action} / {case.test.name} on {case.role} ({position}) ---")
+    out(f"You'll see: {brief.see}")
+    out(f"Watch for: {brief.watch}")
+    for question in case.test.questions:
+        out(f"You'll be asked: {question}")
+    try:
+        await asyncio.to_thread(ask, "Press Enter to start... ")
+    except EOFError:
+        return None
+    return ask
 
 
 # --- Bench records -------------------------------------------------------------------------------------------

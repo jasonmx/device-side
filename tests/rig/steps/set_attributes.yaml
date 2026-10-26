@@ -17,6 +17,9 @@ tests:
 
   - name: sets_color_while_off  # §3.2
     roles: [light_color]
+    brief:
+      see: The color lamp turns off, gets red set while off, then turns on.
+      watch: 'The first moment it lights: red from the start, with no flash of its old color.'
     steps:
       - set: {state: off}
       - call: {rgb_color: [255, 0, 0]}
