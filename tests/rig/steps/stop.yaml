@@ -1,6 +1,7 @@
 # hue_dimmer tests/RELEASE_CHECKLIST.md §2.5 and §2.6 from the stop side; move.yaml checks the move that follows.
+# Samples after a move read device_side's prediction, in percent: HA shows a Hue fade's end value at once.
 action: stop
-rig_seconds: 100
+rig_seconds: 160
 tests:
   - name: halts_a_move  # §2.5
     roles: [light_ct, group]
@@ -11,7 +12,7 @@ tests:
       - wait: 3
       - call: {}
       - expect_response: {status: expected, integration: self}
-      - sample: {attribute: brightness, for: 4, expect: steady, max: 200}
+      - sample: {attribute: brightness, for: 4, expect: steady, max: 78, source: device_side}
     observe:
       see: The light at 10 %, climbing slowly, stopped after 3 s.
       watch: That it stops part way and holds.
@@ -27,7 +28,7 @@ tests:
       - call: {}
       - expect_response: {status: expected, integration: self}
       - expect_state: {state: on, within: tol}
-      - sample: {attribute: brightness, for: 4, expect: steady, min: 120, max: 210}
+      - sample: {attribute: brightness, for: 4, expect: steady, min: 47, max: 82, source: device_side}
     observe:
       see: The light at full, fading slowly toward off, stopped after 3 s.
       watch: 'The stop: it holds about two thirds up, with no flash, jump or blink off first.'

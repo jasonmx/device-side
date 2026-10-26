@@ -21,7 +21,7 @@ import yaml
 from scripts.fingerprint import adapter_path, fingerprint
 
 from .client import HAClient, HAError
-from .inventory import RIG_DIR, ROLES, TOLERANCE_S, Inventory
+from .inventory import RIG_DIR, ROLES, SETTLE_S, TOLERANCE_S, Inventory
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -47,6 +47,11 @@ POWER_RETRY_S = 3.0
 # A light reports off as its fade starts: an observed case waits this long after setup, so the brief comes once the
 # lights have reached the start state it describes.
 SETUP_SETTLE_S = 2.0
+
+# Actions whose calls leave a prediction behind (SETTLE_S), and move's default sweep_time (actions/move.py
+# DEFAULT_SWEEP_TIME), the longest a move without one can run.
+_PREDICTED = frozenset({"move", "stop"})
+MOVE_SWEEP_TIME_S = 5.0
 
 
 class SchemaError(ValueError):
@@ -242,11 +247,15 @@ def _parse_expect_state(args: Any) -> dict:
 
 
 def _parse_sample(args: Any) -> dict:
-    args = _mapping(args, required=["attribute", "for"], allowed=["target", "every", "expect", "min", "max"])
+    args = _mapping(
+        args, required=["attribute", "for"], allowed=["target", "every", "expect", "min", "max", "source"]
+    )
     args["for"] = Expr.parse(args["for"])
     args["every"] = Expr.parse(args.get("every", 0.5))
     if args.get("expect", "rising") not in ("rising", "falling", "steady"):
         raise ValueError(f"expect must be rising, falling or steady, got {args['expect']!r}")
+    if args.get("source", "ha") not in ("ha", "device_side"):
+        raise ValueError(f"source must be ha or device_side, got {args['source']!r}")
     return args
 
 
@@ -614,9 +623,15 @@ class _CaseRun:
         power: dict[str, str] | None = None,
         out: Callable[[str], None] = print,
         position: str = "",
+        busy: dict[str, float] | None = None,
+        settle: float = 0.0,
     ):
         self.case, self.ha, self.registry, self.ask, self.out, self.position = case, ha, registry, ask, out, position
         self.integration = case.suite.integration
+        # Each light's loop time once the predictions an earlier move or stop left on it have expired; shared
+        # by every case in the run.
+        self.busy = {} if busy is None else busy
+        self.settle = settle
         self.names: dict[str, float] = {"tol": tolerance}
         self.snapshot = Snapshot(
             ha,
@@ -667,6 +682,7 @@ class _CaseRun:
             if case.observed:
                 self.out("")
                 self.out(f"--- {case.suite.action} / {case.test.name} on {case.role} ({self.position}) ---")
+            await self.await_settled()
             await self.check_power()
             await self.steps(case.test.setup)
             if case.observed:
@@ -728,6 +744,15 @@ class _CaseRun:
         except EOFError:
             raise _NoOneThere from None
 
+    async def await_settled(self) -> None:
+        """Wait out the predictions an earlier case's move or stop left on this case's lights."""
+        lights = [member for entity_id in self.case.entities.values() for member in await self.members(entity_id)]
+        wait = max((self.busy.get(light, 0.0) for light in lights), default=0.0) - asyncio.get_running_loop().time()
+        if wait > 0:
+            if self.case.observed:
+                self.out(f"Waiting {wait:.0f} s for the last move's predictions to expire...")
+            await asyncio.sleep(wait)
+
     async def check_power(self) -> None:
         """Fail up front if a target's supply is off: its state in HA is stale, so every step would mislead."""
         for entity_id in self.case.entities.values():
@@ -779,12 +804,22 @@ class _CaseRun:
             return
         if following == "expect_error":
             raise StepFailure(f"device_side.{action} succeeded where an error was expected: {self.response}")
+        await self.mark_busy(action, data)
         entries = [entry for entry in (self.response or {}).values() if isinstance(entry, dict)]
         # A query returns only the targets it read, as core does, with no status to check.
         if entries and (self.query or any(entry.get("status") in _REACHED for entry in entries)):
             self.reached = True
             if (adapter := self.registry.adapter(action, self.integration)) is not None:
                 self.fields |= set(data) & adapter.scope.fields
+
+    async def mark_busy(self, action: str, data: dict) -> None:
+        """After a move or stop, hold its lights until the predictions it left expire (see await_settled)."""
+        if not self.settle or action not in _PREDICTED:
+            return
+        sweep = data.get("sweep_time", MOVE_SWEEP_TIME_S) if action == "move" else 0.0
+        until = asyncio.get_running_loop().time() + sweep + self.settle
+        for member in await self.members(data["entity_id"]):
+            self.busy[member] = max(self.busy.get(member, 0.0), until)
 
     def expected(self, name: str, want: Any) -> Any:
         if name == "status" and want == "expected":
@@ -858,15 +893,18 @@ class _CaseRun:
         await asyncio.sleep(max(seconds.eval(self.names), 0))
 
     async def _sample(self, args: dict, _following: str | None) -> None:
-        """Poll an attribute for `for` seconds; an absent attribute (a light that is off) reads as 0."""
+        """Poll an attribute for `for` seconds; an absent attribute (a light that is off) reads as 0.
+
+        `source: device_side` reads device_side.get_attributes instead of HA's state, in its units (brightness in
+        percent): mid-move it predicts where the light is, where HA shows a Hue fade's end value at once.
+        """
         entity_id, attribute = self.entity(args), args["attribute"]
         loop = asyncio.get_running_loop()
         deadline = loop.time() + args["for"].eval(self.names)
         every = max(args["every"].eval(self.names), 0.05)
         readings: list[float] = []
         while True:
-            state = await self.ha.get_state(entity_id)
-            value = state["attributes"].get(attribute) if state else None
+            value = await self.reading(entity_id, attribute, args.get("source", "ha"))
             if value is not None and (isinstance(value, bool) or not isinstance(value, int | float)):
                 raise StepFailure(f"{entity_id}: {attribute} is {value!r}, not a number")
             readings.append(float(value or 0))
@@ -886,6 +924,15 @@ class _CaseRun:
                 raise StepFailure(f"{entity_id}: {attribute} did not fall steadily: {shown}")
             case "steady" if len(set(readings)) > 1:
                 raise StepFailure(f"{entity_id}: {attribute} moved: {shown}")
+
+    async def reading(self, entity_id: str, attribute: str, source: str) -> Any:
+        if source == "ha":
+            state = await self.ha.get_state(entity_id)
+            return state["attributes"].get(attribute) if state else None
+        response = await self.ha.call_service(
+            "device_side", "get_attributes", {"entity_id": entity_id}, return_response=True
+        )
+        return ((response or {}).get(entity_id) or {}).get(attribute)
 
     async def _do(self, instruction: str, _following: str | None) -> None:
         await self.answer(f"    {instruction} Press Enter when done... ")
@@ -919,6 +966,7 @@ async def run(
     keyword: str | None = None,
     ask: Callable[[str], str] | None = input,
     tolerance: dict[str, float] = TOLERANCE_S,
+    settle: dict[str, float] = SETTLE_S,
     out: Callable[[str], None] = print,
 ) -> RunResult:
     """Run every case and print the table; ADMIN_INTEGRATIONS run on `admin`. `ask=None` is --unattended.
@@ -937,7 +985,7 @@ async def run(
             out(f"{suite.integration} / {suite.action}: needs HA_ADMIN_TOKEN, skipped")
             continue
         planned.append((suite, adapter, client, cases(suite, inventory, keyword)))
-    rig_run = _Run(registry, tolerance, inventory.power(), ask, out)
+    rig_run = _Run(registry, tolerance, settle, inventory.power(), ask, out)
     waiting = [
         case
         for suite, _, client, suite_cases in planned
@@ -961,10 +1009,19 @@ class _Run:
 
     registry: Any
     tolerance: dict[str, float]
+    settle: dict[str, float]
     power: dict[str, str]
     ask: Callable[[str], str] | None
     out: Callable[[str], None]
     results: dict[tuple[int, str], CaseResult] = field(default_factory=dict)
+    busy: dict[str, float] = field(default_factory=dict)  # _CaseRun.busy
+
+    def case_run(self, case: Case, client: HAClient, ask: Callable[[str], str] | None, position: str = "") -> _CaseRun:
+        integration = case.suite.integration
+        return _CaseRun(
+            case, client, self.registry, self.tolerance[integration], ask, self.power, self.out, position,
+            self.busy, self.settle.get(integration, 0.0),
+        )
 
     def report(self, case: Case, result: CaseResult) -> None:
         self.results[id(case.suite), case.id] = result
@@ -979,8 +1036,7 @@ class _Run:
             if case.skip:
                 self.report(case, _not_run(case, Outcome.SKIPPED, case.skip))
             elif not case.observed:
-                tolerance = self.tolerance[suite.integration]
-                self.report(case, await _CaseRun(case, client, self.registry, tolerance, None, self.power).run())
+                self.report(case, await self.case_run(case, client, None).run())
             elif self.ask is None:
                 self.report(case, _not_run(case, Outcome.NOT_OBSERVED))
             elif twin is not None and twin.outcome is Outcome.FAIL:
@@ -998,10 +1054,7 @@ class _Run:
             if self.ask is None:
                 self.report(case, _not_run(case, Outcome.NOT_OBSERVED))
                 continue
-            tolerance, position = self.tolerance[case.suite.integration], f"{number} of {len(waiting)}"
-            result = await _CaseRun(
-                case, client, self.registry, tolerance, self.ask, self.power, self.out, position
-            ).run()
+            result = await self.case_run(case, client, self.ask, f"{number} of {len(waiting)}").run()
             self.report(case, result)
             if result.outcome is Outcome.NOT_OBSERVED:
                 self.ask = None

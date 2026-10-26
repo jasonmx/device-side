@@ -765,6 +765,64 @@ async def test_sample(tmp_path, expect, step, failure):
     assert failure in detail
 
 
+async def test_a_device_side_sample_reads_get_attributes_not_ha(tmp_path):
+    text = SAMPLE.replace("EXPECT", "rising").replace("max: 200}", "max: 50, source: device_side}")
+    predicted = iter(range(10, 100, 5))
+
+    def respond(ha, action, data):
+        ha.set(data["entity_id"], "on", brightness=255)  # HA shows the fade's end value at once
+        if action == "get_attributes":
+            return {data["entity_id"]: {"brightness": next(predicted)}}
+        return {data["entity_id"]: {"status": "confirmed"}}
+
+    ha = FakeHA({"light.lamp": {}}, respond)
+    result = await run_one(ha, suite(tmp_path, text), inventory(light_dimmable="light.lamp"))
+    assert outcomes(result) == {"ramps[light_dimmable]": (Outcome.PASS, "")}
+
+
+MOVES = """
+action: move
+rig_seconds: 5
+tests:
+  - name: moves_the_room
+    roles: [group]
+    steps:
+      - call: {brightness: up, sweep_time: 0.2}
+  - name: moves_a_member
+    roles: [light_ct]
+    steps:
+      - call: {brightness: up}
+"""
+
+
+@pytest.mark.parametrize(("settle", "gap"), [({"fake": 0.3}, (0.45, 1.0)), ({}, (0.0, 0.1))])
+async def test_a_case_waits_out_the_predictions_a_move_left_on_its_lights(tmp_path, settle, gap):
+    called_at = []
+
+    def respond(ha, action, data):
+        if action == "move":  # the snapshot reads get_attributes too
+            called_at.append(asyncio.get_running_loop().time())
+        return {data["entity_id"]: {"status": "sent", "integration": "fake"}}
+
+    result = await run(
+        [suite(tmp_path, MOVES, "fake")],
+        inventory("fake", group="light.room", light_ct="light.a"),
+        GROUP_REGISTRY,
+        group_ha(respond),
+        tolerance=TOLERANCE,
+        settle=settle,
+        out=lambda _: None,
+    )
+    assert not result.failed
+    assert gap[0] <= called_at[1] - called_at[0] < gap[1]
+
+
+def test_the_default_sweep_time_matches_the_move_action():
+    from custom_components.device_side.actions.move import DEFAULT_SWEEP_TIME
+
+    assert engine.MOVE_SWEEP_TIME_S == DEFAULT_SWEEP_TIME
+
+
 async def test_duration_before_any_call_fails_the_step(tmp_path):
     text = "action: turn_on_for\nrig_seconds: 5\ntests:\n  - name: early\n    roles: [switch_plug]\n    steps:\n"
     text += "      - wait: duration\n"

@@ -64,6 +64,7 @@ def observed(observe: str = "{see: s, watch: w, ask: a}", setup: str = "[{wait: 
         (HEADER + "      - expect_state: {brightness: {min: a}}\n", "range bounds must be numbers"),
         (HEADER + "      - expect_response: {attributes: 3}\n", "attributes must be a mapping"),
         (HEADER + "      - sample: {attribute: brightness, for: 1, expect: wobbly}\n", "rising, falling or steady"),
+        (HEADER + "      - sample: {attribute: brightness, for: 1, source: hue}\n", "source must be ha or device_side"),
         (HEADER + "      - observe: ok?\n", "step 1 (observe): the observe step is gone; give the test observe:"),
         (
             HEADER.replace("    steps:\n", "    brief: {see: s, watch: w}\n    steps:\n") + "      - wait: 0\n",

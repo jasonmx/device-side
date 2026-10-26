@@ -1,7 +1,8 @@
 # hue_dimmer tests/RELEASE_CHECKLIST.md §2 as steps; §2.6 (stop when idle) and stopping a move to off are in
 # stop.yaml. Each test runs on a lamp and then a room; on the room, expect_state checks every member light.
+# HA shows a Hue fade's end value at once, so samples read device_side's prediction, in percent.
 action: move
-rig_seconds: 240
+rig_seconds: 420
 tests:
   - name: raise  # §2.1
     roles: [light_ct, group]
@@ -10,7 +11,7 @@ tests:
     steps:
       - call: {brightness: up, sweep_time: 5}
       - expect_response: {status: expected, integration: self}
-      - sample: {attribute: brightness, for: 3, expect: rising}
+      - sample: {attribute: brightness, for: 3, expect: rising, source: device_side}
       - expect_state: {brightness: 255, within: 2 + tol}
     observe:
       see: The light at 20 %, climbing to full over 5 s.
@@ -36,7 +37,7 @@ tests:
       - set: {state: off}
     steps:
       - call: {brightness: up, sweep_time: 5}
-      - sample: {attribute: brightness, for: 1, expect: rising, max: 128}
+      - sample: {attribute: brightness, for: 1, expect: rising, max: 50, source: device_side}
     observe:
       see: The light, off, climbing from the bottom over 5 s.
       watch: 'The first moment it lights: low, not its previous brightness.'
@@ -76,9 +77,9 @@ tests:
       - wait: 3
       - call: {action: stop}
       - expect_response: {status: expected}
-      - sample: {attribute: brightness, for: 4, expect: steady}
+      - sample: {attribute: brightness, for: 4, expect: steady, source: device_side}
       - call: {brightness: up, sweep_time: 10}
-      - sample: {attribute: brightness, for: 2, expect: rising, max: 200}
+      - sample: {attribute: brightness, for: 2, expect: rising, max: 78, source: device_side}
     observe:
       see: 'The light at 10 %: a slow climb for 3 s, a 4 s hold, then the climb again.'
       watch: 'The hold and the restart: no drift while held, no jump when it resumes.'
@@ -92,9 +93,9 @@ tests:
       - call: {brightness: down, sweep_time: 10}
       - wait: 3
       - call: {action: stop}
-      - sample: {attribute: brightness, for: 4, expect: steady}
+      - sample: {attribute: brightness, for: 4, expect: steady, source: device_side}
       - call: {brightness: down, sweep_time: 10}
-      - sample: {attribute: brightness, for: 2, expect: falling, min: 30}
+      - sample: {attribute: brightness, for: 2, expect: falling, min: 12, source: device_side}
     observe:
       see: 'The light at 90 %: a slow fade for 3 s, a 4 s hold, then the fade again.'
       watch: 'The hold and the restart: no drift while held, no jump when it resumes.'

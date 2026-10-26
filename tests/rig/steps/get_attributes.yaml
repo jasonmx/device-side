@@ -1,7 +1,7 @@
 # hue_dimmer tests/RELEASE_CHECKLIST.md §4 as steps.
 # On the group role the set gives every member the same values, so the room's own row reads them back too.
 action: get_attributes
-rig_seconds: 45
+rig_seconds: 60
 tests:
   - name: reads_while_off  # §4.1
     roles: [light_ct, group]

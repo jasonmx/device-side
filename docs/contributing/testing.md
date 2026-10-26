@@ -70,13 +70,16 @@ tests:
 | `expect_error` | The call before it must fail, with this `key` and/or `summary`. |
 | `expect_state` | Checks state and attributes now, or `within` seconds. `unchanged` is the state before the test. A `{min, max}` range fits values that drift. On a `group` it checks every member. |
 | `wait` | Sleeps. |
-| `sample` | Polls `attribute` for `for` seconds and expects it `rising`, `falling` or `steady`, optionally within `min`/`max`. |
+| `sample` | Polls `attribute` for `for` seconds and expects it `rising`, `falling` or `steady`, optionally within `min`/`max`. `source: device_side` reads `device_side.get_attributes` instead of HA's state, in its units (brightness in percent), for a fade HA shows only the end of. |
 | `do` | Prints an instruction for the person and waits for Enter. Only in the `setup` of an observed test. |
 | `restore` | Puts back the state from before the test. It also runs after every test, pass or fail. |
 
 Any step takes `target: <role>` to act on another role the test lists. Durations accept numbers, `duration`
 (the last call's), `tol` (the integration's timing tolerance) and `+ - *`. `only: [<integration>]` limits a
 test to some integrations; when those pile up, split the file.
+
+An integration in `SETTLE_S` (`tests/rig/inventory.py`) predicts a light's brightness for a while after a
+`move` or `stop`, so a later test on that light waits until it reads the device again.
 
 ### Observed tests
 
