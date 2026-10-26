@@ -68,7 +68,7 @@ class HueSetScene(Adapter[Request]):
             if (scene := api.scenes.scene.get(scene_id)) is None:
                 return self.result(target, Status.REJECTED, detail="scene_not_found")
             if not (writes := scene_light_writes(scene)):
-                return self.result(target, Status.CONFIRMED, detail="nothing_to_set")
+                return self.result(target, Status.UNCHANGED, detail="nothing_to_set")
 
             failed = 0
             for light_id, write in writes:

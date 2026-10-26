@@ -326,7 +326,7 @@ The fields, units and names are hue_dimmer's, so its calls work unchanged under 
 `brightness` is percent, as Hue stores it; `color_temp_kelvin` is clamped to the light's range;
 colors convert to xy, and given more than one, `rgb_color` wins, then `hs_color`, then `xy_color`.
 `min_brightness` and `max_brightness` are percent and move the brightness the bridge last stored
-into that range, so they work while off; a light already inside it is `confirmed` with
+into that range, so they work while off; a light already inside it is `unchanged` with
 `within_limits` and nothing is written. An explicit `brightness` overrides both. A `0` leaves
 `min_brightness`, `max_brightness` or `color_temp_kelvin` unset.
 

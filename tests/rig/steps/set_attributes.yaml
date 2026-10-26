@@ -40,7 +40,7 @@ tests:
     steps:
       - set: {state: on, brightness_pct: 70}
       - call: {min_brightness: 50}
-      - expect_response: {status: confirmed, detail: within_limits}
+      - expect_response: {status: unchanged, detail: within_limits}
       - wait: tol
       - expect_state: {brightness: {min: 177, max: 180}}
 

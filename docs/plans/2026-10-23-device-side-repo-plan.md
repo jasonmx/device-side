@@ -197,7 +197,7 @@ requires it.
     address an HA group natively, which is fine because no device can. Goal throughout:
     minimize radio traffic and popcorning by sending to the largest unit the device accepts.
 - **Results:** `SupportsResponse.OPTIONAL`. Response maps entity_id to
-  `{status: unsupported|rejected|sent|confirmed, integration, clamped_to?, detail?}`. Tier is not in the response: it is a subjective label about the code, not a fact
+  `{status: unsupported|rejected|sent|confirmed|unchanged, integration, clamped_to?, detail?}`; `unchanged` means nothing was sent because the target is already where the call would leave it. Tier is not in the response: it is a subjective label about the code, not a fact
   about this call. A query returns core's shape instead: each target's data under its entity_id, with
   targets that could not be read left out. Raise `HomeAssistantError` only on invalid input or when every
   target failed, so mixed rooms do not abort automations, until slice 9f moves the raise rule to core's.
@@ -347,7 +347,7 @@ copied from `/Users/jason/projects/hue-smooth-dimming`.
 
 ```python
 # core/models.py
-class Status(StrEnum): UNSUPPORTED, REJECTED, SENT, CONFIRMED
+class Status(StrEnum): UNSUPPORTED, REJECTED, SENT, CONFIRMED, UNCHANGED
 class Tier(StrEnum): STABLE, BETA, UNTESTED, EXPERIMENTAL   # computed by check_tiers, never stored on an adapter
 class ActionKind(StrEnum): COMMAND, SETTING, QUERY
 

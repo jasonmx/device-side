@@ -88,7 +88,7 @@ class HueSetAttributes(Adapter[SetAttributesRequest]):
             if not write:
                 if dropped:
                     return self.result(target, Status.UNSUPPORTED, detail="fields_not_supported")
-                return self.result(target, Status.CONFIRMED, detail="within_limits")
+                return self.result(target, Status.UNCHANGED, detail="within_limits")
             await write_light(api, light.id, **write)
             return self.result(target, Status.SENT, detail="fields_dropped" if dropped else None)
 
