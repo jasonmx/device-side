@@ -44,3 +44,20 @@ def add_z2m_entity(
     )
     hass.states.async_set(entity_id, state, attributes or {})
     return entity_id
+
+
+def add_z2m_group(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    entity_id: str,
+    group_id: int,
+    base_topic: str = "zigbee2mqtt",
+    state: str = "off",
+) -> str:
+    """Register one Z2M group entity with the identifier Z2M writes via MQTT discovery.
+
+    Z2M encodes the base topic as character codes joined with no separator, then appends the
+    group ID (getDevicePayload and getEncodedBaseTopic in lib/extension/homeassistant.ts).
+    """
+    encoded = "".join(str(ord(c)) for c in base_topic)
+    return add_z2m_entity(hass, entry, entity_id, ieee=f"{encoded}_{group_id}", state=state)

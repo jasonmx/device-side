@@ -1,5 +1,6 @@
 """Zigbee2MQTT bridge over the core mqtt integration."""
 
+from .addressing import is_z2m_group
 from .detect import detect
 from .turn_on_for import Z2MTurnOnFor
 from ...core.scope import IntegrationInfo
@@ -9,6 +10,7 @@ INTEGRATION = IntegrationInfo(
     title="Zigbee2MQTT",
     ha_domain="mqtt",
     detect=detect,
+    is_group=is_z2m_group,
     max_concurrency=4,
 )
 
