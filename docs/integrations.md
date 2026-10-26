@@ -387,9 +387,16 @@ it arrives, so Home Assistant shows what is listed here.
   the average about 1 s later. After a stop the lights report separately, up to 16 s apart.
 - **A change from elsewhere is reported promptly:** a `light.turn_on` from Home Assistant within
   0.25 s, and a Hue app slider with an event about once a second while it moves.
-- **Dimming to off:** `on: false` and brightness 0 are reported at the start. In 1 of 2 runs, a report
-  mid-transition then showed the light on at 17 % with nothing after it. A dimming stop is refused
-  while the light dims to off ("soft off").
+- **Dimming to off:** `on: false` (and brightness 0, if the write set it) is reported at the start. In
+  1 of 2 runs, a report mid-transition then showed the light on at 17 % with nothing after it. A
+  dimming stop is refused while the light dims to off ("soft off"), but writing `on: true` with a
+  brightness and no duration ends the fade there; set to the straight-line value, it showed no jump
+  or flash. A plain `on: false` with a duration keeps the stored brightness, and the next plain on
+  comes back at it; with brightness 0 in the write, it comes back at the minimum.
+- **Brightness 0 with the light left on** (`on: true`, brightness 0, with a duration) is accepted,
+  reported as 0 at the start, and ends with the light on at its minimum (the bridge's
+  `min_dim_level`, 0.2 % on the LTA009). Home Assistant shows it on at brightness 0. A dimming stop
+  halts it.
 - **A color temperature write reports only `color_temperature`,** never `dimming`. Color
   temperature transitions and their stop (`color_temperature_delta`) behave as brightness does
   above, on a light and on a zone.
