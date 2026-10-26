@@ -22,6 +22,7 @@ from tests.rig.engine import (
     run,
     table,
     write_records,
+    write_report,
 )
 from tests.rig.inventory import Inventory, RigEntity
 
@@ -353,9 +354,37 @@ async def test_observed_asks_and_proves_only_when_both_cases_pass(tmp_path, answ
     asked, ask = answers("", answer)
     ha = FakeHA({"switch.plug": {}}, timer_on)
     result = await run_one(ha, suite(tmp_path, OBSERVED), inventory(switch_plug="switch.plug"), ask=ask)
-    assert asked == ["Press Enter to start... ", "    Did it click twice? [Y/n] "]
+    assert asked[:2] == ["Press Enter to start... ", "    Did it click twice? [Y/n] "]
     assert outcomes(result)[WATCHED][0] is outcome
     assert [case.id for case in result.suites[0].proven] == ([AUTOMATED, WATCHED] if outcome is Outcome.PASS else [])
+
+
+@pytest.mark.parametrize(("saw", "detail"), [("Red, then  blue ", "; saw: Red, then  blue"), ("", "")])
+async def test_a_no_records_what_the_person_saw(tmp_path, saw, detail):
+    asked, ask = answers("", "n", saw)
+    ha = FakeHA({"switch.plug": {}}, timer_on)
+    result = await run_one(ha, suite(tmp_path, OBSERVED), inventory(switch_plug="switch.plug"), ask=ask)
+    assert asked[-1] == "    What did you see? (Enter to skip) "
+    assert outcomes(result)[WATCHED] == (Outcome.FAIL, "not seen: Did it click twice?" + detail)
+
+
+async def test_eof_at_what_was_seen_still_fails_the_case(tmp_path):
+    _, ask = answers("", "n")
+    result = await run_one(
+        FakeHA({"switch.plug": {}}, timer_on), suite(tmp_path, OBSERVED), inventory(switch_plug="switch.plug"), ask=ask
+    )
+    assert outcomes(result)[WATCHED] == (Outcome.FAIL, "not seen: Did it click twice?")
+
+
+async def test_a_report_lists_every_suite_with_its_reasons(tmp_path):
+    ha = FakeHA({"switch.plug": {}}, stuck)
+    result = await run_one(ha, suite(tmp_path, OBSERVED), inventory(switch_plug="switch.plug"), ask=answers()[1])
+    path = write_report(result, tmp_path / "reports", "rig run 2026-10-26 14:03:05")
+    assert path == tmp_path / "reports" / "rig-run-2026-10-26-140305.md"
+    text = path.read_text()
+    assert text.startswith("# rig run 2026-10-26 14:03:05\n\n## shelly / turn_on_for\n")
+    assert "| fail: step 5 (expect_state): switch.plug: expected {'state': 'off'}" in text
+    assert "| skipped: automated case failed |" in text
 
 
 async def test_an_answer_other_than_yes_or_no_is_asked_again(tmp_path):
@@ -363,7 +392,7 @@ async def test_an_answer_other_than_yes_or_no_is_asked_again(tmp_path):
     ha, printed = FakeHA({"switch.plug": {}}, timer_on), []
     inv = inventory(switch_plug="switch.plug")
     result = await run([suite(tmp_path, OBSERVED)], inv, REGISTRY, ha, tolerance=TOLERANCE, out=printed.append, ask=ask)
-    assert asked[1:] == ["    Did it click twice? [Y/n] "] * 2
+    assert asked[1:3] == ["    Did it click twice? [Y/n] "] * 2
     assert "    Answer y or n." in printed
     assert outcomes(result)[WATCHED] == (Outcome.FAIL, "not seen: Did it click twice?")
 

@@ -712,15 +712,19 @@ class _CaseRun:
             with contextlib.suppress(EOFError):
                 await asyncio.to_thread(self.ask, "Press Enter to go on... ")
             raise
-        while (answer := await self.answer(f"    {observe.ask} [Y/n] ")) not in ("", "y", "yes", "n", "no"):
+        while (answer := (await self.answer(f"    {observe.ask} [Y/n] ")).lower()) not in ("", "y", "yes", "n", "no"):
             self.out("    Answer y or n.")
         if answer in ("n", "no"):
-            raise StepFailure(f"not seen: {observe.ask}")
+            try:
+                saw = await self.answer("    What did you see? (Enter to skip) ")
+            except _NoOneThere:
+                saw = ""
+            raise StepFailure(f"not seen: {observe.ask}" + (f"; saw: {saw}" if saw else ""))
 
     async def answer(self, text: str) -> str:
-        """The person's reply, lowercased; EOF there means nobody is at the rig."""
+        """The person's reply, stripped; EOF there means nobody is at the rig."""
         try:
-            return (await asyncio.to_thread(self.ask, text)).strip().lower()
+            return (await asyncio.to_thread(self.ask, text)).strip()
         except EOFError:
             raise _NoOneThere from None
 
@@ -1016,7 +1020,7 @@ def table(suite_result: SuiteResult, details: bool = False) -> list[str]:
     lines = ["| Test | Target | Result |", "|---|---|---|"]
     for case in suite_result.cases:
         target = f"`{case.domain}` ({case.role})" if case.domain else f"{case.role}: none in inventory"
-        outcome = str(case.outcome) + (f": {case.detail}" if details and case.outcome is Outcome.FAIL else "")
+        outcome = str(case.outcome) + (f": {case.detail}" if details and case.detail else "")
         lines.append(f"| `{case.id}` | {target} | {outcome} |")
     return lines
 
@@ -1075,6 +1079,18 @@ def render_record(
     if any(case.outcome is Outcome.NOT_OBSERVED for case in suite_result.cases):
         lines += ["", "Tests marked `not observed` had nobody watching; their fields and capabilities are not listed."]
     return "\n".join(lines) + "\n"
+
+
+def write_report(result: RunResult, directory: Path, title: str) -> Path:
+    """Every suite's table with each failure's and skip's reason, for any run: failed, partial or unattended."""
+    lines = [f"# {title}"]
+    for suite_result in result.suites:
+        suite = suite_result.suite
+        lines += ["", f"## {suite.integration} / {suite.action}", "", *table(suite_result, details=True)]
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{title.replace(' ', '-').replace(':', '')}.md"
+    path.write_text("\n".join(lines) + "\n")
+    return path
 
 
 async def write_records(
