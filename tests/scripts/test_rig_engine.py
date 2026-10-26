@@ -286,7 +286,8 @@ tests:
     ]
 
 
-OBSERVED = ON_THEN_OFF + "      - observe: Did it click twice?\n"
+BRIEF = "    brief: {see: It clicks on then off., watch: Two clicks.}\n    steps:\n"
+OBSERVED = ON_THEN_OFF.replace("    steps:\n", BRIEF) + "      - observe: Did it click twice?\n"
 
 
 async def test_observe_unattended_reports_not_observed_and_proves_nothing(tmp_path):
@@ -310,8 +311,47 @@ async def test_observe_asks_and_a_no_fails(tmp_path, answer, outcome):
 
     ha = FakeHA({"switch.plug": {}}, timer_on)
     result = await run_one(ha, suite(tmp_path, OBSERVED), inventory(switch_plug="switch.plug"), ask=ask)
-    assert asked == ["    Did it click twice? [y/N] "]
+    assert asked == ["Press Enter to start... ", "    Did it click twice? [y/N] "]
     assert outcomes(result)["on_then_off[switch_plug]"][0] is outcome
+
+
+async def test_an_attended_case_is_briefed_before_its_first_step(tmp_path):
+    ha, printed, events = FakeHA({"switch.plug": {}}, timer_on), [], []
+
+    def ask(prompt):
+        events.append((prompt, len(ha.calls)))
+        return "y"
+
+    inv = inventory(switch_plug="switch.plug")
+    await run([suite(tmp_path, OBSERVED)], inv, REGISTRY, ha, tolerance=TOLERANCE, out=printed.append, ask=ask)
+    assert printed[1:6] == [
+        "--- turn_on_for / on_then_off on switch_plug (1 of 1) ---",
+        "You'll see: It clicks on then off.",
+        "Watch for: Two clicks.",
+        "You'll be asked: Did it click twice?",
+        "  on_then_off[switch_plug]: pass",
+    ]
+    assert events[0] == ("Press Enter to start... ", 0)
+
+
+async def test_eof_at_the_brief_runs_the_case_unattended(tmp_path):
+    asked = []
+
+    def ask(prompt):
+        asked.append(prompt)
+        raise EOFError
+
+    ha = FakeHA({"switch.plug": {}}, timer_on)
+    result = await run_one(ha, suite(tmp_path, OBSERVED), inventory(switch_plug="switch.plug"), ask=ask)
+    assert asked == ["Press Enter to start... "]
+    assert outcomes(result) == {"on_then_off[switch_plug]": (Outcome.NOT_OBSERVED, "")}
+
+
+async def test_unattended_prints_no_brief(tmp_path):
+    ha, printed = FakeHA({"switch.plug": {}}, timer_on), []
+    inv = inventory(switch_plug="switch.plug")
+    await run([suite(tmp_path, OBSERVED)], inv, REGISTRY, ha, tolerance=TOLERANCE, out=printed.append, ask=None)
+    assert not [line for line in printed if line.startswith(("---", "You'll"))]
 
 
 ONLY = """
@@ -320,13 +360,16 @@ rig_seconds: 5
 tests:
   - name: everywhere
     roles: [switch_plug]
+    brief: {see: s, watch: w}
     steps: [{observe: 'ok?'}]
   - name: elsewhere
     roles: [switch_plug]
     only: [zha]
+    brief: {see: s, watch: w}
     steps: [{observe: 'ok?'}]
   - name: needs_a_dimmer
     roles: [light_dimmable]
+    brief: {see: s, watch: w}
     steps: [{observe: 'ok?'}]
 """
 
@@ -346,6 +389,16 @@ async def test_a_keyword_runs_a_subset_and_marks_the_suite_partial(tmp_path):
     result = await run_one(ha, suite(tmp_path, ONLY), inv, ask=lambda _: "y", keyword="everywhere")
     assert list(outcomes(result)) == ["everywhere[switch_plug]"]
     assert not result.suites[0].recordable
+
+
+async def test_the_brief_counts_only_the_attended_cases_that_run(tmp_path):
+    ha, printed = FakeHA({"switch.plug": {}}), []
+    steps = suite(tmp_path, ONLY + ON_THEN_OFF.split("tests:\n")[1])
+    inv = inventory(switch_plug="switch.plug")
+    await run([steps], inv, REGISTRY, ha, tolerance=TOLERANCE, out=printed.append, ask=lambda _: "y")
+    assert [line for line in printed if line.startswith("---")] == [
+        "--- turn_on_for / everywhere on switch_plug (1 of 1) ---"
+    ]
 
 
 async def test_a_suite_without_an_adapter_is_skipped(tmp_path):

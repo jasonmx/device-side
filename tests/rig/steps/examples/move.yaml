@@ -5,6 +5,9 @@ rig_seconds: 120
 tests:
   - name: raise  # §2.1
     roles: [light_color, group]
+    brief:
+      see: The light at 20 %, then a 5 s climb to full.
+      watch: Steps or flashes on the way up.
     steps:
       - set: {state: on, brightness_pct: 20}
       - call: {brightness: brighter, sweep_time: 5}
@@ -15,6 +18,9 @@ tests:
 
   - name: lower_to_off  # §2.2; the default sweep time is under 10 s
     roles: [light_color, group]
+    brief:
+      see: The light at full, then a fade under 10 s to off.
+      watch: Steps on the way down, and that it ends off.
     steps:
       - set: {state: on, brightness_pct: 100}
       - call: {brightness: dimmer}
@@ -24,6 +30,9 @@ tests:
 
   - name: raise_from_off  # §2.3
     roles: [light_color, group]
+    brief:
+      see: The light off, then a 5 s climb from the bottom.
+      watch: 'The first moment it lights: low, not its previous brightness.'
     steps:
       - set: {state: off}
       - call: {brightness: brighter, sweep_time: 5}
@@ -41,6 +50,9 @@ tests:
 
   - name: raise_stop_raise  # §2.5
     roles: [light_color, group]
+    brief:
+      see: The light at 10 %, a slow climb for 3 s, a 4 s hold, then the climb again.
+      watch: 'The hold and the restart: no drift while held, no jump when it resumes.'
     steps:
       - set: {state: on, brightness_pct: 10}
       - call: {brightness: brighter, sweep_time: 10}
@@ -54,6 +66,9 @@ tests:
 
   - name: lower_stop_lower  # §2.5, repeated with lower
     roles: [light_color, group]
+    brief:
+      see: The light at 90 %, a slow fade for 3 s, a 4 s hold, then the fade again.
+      watch: 'The hold and the restart: no drift while held, no jump when it resumes.'
     steps:
       - set: {state: on, brightness_pct: 90}
       - call: {brightness: dimmer, sweep_time: 10}

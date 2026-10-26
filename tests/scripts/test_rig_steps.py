@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from custom_components.device_side.core.registry import AdapterRegistry
-from tests.rig.engine import STEPS_DIR, Expr, SchemaError, load_step_file, load_step_files
+from tests.rig.engine import STEPS_DIR, Brief, Expr, SchemaError, load_step_file, load_step_files
 
 
 @pytest.mark.parametrize("path", sorted(STEPS_DIR.rglob("*.yaml")), ids=lambda path: path.name)
@@ -34,6 +34,10 @@ def test_the_step_files_keep_their_roles():
 HEADER = "action: turn_on_for\nrig_seconds: 5\ntests:\n  - name: broken\n    roles: [switch_plug]\n    steps:\n"
 
 
+def briefed(brief: str) -> str:
+    return HEADER.replace("    steps:\n", f"    brief: {brief}\n    steps:\n")
+
+
 @pytest.mark.parametrize(
     ("text", "message"),
     [
@@ -60,6 +64,10 @@ HEADER = "action: turn_on_for\nrig_seconds: 5\ntests:\n  - name: broken\n    rol
         (HEADER + "      - expect_response: {attributes: 3}\n", "attributes must be a mapping"),
         (HEADER + "      - sample: {attribute: brightness, for: 1, expect: wobbly}\n", "rising, falling or steady"),
         (HEADER + "      - observe: {question: x}\n", "observe takes the question"),
+        (HEADER + "      - observe: ok?\n", "test broken, a test with an observe step needs a brief"),
+        (briefed("{see: s, watch: w}") + "      - restore: null\n", "brief is only for"),
+        (briefed("{see: s}") + "      - observe: ok?\n", "missing watch"),
+        (briefed("{see: s, watch: ''}") + "      - observe: ok?\n", "non-empty strings"),
         (HEADER + "      - restore: 1\n", "restore takes no arguments"),
         (HEADER + "      - expect_response: 1\n", "expected a mapping"),
         (HEADER + "      - expect_response: {status: fine, colour: red}\n", "unknown key(s) colour"),
@@ -85,3 +93,11 @@ def test_a_schema_error_names_where_it_is(tmp_path: Path, text, message):
 )
 def test_expressions_evaluate_against_the_run(text, value):
     assert Expr.parse(text).eval({"duration": 10, "tol": 0.5}) == value
+
+
+def test_a_brief_is_parsed_with_its_questions(tmp_path: Path):
+    path = tmp_path / "briefed.yaml"
+    path.write_text(briefed("{see: ' It clicks. ', watch: Twice.}") + "      - observe: One?\n      - observe: Two?\n")
+    (test,) = load_step_file(path).tests
+    assert test.brief == Brief("It clicks.", "Twice.")
+    assert test.questions == ["One?", "Two?"]

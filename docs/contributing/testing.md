@@ -86,6 +86,9 @@ run pauses, prints the question and waits for you to answer: watch the device an
 it. Anything else fails the test. `--unattended` skips the questions and reports those tests as
 `not observed`; they don't fail, but their bench record proves nothing they cover.
 
+A test with an `observe` step needs `brief: {see, watch}`: what the device will do, and what to watch for. The
+runner prints it, with the questions to come, and waits for Enter before the test starts.
+
 ### Bench records
 
 When every test of an adapter passes, the run writes `docs/bench/<integration>/<action>.md`: the adapter's
