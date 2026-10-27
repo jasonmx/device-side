@@ -185,7 +185,7 @@ tests:
     roles: [light_wrapped]
     steps:
       - call: {duration: 6, brightness: 128}
-      - expect_error: {key: all_targets_failed, summary: fields_not_supported}
+      - expect_error: {key: targets_failed, summary: timeout}
       - expect_state: {state: unchanged}
 """
 
@@ -193,25 +193,25 @@ tests:
 def refuse(detail: str) -> Callable:
     def _respond(ha, action, data):
         summary = f"{data['entity_id']}: {detail}"
-        raise HAError({"translation_key": "all_targets_failed", "translation_placeholders": {"summary": summary}})
+        raise HAError({"translation_key": "targets_failed", "translation_placeholders": {"summary": summary}})
 
     return _respond
 
 
 async def test_a_refusal_passes_when_key_summary_and_state_match(tmp_path):
-    ha = FakeHA({"light.lamp": {"state": "on"}}, refuse("fields_not_supported"))
+    ha = FakeHA({"light.lamp": {"state": "on"}}, refuse("timeout"))
     result = await run_one(ha, suite(tmp_path, REFUSAL), inventory(light_wrapped="light.lamp"))
     assert outcomes(result) == {"refuses[light_wrapped]": (Outcome.PASS, "")}
 
 
 async def test_an_expect_error_mismatch_fails_naming_both_summaries(tmp_path):
-    ha = FakeHA({"light.lamp": {}}, refuse("fields_not_tested"))
+    ha = FakeHA({"light.lamp": {}}, refuse("error"))
     result = await run_one(ha, suite(tmp_path, REFUSAL), inventory(light_wrapped="light.lamp"))
     outcome, detail = outcomes(result)["refuses[light_wrapped]"]
     assert outcome is Outcome.FAIL
     assert detail == (
-        "step 2 (expect_error): error summary is 'light.lamp: fields_not_tested', "
-        "expected 'light.lamp: fields_not_supported'"
+        "step 2 (expect_error): error summary is 'light.lamp: error', "
+        "expected 'light.lamp: timeout'"
     )
 
 
@@ -479,7 +479,7 @@ async def test_a_call_that_raises_after_enter_says_there_is_nothing_to_observe(t
     assert asked == ["Press Enter to start... ", "Press Enter to go on... "]
     outcome, detail = outcomes(result)[WATCHED]
     assert outcome is Outcome.FAIL
-    assert detail.startswith("step 1 (call): device_side.turn_on_for raised all_targets_failed")
+    assert detail.startswith("step 1 (call): device_side.turn_on_for raised targets_failed")
     assert f"    nothing to observe: {detail}" in printed
 
 
@@ -594,11 +594,11 @@ tests:
     setup: [{wait: 0}]
     steps:
       - call: {duration: 6}
-      - expect_error: {key: all_targets_failed, summary: fields_not_supported}
+      - expect_error: {key: targets_failed, summary: timeout}
     observe: {see: s, watch: w, ask: 'ok?'}
 """
     # The observed run's refusal names another summary: the automated check would fail it.
-    ha = FakeHA({"light.lamp": {}}, in_turn(refuse("fields_not_supported"), refuse("fields_not_tested")))
+    ha = FakeHA({"light.lamp": {}}, in_turn(refuse("timeout"), refuse("error")))
     result = await run_one(ha, suite(tmp_path, text), inventory(light_wrapped="light.lamp"), ask=answers("", "y")[1])
     assert outcomes(result) == {
         "refuses[light_wrapped]": (Outcome.PASS, ""),

@@ -1,8 +1,9 @@
+from dataclasses import replace
 from typing import ClassVar
 
 from homeassistant.core import HomeAssistant
 
-from .addressing import address, unsupported_reason
+from .addressing import COMPONENT_FIELDS, address, unsupported_reason
 from .rpc import TIMER_LIMITS, light_params, set_with_timer
 from ...actions.turn_on_for import TurnOnForRequest
 from ...core.adapter import Adapter
@@ -25,17 +26,18 @@ class ShellyTurnOnFor(Adapter[TurnOnForRequest]):
     )
 
     def supports(self, hass: HomeAssistant, request: TurnOnForRequest, target: Target) -> str | None:
-        return super().supports(hass, request, target) or unsupported_reason(
-            target, request.fields_present(), self.scope.capabilities
-        )
+        return super().supports(hass, request, target) or unsupported_reason(target, self.scope.capabilities)
 
     async def execute(
         self, hass: HomeAssistant, request: TurnOnForRequest, targets: list[Target]
     ) -> list[EntityResult]:
         async def send(target: Target) -> EntityResult:
+            # The dispatcher drops the fields HA's state says the light lacks; the component is the device's word.
+            component = address(target).component
+            dropped = request.light.present() - COMPONENT_FIELDS[component]
             params = {"on": True, "toggle_after": request.duration_s}
-            if target.domain == "light":
-                params |= light_params(request.light, address(target).component, target.state)
-            return await set_with_timer(self, target, params)
+            params |= light_params(request.light.without(dropped), component, target.state)
+            result = await set_with_timer(self, target, params)
+            return replace(result, detail="fields_dropped") if dropped and result.detail is None else result
 
         return await self.gather(hass, targets, send)

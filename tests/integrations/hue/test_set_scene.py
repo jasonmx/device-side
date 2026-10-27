@@ -5,7 +5,7 @@ from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.device_side.integrations.hue.transition_cache import transition_cache
 
-from ...conftest import call
+from ...conftest import call, refusal
 from ...fixtures.hue import add_hue_entity, hue_entry, light_action
 
 pytestmark = pytest.mark.usefixtures("setup_production")
@@ -54,8 +54,7 @@ async def test_single_light(hass, bridge, action, put):
     await scene(hass, bridge, light_action("light-1", **action))
 
     response = await call(hass, "set_scene", {"entity_id": "scene.relax"})
-
-    # A scene has no light fields, so the dispatcher stamps no light_fields_ignored on it.
+    # A scene has no light fields, so nothing is dropped and the result carries no detail.
     assert response == {"scene.relax": SENT}
     assert bridge.puts == [("light/light-1", put)]
 
@@ -94,21 +93,26 @@ async def test_actions_with_nothing_to_write_are_skipped(hass, bridge, action):
     assert bridge.puts == []
 
 
-@pytest.mark.parametrize(
-    ("smart", "detail"),
-    [pytest.param(True, "smart_scene", id="smart"), pytest.param(False, "scene_not_found", id="gone")],
-)
-async def test_smart_or_missing_scene_writes_nothing(hass, bridge, smart, detail):
+async def test_smart_scene_is_refused(hass, bridge):
+    # smart_scene is unsupported: a named target raises before anything is sent.
     bridge.light("light-1")
-    if smart:
-        bridge.scene("scene-1", [], smart=True)
+    bridge.scene("scene-1", [], smart=True)
+    entry = await hue_entry(hass, bridge)
+    add_hue_entity(hass, entry, "scene.relax", "scene-1")
+
+    assert await refusal(hass, "set_scene", {"entity_id": "scene.relax"}) == "smart_scene"
+    assert bridge.puts == []
+
+
+async def test_missing_scene_is_rejected(hass, bridge):
+    bridge.light("light-1")
     entry = await hue_entry(hass, bridge)
     add_hue_entity(hass, entry, "scene.relax", "scene-1")
 
     with pytest.raises(HomeAssistantError) as raised:
         await call(hass, "set_scene", {"entity_id": "scene.relax"})
 
-    assert raised.value.translation_placeholders["summary"] == f"scene.relax: {detail}"
+    assert raised.value.translation_placeholders["summary"] == "scene.relax: scene_not_found"
     assert bridge.puts == []
 
 
@@ -117,10 +121,7 @@ async def test_light_target_is_outside_the_action(hass, bridge):
     entry = await hue_entry(hass, bridge)
     add_hue_entity(hass, entry, "light.lamp", "light-1")
 
-    with pytest.raises(HomeAssistantError) as raised:
-        await call(hass, "set_scene", {"entity_id": "light.lamp"})
-
-    assert raised.value.translation_placeholders["summary"] == "light.lamp: domain_not_supported"
+    assert await refusal(hass, "set_scene", {"entity_id": "light.lamp"}) == "domain_not_supported"
 
 
 async def test_one_failing_light_does_not_stop_the_others(hass, bridge, caplog):
@@ -165,10 +166,7 @@ async def test_v1_bridge_is_refused(hass, bridge):
     entry = await hue_entry(hass, bridge, api_version=1)
     add_hue_entity(hass, entry, "scene.relax", "scene-1")
 
-    with pytest.raises(HomeAssistantError) as raised:
-        await call(hass, "set_scene", {"entity_id": "scene.relax"})
-
-    assert raised.value.translation_placeholders["summary"] == "scene.relax: bridge_v1"
+    assert await refusal(hass, "set_scene", {"entity_id": "scene.relax"}) == "bridge_v1"
 
 
 async def test_the_lights_written_forget_their_move_predictions(hass, bridge):

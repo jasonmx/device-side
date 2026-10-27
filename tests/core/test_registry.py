@@ -29,7 +29,7 @@ def test_matrix_lists_every_pair_sorted():
         ("move", "fake", False),
         ("move", "fake_special", False),
         ("set_attributes", "broken_integration", False),
-        ("set_attributes", "fake", False),
+        ("set_attributes", "fake", True),
         ("set_attributes", "fake_special", False),
         ("set_scene", "broken_integration", False),
         ("set_scene", "fake", False),

@@ -73,9 +73,7 @@ class Z2MTurnOnFor(Adapter[TurnOnForRequest]):
         self, hass: HomeAssistant, request: TurnOnForRequest, targets: list[Target]
     ) -> list[EntityResult]:
         async def send(target: Target) -> EntityResult:
-            set_topic = topic(target, "set")
-            if set_topic is None:  # defense in depth; supports() already refused this target
-                return self.result(target, Status.UNSUPPORTED, detail="not_addressable")
+            set_topic = topic(target, "set")  # supports() refused the targets it can't address
 
             if request.light.present() & COLOR_FIELDS:
                 await ensure_native_control(hass, target)

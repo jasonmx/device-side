@@ -8,7 +8,7 @@ import pytest
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.util.color import color_hs_to_xy, color_RGB_to_xy
 
-from ...conftest import call
+from ...conftest import call, refusal
 from ...fixtures.hue import add_hue_entity, add_hue_group, hue_entry
 
 pytestmark = pytest.mark.usefixtures("setup_production")
@@ -93,13 +93,12 @@ async def test_writes_while_off_without_turning_on(hass, bridge):
         pytest.param({"brightness": 40}, {"brightness": None, "mirek": None}, id="brightness_on_on_off_light"),
     ],
 )
-async def test_nothing_the_light_can_take_is_unsupported(hass, bridge, data, light):
+async def test_nothing_the_light_can_take_is_unchanged_with_fields_dropped(hass, bridge, data, light):
     await lamp(hass, bridge, **light)
 
-    with pytest.raises(HomeAssistantError) as raised:
-        await call(hass, "set_attributes", {"entity_id": "light.lamp", **data})
+    response = await call(hass, "set_attributes", {"entity_id": "light.lamp", **data})
 
-    assert raised.value.translation_placeholders["summary"] == "light.lamp: fields_not_supported"
+    assert response == {"light.lamp": {"status": "unchanged", "integration": "hue", "detail": "fields_dropped"}}
     assert bridge.puts == []
 
 
@@ -202,20 +201,27 @@ async def test_one_failing_light_does_not_stop_the_others(hass, bridge):
     add_hue_entity(hass, entry, "light.one", "light-1")
     add_hue_entity(hass, entry, "light.two", "light-2")
 
-    response = await call(hass, "set_attributes", {"entity_id": ["light.one", "light.two"], "brightness": 40})
+    with pytest.raises(HomeAssistantError) as raised:
+        await call(hass, "set_attributes", {"entity_id": ["light.one", "light.two"], "brightness": 40})
 
-    assert response == {"light.one": {"status": "rejected", "integration": "hue", "detail": "error"}, "light.two": SENT}
+    # Both targets run; the failure raises targets_failed, and the successful write still happened.
+    assert raised.value.translation_placeholders["summary"] == "light.one: error"
+    put_paths = [path for path, _ in bridge.puts]
+    assert "light/light-1" in put_paths  # attempted, failed
+    assert "light/light-2" in put_paths  # succeeded
 
 
-async def test_light_gone_from_the_bridge_is_rejected(hass, bridge):
+async def test_light_gone_from_the_bridge_raises_targets_failed(hass, bridge):
     bridge.light("light-1")
     entry = await hue_entry(hass, bridge)
     add_hue_entity(hass, entry, "light.lamp", "light-1")
     add_hue_entity(hass, entry, "light.gone", "light-gone")
 
-    response = await call(hass, "set_attributes", {"entity_id": ["light.lamp", "light.gone"], "brightness": 40})
+    with pytest.raises(HomeAssistantError) as raised:
+        await call(hass, "set_attributes", {"entity_id": ["light.lamp", "light.gone"], "brightness": 40})
 
-    assert response["light.gone"] == {"status": "rejected", "integration": "hue", "detail": "not_on_bridge"}
+    assert raised.value.translation_placeholders["summary"] == "light.gone: not_on_bridge"
+    assert bridge.puts == [("light/light-1", {"dimming": {"brightness": 40.0}})]
 
 
 async def test_room_is_written_light_by_light(hass, bridge):
@@ -234,7 +240,7 @@ async def test_room_is_written_light_by_light(hass, bridge):
     assert bridge.puts == [("light/light-1", color((0.369, 0.445))), ("light/light-2", color((0.369, 0.445)))]
 
 
-async def test_empty_room_is_unsupported(hass, bridge):
+async def test_empty_room_raises_no_entities_matched(hass, bridge):
     bridge.room("grouped-1", [])
     entry = await hue_entry(hass, bridge)
     add_hue_group(hass, entry, "light.room", "grouped-1", [])
@@ -242,19 +248,16 @@ async def test_empty_room_is_unsupported(hass, bridge):
     with pytest.raises(HomeAssistantError) as raised:
         await call(hass, "set_attributes", {"entity_id": "light.room", "brightness": 40})
 
-    assert raised.value.translation_placeholders["summary"] == "light.room: empty_group"
+    # empty_group is skipped silently; no targets ran, and the caller asked for a response.
+    assert raised.value.translation_key == "no_entities_matched"
 
 
 async def test_v1_bridge_is_refused(hass, bridge):
     bridge.light("light-1")
     entry = await hue_entry(hass, bridge, api_version=1)
     add_hue_entity(hass, entry, "light.lamp", "light-1")
-    add_hue_group(hass, entry, "light.room", "grouped-1", ["light.lamp"])
 
-    with pytest.raises(HomeAssistantError) as raised:
-        await call(hass, "set_attributes", {"entity_id": ["light.lamp", "light.room"], "brightness": 40})
-
-    assert raised.value.translation_placeholders["summary"] == "light.lamp: bridge_v1, light.room: bridge_v1"
+    assert await refusal(hass, "set_attributes", {"entity_id": "light.lamp", "brightness": 40}) == "bridge_v1"
     assert bridge.puts == []
 
 

@@ -23,8 +23,7 @@ class ShellyTurnOffFor(Adapter[TimedRequest]):
     )
 
     def supports(self, hass: HomeAssistant, request: TimedRequest, target: Target) -> str | None:
-        capabilities = self.scope.capabilities
-        return super().supports(hass, request, target) or unsupported_reason(target, capabilities=capabilities)
+        return super().supports(hass, request, target) or unsupported_reason(target, self.scope.capabilities)
 
     async def execute(self, hass: HomeAssistant, request: TimedRequest, targets: list[Target]) -> list[EntityResult]:
         async def send(target: Target) -> EntityResult:
