@@ -1,7 +1,7 @@
 # move.yaml's fades with predicted_state on: HA's state shows device_side's predictions, so these checks read HA, in
 # 0-255 (20 % is 51, 60 % is 153, 80 % is 204).
 action: move
-rig_seconds: 300
+rig_seconds: 330
 options: [predicted_state]
 tests:
   - name: holds_the_start_then_shows_the_end  # 20 % to full takes 8 s
@@ -42,3 +42,18 @@ tests:
       - set: {state: on, brightness_pct: 80}
       - wait: 7
       - expect_state: {state: on, brightness: {min: 200, max: 208}}
+
+  - name: bridge_scene_recall_mid_fade_shows_at_once  # a soft off hides the lights' reports; the recall must end that
+    roles: [group]
+    setup:
+      - set: {state: on, brightness_pct: 100}
+    steps:
+      - call: {brightness: down, sweep_time: 10}
+      - wait: 2
+      - bridge: {target: scene, recall: true}
+      - wait: 12  # past the soft off's end, which would show the zone off
+      - expect_state: {state: on}
+    observe:
+      see: The zone fading down from full; 2 s in, the zone's scene is recalled on the Hue bridge.
+      watch: The lights at the recall, and HA's light card for the zone once 10 s have passed.
+      ask: Did the lights change to the scene and stay on, with HA showing the zone on?
