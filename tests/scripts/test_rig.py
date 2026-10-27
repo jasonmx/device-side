@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 
 from custom_components.device_side.core.registry import AdapterRegistry
-from scripts.fingerprint import adapter_path, fingerprint
 from tests.rig.engine import load_step_file, load_step_files
 from tests.rig.inventory import Inventory, load_env, main_checkout
 
@@ -124,7 +123,7 @@ def test_load_env_reads_command_vars(tmp_path, monkeypatch):
     assert "RIG_RESTART_CMD" not in env
 
 
-def test_select_plan_lines_and_estimate(inventory, tmp_path):
+def test_select_plan_lines_and_estimate(inventory):
     step_files = [step_file for step_file in load_step_files() if step_file.action in ("turn_off_for", "turn_on_for")]
     suites = rig.select(step_files, inventory, None)
     assert [(suite.integration, suite.action) for suite in suites] == [
@@ -134,17 +133,8 @@ def test_select_plan_lines_and_estimate(inventory, tmp_path):
 
     registry = AdapterRegistry.discover()
     shelly_on = [suite for suite in suites if suite.integration == "shelly" and suite.action == "turn_on_for"]
-    bench = tmp_path / "bench"
-    (bench / "shelly").mkdir(parents=True)
-    current = fingerprint(adapter_path(registry.adapter("turn_on_for", "shelly")))
-    write(
-        bench / "shelly",
-        "turn_on_for.md",
-        f"| Result | pass |\n| Fingerprint | `{current}` |\n| Capabilities | `RGBCCT`, `Switch` |\n"
-        "| Fields | `brightness`, `color_temp_kelvin`, `rgb_color`, `transition` |\n",
-    )
-    assert rig.plan_lines(shelly_on + suites[1:2], inventory, registry, bench_dir=bench) == [
-        "shelly / turn_on_for -> switch.plug (beta)",
+    assert rig.plan_lines(shelly_on + suites[1:2], inventory, registry) == [
+        "shelly / turn_on_for -> switch.plug",
         "    on_then_off[switch_plug]: switch.plug",
         "    on_then_off[light_onoff]: no light_onoff entity in inventory",
         "    on_then_off[light_wrapped]: no light_wrapped entity in inventory",
@@ -158,9 +148,8 @@ def test_select_plan_lines_and_estimate(inventory, tmp_path):
         "    rgbcct_bulb_rgb_then_off[light_color] observed: no light_color entity in inventory",
         "hue / turn_off_for (no adapter, will skip)",
     ]
-    # The tier is check_tiers': with no records, nothing is proven.
-    assert rig.plan_lines(shelly_on, inventory, registry, "on_then", bench_dir=tmp_path) == [
-        "shelly / turn_on_for -> switch.plug (untested)",
+    assert rig.plan_lines(shelly_on, inventory, registry, "on_then") == [
+        "shelly / turn_on_for -> switch.plug",
         "    on_then_off[switch_plug]: switch.plug",
         "    on_then_off[light_onoff]: no light_onoff entity in inventory",
         "    on_then_off[light_wrapped]: no light_wrapped entity in inventory",

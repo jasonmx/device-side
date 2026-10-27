@@ -77,8 +77,6 @@ Once an integration's A60 visit has passed, any change to that integration's pac
 - the bulb goes back for a re-run, or
 - the colour fields leave that adapter's scope for the release.
 
-When choosing a fix, prefer one in `core/`, because the fingerprint doesn't cover core.
-
 ## Critical files
 
 - Core: `actions/get_attributes.py`, a new timer-row helper in `core/`, `services.yaml`, `strings.json`,
@@ -96,10 +94,10 @@ When choosing a fix, prefer one in `core/`, because the fingerprint doesn't cove
 
 ## Verification
 
-- Every PR: `.venv/bin/pytest`, `pre-commit run --all-files`, `scripts/check_tiers.py --coverage`. New adapters
-  are experimental, so coverage reaches the 95% bar before 13k removes the flag.
+- Every PR: `.venv/bin/pytest`, `pre-commit run --all-files`, `scripts/check_release.py --coverage`. New adapters
+  are experimental, and meet the 95% coverage bar like every other adapter.
 - 13a: the probe script's output tables are the evidence. No adapter is written before them.
 - Each adapter: a rig run (`scripts/rig.py`, in the background, one at a time) writes a bench record. Attended
   steps are briefed and gated on the maintainer's go.
-- 13k end state: `scripts/check_tiers.py --require-beta` shows every adapter `beta` with current fingerprints and
-  no `light_color` skips in any record. That's the v0.1.0 entry condition this slice adds.
+- 13k end state: `scripts/check_release.py --release` passes (no adapter experimental), each flag cleared by a PR
+  citing its records, and no `light_color` skips in any record. That's the v0.1.0 entry condition this slice adds.

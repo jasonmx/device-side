@@ -75,8 +75,6 @@ class FakeHA:
         }
         self.respond = respond
         self.calls: list[tuple[str, str, dict]] = []
-        # Registry unique_ids; any other entity reads as a Shelly component named after its domain (switch:0).
-        self.unique_ids: dict[str, str] = {}
 
     def set(self, entity_id: str, state: str, **attributes) -> None:
         # HA keeps an entity's name whatever its state; every other attribute is the new state's own.
@@ -112,10 +110,6 @@ class FakeHA:
         return state
 
     async def command(self, payload: dict):
-        if payload["type"] == "config/entity_registry/get":
-            entity_id = payload["entity_id"]
-            domain = entity_id.partition(".")[0]
-            return {"entity_id": entity_id, "unique_id": self.unique_ids.get(entity_id, f"00aa-{domain}:0")}
         return {
             "get_config": {"version": "2026.10.1"},
             "config/entity_registry/list_for_display": {"entities": [{"ei": "switch.plug", "di": "d1"}]},
@@ -156,7 +150,6 @@ async def test_a_timed_on_off_passes_and_restores(tmp_path):
     assert outcomes(result) == {"on_then_off[switch_plug]": (Outcome.PASS, "")}
     assert ("device_side", "turn_on_for", {"entity_id": "switch.plug", "duration": {"seconds": 0.6}}) in ha.calls
     assert ha.calls[-1] == ("switch", "turn_on", {"entity_id": "switch.plug"})
-    assert result.suites[0].cases[0].reached
     assert not result.failed
 
 
@@ -209,7 +202,6 @@ async def test_a_refusal_passes_when_key_summary_and_state_match(tmp_path):
     ha = FakeHA({"light.lamp": {"state": "on"}}, refuse("fields_not_supported"))
     result = await run_one(ha, suite(tmp_path, REFUSAL), inventory(light_wrapped="light.lamp"))
     assert outcomes(result) == {"refuses[light_wrapped]": (Outcome.PASS, "")}
-    assert not result.suites[0].cases[0].reached
 
 
 async def test_an_expect_error_mismatch_fails_naming_both_summaries(tmp_path):
@@ -272,7 +264,6 @@ tests:
     result = await run_one(ha, suite(tmp_path, text, "hue"), inventory("hue", light_ct="light.lamp"))
 
     assert outcomes(result)["reads[light_ct]"][0] is outcome
-    assert result.suites[0].cases[0].reached
 
 
 async def test_an_off_light_gets_its_device_side_attributes_back(tmp_path):
@@ -356,7 +347,6 @@ async def test_unattended_reports_observed_cases_not_observed_and_proves_nothing
     assert result.suites[0].proven == []
     assert not result.suites[0].recordable
     record = render_record(result.suites[0], "Shelly", "2026.10.1", [], "2026-10-25", "test")
-    assert "| Capabilities | none |" in record
     assert "| `on_then_off[switch_plug] observed` | `switch` (switch_plug) | not observed |" in record
 
 
@@ -749,60 +739,6 @@ async def test_a_group_fails_on_a_lagging_member(tmp_path):
     assert detail.startswith("step 4 (expect_state): light.b: expected {'state': 'on'}")
 
 
-async def test_fields_in_scope_count_only_when_the_call_reaches_the_device(tmp_path):
-    text = """
-action: turn_on_for
-rig_seconds: 5
-tests:
-  - name: dims
-    roles: [light_dimmable]
-    steps:
-      - call: {duration: 6, brightness: 128, transition: 1}
-      - expect_response: {status: expected}
-"""
-    scope = SimpleNamespace(confirmable=False, capabilities=None, fields=frozenset({"brightness"}), options=frozenset())
-    registry = SimpleNamespace(adapter=lambda action, integration: SimpleNamespace(scope=scope))
-
-    def sent(ha, action, data):
-        return {data["entity_id"]: {"status": "sent"}}
-
-    result = await run_one(
-        FakeHA({"light.lamp": {}}, sent),
-        suite(tmp_path, text, "fake"),
-        inventory("fake", light_dimmable="light.lamp"),
-        registry=registry,
-    )
-    case = result.suites[0].cases[0]
-    assert (case.outcome, case.fields, case.reached) == (Outcome.PASS, frozenset({"brightness"}), True)
-
-
-async def test_a_call_to_another_action_proves_nothing_for_the_suite(tmp_path):
-    text = """
-action: stop
-rig_seconds: 5
-tests:
-  - name: halts
-    roles: [light_dimmable]
-    steps:
-      - call: {action: move, brightness: up}
-      - call: {}
-"""
-    scope = SimpleNamespace(confirmable=False, capabilities=None, fields=frozenset({"brightness"}), options=frozenset())
-    registry = SimpleNamespace(adapter=lambda action, integration: SimpleNamespace(scope=scope))
-
-    def respond(ha, action, data):
-        return {data["entity_id"]: {"status": "sent" if action == "move" else "unchanged"}}
-
-    result = await run_one(
-        FakeHA({"light.lamp": {"state": "on"}}, respond),
-        suite(tmp_path, text, "fake"),
-        inventory("fake", light_dimmable="light.lamp"),
-        registry=registry,
-    )
-    case = result.suites[0].cases[0]
-    assert (case.outcome, case.fields, case.reached) == (Outcome.PASS, frozenset(), False)
-
-
 SAMPLE = """
 action: turn_on_for
 rig_seconds: 5
@@ -930,56 +866,16 @@ async def test_a_full_pass_writes_a_record_and_a_failure_writes_none(tmp_path):
     ha = FakeHA({"switch.plug": {}}, timer_on)
     steps = suite(tmp_path, ON_THEN_OFF)
     passed = await run_one(ha, steps, inventory(switch_plug="switch.plug"))
-    failed = RunResult([SuiteResult(steps, passed.suites[0].adapter, [], complete=True)])
+    failed = RunResult([SuiteResult(steps, [], complete=True)])
     assert await write_records(failed, ha, REGISTRY, tmp_path / "bench", "2026-10-25", "test") == []
 
     [path] = await write_records(passed, ha, REGISTRY, tmp_path / "bench", "2026-10-25", "rig run")
     assert path == tmp_path / "bench" / "shelly" / "turn_on_for.md"
     record = path.read_text()
     assert record.startswith("# Shelly · turn_on_for\n")
-    assert "| Fingerprint | `" in record and "(`integrations/shelly/turn_on_for.py`) |" in record
     assert "| Device | Mini (`S3`), firmware `2.0` |" in record
-    assert "| Capabilities | `Switch` |" in record  # what the cases reached, though RGBCCT is in scope too
-    assert "| Fields | none |" in record
     assert "| `on_then_off[switch_plug]` | `switch` (switch_plug) | pass |" in record
     assert "switch.plug" not in record
-
-
-async def test_a_record_lists_only_the_capabilities_its_calls_reached(tmp_path):
-    scope = SimpleNamespace(
-        confirmable=True, capabilities=frozenset({"Switch", "RGBCCT"}), fields=frozenset(), options=frozenset()
-    )
-    shelly = REGISTRY.adapter("turn_on_for", "shelly")
-    registry = SimpleNamespace(
-        adapter=lambda action, integration: SimpleNamespace(scope=scope) if action == "turn_on_for" else None
-    )
-    text = ON_THEN_OFF.replace("roles: [switch_plug]", "roles: [switch_plug, light_color]")
-
-    async def record(**unique_ids: str) -> str:
-        ha = FakeHA({"switch.plug": {}, "light.bulb": {}}, timer_on)
-        ha.unique_ids = unique_ids
-        inv = inventory(switch_plug="switch.plug", light_color="light.bulb")
-        result = await run_one(ha, suite(tmp_path, text), inv, registry=registry)
-        assert {case.outcome for case in result.suites[0].cases} == {Outcome.PASS}
-        result.suites[0].adapter = shelly
-        return render_record(result.suites[0], "Shelly", "2026.10.1", [], "2026-10-25", "test")
-
-    # The bulb is a Shelly Switch shown as a light: the run never reached RGBCCT, though the scope holds it.
-    assert "| Capabilities | `Switch` |" in await record(**{"light.bulb": "00aa-switch:1"})
-    assert "| Capabilities | `RGBCCT`, `Switch` |" in await record(**{"light.bulb": "00aa-rgbcct:0"})
-
-
-async def test_a_capability_the_adapter_cannot_address_fails_the_case(tmp_path):
-    scope = SimpleNamespace(
-        confirmable=True, capabilities=frozenset({"Switch"}), fields=frozenset(), options=frozenset()
-    )
-    registry = SimpleNamespace(adapter=lambda action, integration: SimpleNamespace(scope=scope))
-    ha = FakeHA({"switch.plug": {}}, timer_on)
-    ha.unique_ids = {"switch.plug": "00aa-script:0"}
-    result = await run_one(ha, suite(tmp_path, ON_THEN_OFF), inventory(switch_plug="switch.plug"), registry=registry)
-    outcome, detail = outcomes(result)["on_then_off[switch_plug]"]
-    assert outcome is Outcome.FAIL
-    assert "switch.plug is not a Shelly component the adapter addresses" in detail
 
 
 def header(role: str) -> str:
@@ -1349,20 +1245,15 @@ def test_a_step_file_lists_options_by_name(tmp_path):
         load_step_file(path)
 
 
-async def test_a_record_with_options_on_is_named_and_marked_for_them(tmp_path):
-    adapter = REGISTRY.adapter("move", "hue")
+async def test_a_record_with_options_on_is_named_for_them(tmp_path):
     steps = suite(tmp_path, option_file("predicted_state"), "hue")
-    case = CaseResult("t[light_ct]", "light_ct", "light", Outcome.PASS, reached=True)
-    result = RunResult([SuiteResult(steps, adapter, [case], complete=True)])
+    case = CaseResult("t[light_ct]", "light_ct", "light", Outcome.PASS)
+    result = RunResult([SuiteResult(steps, [case], complete=True)])
 
     [path] = await write_records(result, FakeHA({}), REGISTRY, tmp_path / "bench", "2026-10-27", "rig run")
 
     assert path == tmp_path / "bench" / "hue" / "move-predicted_state.md"
-    assert "| Options | `predicted_state` |" in path.read_text()
-    plain = render_record(
-        SuiteResult(suite(tmp_path, option_file(), "hue"), adapter, [case], True), "Hue", "", [], "", ""
-    )
-    assert "Options" not in plain
+    assert path.read_text().startswith("# Hue · move-predicted_state\n")
 
 
 # --- bridge ---------------------------------------------------------------------------------------------------
