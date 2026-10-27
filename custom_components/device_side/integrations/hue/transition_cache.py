@@ -20,10 +20,13 @@ from homeassistant.core import HomeAssistant
 from ...core.runtime import get_runtime
 
 BRIGHTNESS = "brightness"
+COLOR_TEMP = "color_temp"  # in mirek
 # How long after a move ends (or a stop) the bridge's report still can't be trusted.
 API_SETTLE_SECONDS = 15
 # The dimmest step a Hue light makes (1/254), in percent.
 MIN_BRIGHTNESS_STEP = 0.4
+# The smallest color temperature step the bridge takes, in mirek.
+MIN_MIREK_STEP = 1
 
 
 @dataclass(frozen=True, slots=True)

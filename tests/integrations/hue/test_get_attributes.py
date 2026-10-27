@@ -7,6 +7,8 @@ import pytest
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util.color import color_xy_to_hs, color_xy_to_RGB
 
+from custom_components.device_side.integrations.hue.transition_cache import COLOR_TEMP, transition_cache
+
 from ...conftest import call
 from ...fixtures.hue import add_hue_entity, add_hue_group, hue_entry
 
@@ -143,3 +145,22 @@ async def test_v1_bridge_is_refused(hass, bridge):
         await call(hass, "get_attributes", {"entity_id": "light.lamp"})
 
     assert raised.value.translation_placeholders["summary"] == "light.lamp: bridge_v1"
+
+
+async def test_color_temp_reads_the_prediction_mid_move(hass, bridge, clock):
+    # The bridge reports the end value at once; the light and room rows read where the lights are.
+    await room(
+        hass,
+        bridge,
+        {"one": {"on": True, "mirek": 454}, "two": {"on": True, "mirek": 454}, "three": {"on": True, "mirek": None}},
+    )
+    cache = transition_cache(hass)
+    cache.moving("one", COLOR_TEMP, 254.0, 454.0, 10.0)
+    cache.moving("two", COLOR_TEMP, 354.0, 454.0, 10.0)
+    clock.now += 5.0  # one at 354, two at 404
+
+    response = await call(hass, "get_attributes", {"entity_id": ["light.room", "light.one", "light.two"]})
+
+    assert response["light.one"]["color_temp_kelvin"] == 2824
+    assert response["light.two"]["color_temp_kelvin"] == 2475
+    assert response["light.room"]["color_temp_kelvin"] == 2650

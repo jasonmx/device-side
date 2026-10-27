@@ -1,10 +1,12 @@
 """The core hue integration's bridge, through aiohue's v2 API: the bridge behind a target, group members, writes."""
 
+from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
+from .transition_cache import BRIGHTNESS, COLOR_TEMP
 from ...core.models import Target
 from ...core.resolver import resolve
 from ...core.runtime import get_runtime
@@ -13,6 +15,9 @@ if TYPE_CHECKING:
     from aiohue.v2 import HueBridgeV2
     from aiohue.v2.controllers.groups import GroupedLightController
     from aiohue.v2.controllers.lights import LightsController
+
+# The delta object whose stop halts each attribute's fade.
+DELTAS = {BRIGHTNESS: "dimming_delta", COLOR_TEMP: "color_temperature_delta"}
 
 
 def bridge_api(target: Target) -> HueBridgeV2 | None:
@@ -73,3 +78,14 @@ async def write_light(
 ) -> None:
     """One PUT to one light; the bridge stores what it is sent whether the light is on or off. Raises on failure."""
     await api.lights.set_state(light_id, on=on, brightness=brightness, color_temp=color_temp_mirek, color_xy=color_xy)
+
+
+def stops(attributes: Iterable[str]) -> dict:
+    """The PUT body fields that halt these attributes' fades where they are."""
+    return {DELTAS[attribute]: {"action": "stop"} for attribute in attributes}
+
+
+async def put(api: HueBridgeV2, writer: LightsController | GroupedLightController, rid: str, body: dict) -> None:
+    """One raw CLIP v2 PUT to the light or grouped_light, for what aiohue has no model of (a color temperature stop).
+    Raises on failure."""
+    await api.request("put", f"clip/v2/resource/{writer.item_type.value}/{rid}", json=body)

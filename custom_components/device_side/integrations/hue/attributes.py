@@ -2,13 +2,13 @@
 
 A report key names one value in a light's or grouped_light's event ("on", "brightness"). A write of an attribute makes
 the bridge report the keys that attribute owns, and only those: a brightness move reports on and brightness, never a
-color temperature (Tested behavior in docs/integrations.md).
+color temperature, and a color temperature move only mirek (Tested behavior in docs/integrations.md).
 """
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
-from .transition_cache import BRIGHTNESS
+from .transition_cache import BRIGHTNESS, COLOR_TEMP
 
 # Where each report key sits in an event, as (object, field): every key an attribute owns or could own.
 REPORT_KEYS: dict[str, tuple[str, str]] = {
@@ -22,7 +22,9 @@ REPORT_KEYS: dict[str, tuple[str, str]] = {
 @dataclass(frozen=True, slots=True)
 class Attribute:
     keys: frozenset[str]  # the report keys a write of it makes the bridge report
-    shows: Callable[[float], dict[str, float | bool]]  # the report keys' values that show a value of it
+    # The report keys' values that show a value of it, with predicted_state on; None for one HA is shown the bridge's
+    # reports of, which are only told apart from a change made elsewhere.
+    shows: Callable[[float], dict[str, float | bool]] | None
 
 
 def _brightness(value: float) -> dict[str, float | bool]:
@@ -30,7 +32,10 @@ def _brightness(value: float) -> dict[str, float | bool]:
     return {"on": True, BRIGHTNESS: value} if value > 0 else {"on": False}
 
 
-ATTRIBUTES: dict[str, Attribute] = {BRIGHTNESS: Attribute(frozenset({"on", BRIGHTNESS}), _brightness)}
+ATTRIBUTES: dict[str, Attribute] = {
+    BRIGHTNESS: Attribute(frozenset({"on", BRIGHTNESS}), _brightness),
+    COLOR_TEMP: Attribute(frozenset({"mirek"}), None),
+}
 
 
 def reported_values(event: dict) -> dict[str, float | bool]:

@@ -2,7 +2,7 @@
 # stop.yaml. Each test runs on a lamp and then a room; on the room, expect_state checks every member light.
 # HA shows a Hue fade's end value at once, so samples read device_side's prediction, in percent.
 action: move
-rig_seconds: 560
+rig_seconds: 900
 tests:
   - name: raise  # §2.1
     roles: [light_ct, group]
@@ -131,3 +131,77 @@ tests:
       - wait: 10
       - call: {brightness: up, sweep_time: 10}
       - sample: {attribute: brightness, for: 2, expect: rising, min: 30, max: 65, source: device_side}
+
+  # Color temperature: 153 to 454 mirek (6500 K to 2200 K) on the rig's bulbs. Kelvin falls as a light warms.
+  - name: warmer
+    roles: [light_ct, group]
+    setup:
+      - set: {state: on, brightness_pct: 50, color_temp_kelvin: 4000}
+    steps:
+      - call: {color_temp: warmer, sweep_time: 5}  # 250 to 454 mirek takes 3.4 s
+      - expect_response: {status: expected, integration: self}
+      - sample: {attribute: color_temp_kelvin, for: 2, expect: falling, source: device_side}
+      - wait: 1.5 + tol
+      - sample: {attribute: color_temp_kelvin, for: 0.5, expect: steady, max: 2210, source: device_side}
+      - expect_state: {state: on, color_temp_kelvin: {max: 2210}}
+
+  - name: cooler_to_a_limit
+    roles: [light_ct, group]
+    setup:
+      - set: {state: on, brightness_pct: 50, color_temp_kelvin: 2700}
+    steps:
+      - call: {color_temp: cooler, color_temp_limit: 4000, sweep_time: 5}  # 370 to 250 mirek takes 2 s
+      - expect_response: {status: expected, integration: self}
+      - wait: 2 + tol
+      - sample: {attribute: color_temp_kelvin, for: 0.5, expect: steady, min: 3950, max: 4050, source: device_side}
+      - expect_state: {state: on, color_temp_kelvin: {min: 3950, max: 4050}}
+
+  - name: warmer_stop_warmer
+    roles: [light_ct, group]
+    setup:
+      - set: {state: on, brightness_pct: 50, color_temp_kelvin: 6500}
+    steps:
+      - call: {color_temp: warmer, sweep_time: 10}  # 30 mirek a second: about 243 mirek (4100 K) after 3 s
+      - wait: 3
+      - call: {action: stop}
+      - expect_response: {status: expected}
+      - sample: {attribute: color_temp_kelvin, for: 4, expect: steady, min: 3700, max: 4600, source: device_side}
+      - call: {color_temp: warmer, sweep_time: 10}
+      - sample: {attribute: color_temp_kelvin, for: 2, expect: falling, min: 3000, max: 4600, source: device_side}
+    observe:
+      see: 'The light in cool white: a slow warming for 3 s, a 4 s hold, then the warming again.'
+      watch: 'The hold and the restart: no drift while held, no jump when it resumes.'
+      ask: Did it hold where it stopped, then carry on warming from that point?
+
+  - name: color_temp_at_limit
+    roles: [light_ct, group]
+    setup:
+      - set: {state: on, brightness_pct: 50, color_temp_kelvin: 2000}  # clamped to the warmest the bulb makes
+    steps:
+      - call: {color_temp: warmer}
+      - expect_response: {status: unchanged, integration: self, detail: at_limit}
+
+  - name: color_temp_on_off_light
+    roles: [light_ct, group]
+    setup:
+      - set: {state: off}
+    steps:
+      - call: {color_temp: warmer}
+      - expect_response: {status: unchanged, integration: self, detail: off}
+      - expect_state: {state: off}
+
+  - name: brighter_and_cooler  # two writes, each with its own duration: the bridge runs them independently
+    roles: [light_ct, group]
+    setup:
+      - set: {state: on, brightness_pct: 20, color_temp_kelvin: 2700}
+    steps:
+      - call: {brightness: up, color_temp: cooler, sweep_time: 10}  # brightness takes 8 s, color temperature 7.2 s
+      - expect_response: {status: expected, integration: self}
+      - sample: {attribute: brightness, for: 2, expect: rising, max: 50, source: device_side}
+      - sample: {attribute: color_temp_kelvin, for: 2, expect: rising, max: 4500, source: device_side}
+      - wait: 4 + tol
+      - expect_state: {state: on, brightness: {min: 250}, color_temp_kelvin: {min: 6400}}
+    observe:
+      see: The light dim and warm, brightening to full and cooling to daylight white together over about 8 s.
+      watch: Whether both change all the way through, rather than one jumping or stalling.
+      ask: Did it brighten and cool smoothly at the same time, with neither jumping?

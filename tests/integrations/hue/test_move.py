@@ -1,5 +1,5 @@
-"""Hue move and stop for brightness: one PUT per light or room, ported from hue_dimmer's test_core and
-test_transition_errors."""
+"""Hue move and stop: one PUT per attribute to a light or room, ported from hue_dimmer's test_core and
+test_transition_errors, and color temperature."""
 
 import pytest
 from aiohue.v2.controllers.events import EventType
@@ -163,7 +163,7 @@ async def test_light_without_dimming_is_unsupported(hass, bridge):
 @pytest.mark.parametrize(
     ("data", "reason"),
     [
-        pytest.param({"color_temp": "warmer"}, "fields_not_tested", id="color_temp_not_yet"),
+        pytest.param({"saturation": "up"}, "fields_not_tested", id="saturation_not_yet"),
         pytest.param({"hue": "up"}, "fields_not_tested", id="hue_unsupported_on_hue"),
     ],
 )
@@ -502,3 +502,181 @@ async def test_the_fade_is_timed_from_when_the_write_was_sent(hass, bridge, cloc
     await call(hass, "move", {"entity_id": entity_id, "brightness": "up", "sweep_time": 10})
 
     assert transition_cache(hass).value("light-1", "brightness", 0.0) == pytest.approx(25.0)
+
+
+# 153 to 454 mirek is 301 wide, so at this sweep time each mirek takes 0.1 s.
+CT_SWEEP = 30.1
+
+
+def ct_put(mirek: int, duration_ms: int) -> dict:
+    return {"color_temperature": {"mirek": mirek}, "dynamics": {"duration": duration_ms}}
+
+
+BOTH_STOPS = {"dimming_delta": {"action": "stop"}, "color_temperature_delta": {"action": "stop"}}
+
+
+@pytest.mark.parametrize(
+    ("data", "put"),
+    [
+        pytest.param({"color_temp": "warmer"}, ct_put(454, 8400), id="warmer_to_the_range_end"),
+        pytest.param({"color_temp": "cooler"}, ct_put(153, 21700), id="cooler_to_the_range_end"),
+        pytest.param({"color_temp": "cooler", "color_temp_limit": 4000}, ct_put(250, 12000), id="cooler_to_a_limit"),
+        pytest.param({"color_temp": "warmer", "color_temp_limit": 2000}, ct_put(454, 8400), id="limit_past_the_range"),
+    ],
+)
+async def test_color_temp_writes_the_end_point_with_the_time_left(hass, bridge, data, put):
+    entity_id = await lamp(hass, bridge)  # at 370 mirek
+
+    response = await call(hass, "move", {"entity_id": entity_id, "sweep_time": CT_SWEEP, **data})
+
+    assert response == {entity_id: SENT}
+    assert bridge.puts == [("light/light-1", put)]
+
+
+@pytest.mark.parametrize(
+    ("mirek", "data"),
+    [
+        pytest.param(454, {"color_temp": "warmer"}, id="at_the_warm_end"),
+        pytest.param(300, {"color_temp": "cooler", "color_temp_limit": 2700}, id="already_past_the_limit"),
+    ],
+)
+async def test_color_temp_at_the_limit_sends_nothing(hass, bridge, mirek, data):
+    entity_id = await lamp(hass, bridge, mirek=mirek)
+
+    response = await call(hass, "move", {"entity_id": entity_id, **data})
+
+    assert response == {entity_id: {"status": "unchanged", "integration": "hue", "detail": "at_limit"}}
+    assert bridge.puts == []
+
+
+@pytest.mark.parametrize(
+    ("target", "data"),
+    [
+        pytest.param("light", {"color_temp": "warmer"}, id="light"),
+        pytest.param("room", {"color_temp": "warmer"}, id="room"),
+        pytest.param("light", {"color_temp": "warmer", "brightness": "down"}, id="with_brightness_down"),
+    ],
+)
+async def test_color_temp_on_an_off_light_sends_nothing(hass, bridge, target, data):
+    entity_id = await (lamp if target == "light" else room)(hass, bridge, state="off")
+
+    response = await call(hass, "move", {"entity_id": entity_id, **data})
+
+    assert response == {entity_id: {"status": "unchanged", "integration": "hue", "detail": "off"}}
+    assert bridge.puts == []
+
+
+async def test_brightness_up_and_color_temp_from_off_are_two_writes(hass, bridge):
+    # The bridge runs them independently, each over its own duration; brightness first, as it turns the light on.
+    entity_id = await lamp(hass, bridge, state="off")
+
+    await call(
+        hass, "move", {"entity_id": entity_id, "brightness": "up", "color_temp": "warmer", "sweep_time": CT_SWEEP}
+    )
+
+    assert bridge.puts == [
+        ("light/light-1", move_put(100.0, 30100, on=True)),
+        ("light/light-1", ct_put(454, 8400)),
+    ]
+
+
+async def test_an_attribute_at_its_limit_is_left_out(hass, bridge):
+    entity_id = await lamp(hass, bridge, brightness_pct=99.9)
+
+    response = await call(
+        hass, "move", {"entity_id": entity_id, "brightness": "up", "color_temp": "warmer", "sweep_time": CT_SWEEP}
+    )
+
+    assert response == {entity_id: SENT}
+    assert bridge.puts == [("light/light-1", ct_put(454, 8400))]
+
+
+@pytest.mark.parametrize(
+    ("light", "reason"),
+    [
+        pytest.param({"mirek": None}, "fields_not_supported", id="no_color_temperature"),
+        pytest.param({"mirek_valid": False}, "not_in_color_temp_mode", id="in_color_mode"),
+    ],
+)
+async def test_color_temp_refused(hass, bridge, light, reason):
+    entity_id = await lamp(hass, bridge, **light)
+
+    with pytest.raises(HomeAssistantError) as raised:
+        await call(hass, "move", {"entity_id": entity_id, "color_temp": "warmer"})
+
+    assert raised.value.translation_placeholders["summary"] == f"light.lamp: {reason}"
+    assert bridge.puts == []
+
+
+async def test_a_room_heads_for_its_widest_range_each_light_to_its_own_end(hass, bridge, clock):
+    bridge.light("one", on=True, mirek=300)
+    bridge.light("two", on=True, mirek=300, mirek_schema={"mirek_minimum": 200, "mirek_maximum": 400})
+    bridge.room("grouped-1", ["one", "two"], brightness=50.0)
+    entry = await hue_entry(hass, bridge)
+    members = [add_hue_entity(hass, entry, f"light.{light_id}", light_id, state="on") for light_id in ("one", "two")]
+    add_hue_group(hass, entry, "light.room", "grouped-1", members)
+
+    await call(hass, "move", {"entity_id": "light.room", "color_temp": "warmer", "sweep_time": CT_SWEEP})
+    clock.now += 15.4
+    response = await call(hass, "get_attributes", {"entity_id": ["light.room", *members]})
+
+    assert bridge.puts == [("grouped_light/grouped-1", ct_put(454, 15400))]
+    assert response["light.one"]["color_temp_kelvin"] == 2202  # 454 mirek
+    assert response["light.two"]["color_temp_kelvin"] == 2500  # 400 mirek, its own warm end
+    assert response["light.room"]["color_temp_kelvin"] == 2351
+
+
+@pytest.mark.parametrize(("target", "path"), [("light", "light/light-1"), ("room", "grouped_light/grouped-1")])
+async def test_color_temp_stop_halts_and_the_next_move_continues(hass, bridge, clock, target, path):
+    entity_id = await (lamp if target == "light" else room)(hass, bridge)
+    await call(hass, "move", {"entity_id": entity_id, "color_temp": "warmer", "sweep_time": CT_SWEEP})
+    clock.now += 3  # 30 mirek warmer: 400
+
+    await call(hass, "stop", {"entity_id": entity_id})
+    clock.now += 5
+    read = await call(hass, "get_attributes", {"entity_id": entity_id})
+    await call(hass, "move", {"entity_id": entity_id, "color_temp": "warmer", "sweep_time": CT_SWEEP})
+
+    assert bridge.puts[1] == (path, BOTH_STOPS)
+    assert read[entity_id]["color_temp_kelvin"] == 2500
+    assert bridge.puts[2] == (path, ct_put(454, 5400))
+
+
+async def test_a_brightness_stop_leaves_color_temp_alone(hass, bridge):
+    entity_id = await lamp(hass, bridge)
+    await call(hass, "move", {"entity_id": entity_id, "brightness": "up"})
+
+    await call(hass, "stop", {"entity_id": entity_id})
+
+    assert bridge.puts[1] == ("light/light-1", STOP)
+
+
+async def test_the_soft_off_cut_carries_the_color_temp_stop(hass, bridge, clock):
+    entity_id = await lamp(hass, bridge, brightness_pct=100.0)
+    await call(hass, "move", {"entity_id": entity_id, "brightness": "down", "color_temp": "cooler", "sweep_time": 10})
+    report_off(bridge, "light-1")
+    hass.states.async_set(entity_id, "off", {})
+    clock.now += 3
+
+    await call(hass, "stop", {"entity_id": entity_id})
+
+    assert bridge.puts[2] == (
+        "light/light-1",
+        {"on": {"on": True}, "dimming": {"brightness": 70.0}, "color_temperature_delta": {"action": "stop"}},
+    )
+
+
+async def test_a_rooms_cut_stops_color_temp_light_by_light(hass, bridge, clock):
+    entity_id = await mixed_room(hass, bridge, 100.0, 100.0)
+    await call(hass, "move", {"entity_id": entity_id, "brightness": "down", "sweep_time": 10})
+    report_off(bridge, "one", "two")
+    clock.now += 4
+    await call(hass, "move", {"entity_id": "light.one", "brightness": "up", "color_temp": "warmer", "sweep_time": 10})
+    clock.now += 1
+
+    await call(hass, "stop", {"entity_id": entity_id})
+
+    assert sorted(bridge.puts[3:]) == [
+        ("light/one", BOTH_STOPS),
+        ("light/two", {"on": {"on": True}, "dimming": {"brightness": pytest.approx(50.0)}}),
+    ]

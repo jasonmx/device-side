@@ -8,8 +8,9 @@ lit, and a key no live transition owns, which our writes never make the bridge r
 prediction, as does a scene recalled on the bridge, and the next move starts from what the bridge reports. A change made
 from Home Assistant drops it at once, whatever its value, by watching light and scene service calls.
 
-With the predicted_state option on, the reports that are ours are hidden from aiohue, and so from HA, which instead
-is sent what device_side predicts: the start value while a fade runs, the halt at a stop, the end once it has run.
+With the predicted_state option on, the reports of brightness and on that are ours are hidden from aiohue, and so from
+HA, which instead is sent what device_side predicts: the start value while a fade runs, the halt at a stop, the end once
+it has run. Color temperature reports reach HA as the bridge sends them.
 Hiding works by editing the event's dict in a synchronous subscriber, which runs before aiohue's controllers apply it
 in a task; what device_side sends goes through the same event stream in-process, never to the bridge.
 """
@@ -54,14 +55,19 @@ class Report(Enum):
     REAL = "real"  # a change made elsewhere
 
 
-def owned(cache: TransitionCache, api: HueBridgeV2, event: dict) -> frozenset[str]:
-    """The report keys a live transition owns: on a light, its own; on a grouped_light, any of its lights'."""
+def owned(cache: TransitionCache, api: HueBridgeV2, event: dict, *, predicted: bool = False) -> frozenset[str]:
+    """The report keys a live transition owns: on a light, its own; on a grouped_light, any of its lights'. predicted:
+    only those of attributes HA is shown predictions of."""
     if event.get("type") == ResourceTypes.GROUPED_LIGHT.value:
         resource_ids = [light.id for light in api.groups.grouped_light.get_lights(event["id"])]
     else:
         resource_ids = [event["id"]]
     return frozenset(
-        key for rid in resource_ids for attribute in cache.attributes(rid) for key in ATTRIBUTES[attribute].keys
+        key
+        for rid in resource_ids
+        for attribute in cache.attributes(rid)
+        if not predicted or ATTRIBUTES[attribute].shows is not None
+        for key in ATTRIBUTES[attribute].keys
     )
 
 
@@ -122,7 +128,7 @@ class ReportFilter:
         A light HA shows off, faded up from off, is shown on at its dimmest at once, so HA doesn't hold it off for the
         whole fade.
         """
-        if not self.hiding:
+        if not self.hiding or ATTRIBUTES[attribute].shows is None:
             return
         for light_id, target in ends.items():
 
@@ -136,7 +142,7 @@ class ReportFilter:
 
     def halted(self, attribute: str, halts: dict[str, float]) -> None:
         """Show each light where a stop halted it, and drop the end its fade would have shown."""
-        if not self.hiding:
+        if not self.hiding or ATTRIBUTES[attribute].shows is None:
             return
         for light_id in halts:
             get_runtime(self.hass).schedule(self.hass, _end_key(light_id, attribute), [])
@@ -181,11 +187,13 @@ class ReportFilter:
             _LOGGER.exception("Hue report filter failed on %s", data)
 
     def _hide(self, data: dict) -> None:
-        """Take the report keys a live transition owns out of the event before aiohue applies it; the rest pass.
+        """Take the report keys a live transition owns out of the event before aiohue applies it, of the attributes HA
+        is shown predictions of; the rest pass.
 
         A room shows what its lights are shown, once aiohue has applied them.
         """
-        keys = owned(self.cache, self.api, data)
+        if not (keys := owned(self.cache, self.api, data, predicted=True)) & reported_values(data).keys():
+            return
         if data.get("type") == ResourceTypes.GROUPED_LIGHT.value:
             self._show_rooms_soon({data["id"]})
         else:
