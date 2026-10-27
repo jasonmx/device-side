@@ -491,14 +491,18 @@ class EntryOptions:
         values = {field["name"]: field.get("default") for field in flow.get("data_schema", [])}
         if self.original is None:
             self.original = dict(values)
-        changed = any(values.get(name) != on for name, on in wanted.items())
+        flow_path = f"/api/config/config_entries/options/flow/{flow['flow_id']}"
+        if all(values.get(name) == on for name, on in wanted.items()):
+            # Saving would still reload an entry whose options were never saved: they go from none to these.
+            await self.admin.rest("delete", flow_path)
+            self.current = values
+            return
         values |= wanted
-        result = await self.admin.rest("post", f"/api/config/config_entries/options/flow/{flow['flow_id']}", values)
+        result = await self.admin.rest("post", flow_path, values)
         if result.get("type") != "create_entry":
             raise RuntimeError(f"device_side's options flow did not save: {result}")
         self.current = values
-        if changed:
-            await self.reloaded()
+        await self.reloaded()
 
     async def reloaded(self) -> None:
         """Wait for the reload a saved change schedules: it starts after the save returns."""
@@ -1123,7 +1127,11 @@ async def run(
         await rig_run.observed(waiting)
     finally:
         if rig_run.entry_options is not None:
-            await rig_run.entry_options.restore()
+            # A failure here must not hide the one that ended the run.
+            try:
+                await rig_run.entry_options.restore()
+            except Exception as err:  # noqa: BLE001
+                out(f"Could not put device_side's options back; set them in HA: {err}")
     suite_results = [
         SuiteResult(suite, adapter, [rig_run.results[id(suite), case.id] for case in suite_cases], complete=not keyword)
         for suite, adapter, _, suite_cases in planned

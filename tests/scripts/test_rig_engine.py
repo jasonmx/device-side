@@ -1180,6 +1180,7 @@ class FakeAdmin(FakeHA):
         super().__init__(states, respond)
         self.options = {"opt": True, "other": False} | (options or {})
         self.saved: list[dict] = []
+        self.aborted = 0
 
     async def command(self, payload: dict):
         if payload["type"] == "config_entries/get":
@@ -1190,6 +1191,9 @@ class FakeAdmin(FakeHA):
         if path.endswith("/options/flow"):
             schema = [{"name": name, "default": value, "type": "boolean"} for name, value in self.options.items()]
             return {"type": "form", "flow_id": "f1", "data_schema": schema}
+        if method == "delete":
+            self.aborted += 1
+            return {"message": "Flow aborted"}
         self.options = dict(json)
         self.saved.append(dict(json))
         return {"type": "create_entry"}
@@ -1233,7 +1237,24 @@ async def test_each_suite_runs_with_its_options_and_the_rig_gets_its_own_back(tm
     assert not result.failed
     assert respond.seen == [{"opt": False, "other": False}, {"opt": True, "other": False}]
     assert admin.options == {"opt": True, "other": False}  # as the rig had them
+    assert admin.saved == [{"opt": False, "other": False}, {"opt": True, "other": False}]
     assert [suite_result.suite.name for suite_result in result.suites] == ["move", "move-opt"]
+
+
+async def test_options_already_in_force_are_not_saved(tmp_path, monkeypatch):
+    # An entry whose options were never saved reloads on any save, so the engine cancels the flow instead.
+    monkeypatch.setattr(engine, "OPTIONS_RELOAD_S", 0)
+    admin = FakeAdmin({"light.a": {}})
+    admin.respond = options_seen(admin)
+
+    result = await run(
+        [suite(tmp_path, option_file("opt"), "fake")], inventory("fake", light_ct="light.a"), OPTION_REGISTRY,
+        admin, admin=admin, tolerance=TOLERANCE, out=lambda _: None,
+    )
+
+    assert not result.failed
+    assert admin.saved == []
+    assert admin.aborted == 1
 
 
 async def test_a_suite_whose_adapter_has_options_needs_the_admin_token(tmp_path):
