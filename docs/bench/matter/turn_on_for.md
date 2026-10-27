@@ -4,8 +4,8 @@
 |---|---|
 | Result | pass |
 | Date | 2026-10-27 |
-| Source | rig run (`scripts/rig.py`), commit `f0a3569` |
-| Fingerprint | `cd705e5640a8738a` (`integrations/matter/turn_on_for.py`) |
+| Source | rig run (`scripts/rig.py`), commit `be23bb7` |
+| Fingerprint | `fcd9afa933b44bba` (`integrations/matter/turn_on_for.py`) |
 | Home Assistant | 2026.10.2 |
 | Device | WiZ Smart Plug (`8979`), firmware `v1.4` |
 | Capabilities | every capability the adapter addresses |

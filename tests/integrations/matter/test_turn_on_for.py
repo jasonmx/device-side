@@ -24,11 +24,11 @@ def setup_matter(hass, mock_chip, setup_production):
 async def test_sends_on_with_timed_off_and_confirms(setup_matter, hass):
     """Happy path: command sent, OnTime read-back > 0 -> CONFIRMED."""
     entry, send_cmd, read_attr = matter_device(hass, endpoint_id=EP, feature_map=0x0001)
-    add_matter_entity(hass, entry, "light.bulb", endpoint_id=EP)
+    add_matter_entity(hass, entry, "switch.bulb", endpoint_id=EP)
 
-    response = await call(hass, "turn_on_for", {"entity_id": "light.bulb", "duration": 5})
+    response = await call(hass, "turn_on_for", {"entity_id": "switch.bulb", "duration": 5})
 
-    assert response == {"light.bulb": CONFIRMED}
+    assert response == {"switch.bulb": CONFIRMED}
     send_cmd.assert_awaited_once()
     call_kwargs = send_cmd.call_args.kwargs
     assert call_kwargs["node_id"] == NODE_ID
@@ -43,9 +43,9 @@ async def test_sends_on_with_timed_off_and_confirms(setup_matter, hass):
 async def test_duration_converted_to_tenths(setup_matter, hass):
     """Duration in seconds is multiplied by 10 and rounded to integer tenths."""
     entry, send_cmd, _ = matter_device(hass, endpoint_id=EP, feature_map=0x0001)
-    add_matter_entity(hass, entry, "light.bulb", endpoint_id=EP)
+    add_matter_entity(hass, entry, "switch.bulb", endpoint_id=EP)
 
-    await call(hass, "turn_on_for", {"entity_id": "light.bulb", "duration": {"seconds": 1, "milliseconds": 500}})
+    await call(hass, "turn_on_for", {"entity_id": "switch.bulb", "duration": {"seconds": 1, "milliseconds": 500}})
 
     cmd = send_cmd.call_args.kwargs["command"]
     assert cmd.onTime == 15  # 1.5 s * 10 = 15 tenths
@@ -54,28 +54,28 @@ async def test_duration_converted_to_tenths(setup_matter, hass):
 async def test_no_lt_feature_returns_unsupported(setup_matter, hass):
     """An endpoint without the LT feature bit returns no_lt_feature unsupported."""
     entry, send_cmd, _ = matter_device(hass, endpoint_id=EP, feature_map=0x0000)
-    add_matter_entity(hass, entry, "light.plug_as_light", endpoint_id=EP)
+    add_matter_entity(hass, entry, "switch.no_lt", endpoint_id=EP)
     # need a second entity that succeeds so the call doesn't raise all_targets_failed
     second_entry, _, _ = matter_device(hass, endpoint_id=2, feature_map=0x0001)
-    add_matter_entity(hass, second_entry, "light.real_bulb", endpoint_id=2)
+    add_matter_entity(hass, second_entry, "switch.plug_with_lt", endpoint_id=2)
 
     response = await call(
         hass,
         "turn_on_for",
-        {"entity_id": ["light.plug_as_light", "light.real_bulb"], "duration": 5},
+        {"entity_id": ["switch.no_lt", "switch.plug_with_lt"], "duration": 5},
     )
 
-    assert response["light.plug_as_light"] == {
+    assert response["switch.no_lt"] == {
         "status": "unsupported",
         "integration": "matter",
         "detail": "no_lt_feature",
     }
-    assert response["light.real_bulb"] == CONFIRMED
+    assert response["switch.plug_with_lt"] == CONFIRMED
     send_cmd.assert_not_awaited()
 
 
 async def test_plug_sends_on_with_timed_off(setup_matter, hass):
-    """A plug (switch domain) with the LT bit takes the same command as a light."""
+    """A plug (switch domain) with the LT bit takes OnWithTimedOff."""
     entry, send_cmd, _ = matter_device(hass, endpoint_id=EP, feature_map=0x0001)
     add_matter_entity(hass, entry, "switch.plug", endpoint_id=EP)
 
@@ -83,6 +83,46 @@ async def test_plug_sends_on_with_timed_off(setup_matter, hass):
 
     assert response == {"switch.plug": CONFIRMED}
     assert send_cmd.call_args.kwargs["command"].onTime == 50
+
+
+async def test_light_is_out_of_scope(setup_matter, hass):
+    """A Matter light is refused until a tester's report brings lights into scope."""
+    entry, send_cmd, _ = matter_device(hass, endpoint_id=EP)
+    add_matter_entity(hass, entry, "light.bulb", endpoint_id=EP)
+    second_entry, _, _ = matter_device(hass, endpoint_id=2)
+    add_matter_entity(hass, second_entry, "switch.plug", endpoint_id=2)
+
+    response = await call(hass, "turn_on_for", {"entity_id": ["light.bulb", "switch.plug"], "duration": 5})
+
+    assert response["light.bulb"]["detail"] == "domain_not_tested"
+    assert response["switch.plug"] == CONFIRMED
+
+
+def _no_client(entry):
+    del entry.runtime_data
+
+
+def _node_lookup_raises(entry):
+    entry.runtime_data.adapter.matter_client.get_node.side_effect = KeyError("node gone")
+
+
+def _node_missing(entry):
+    entry.runtime_data.adapter.matter_client.get_node.return_value = None
+
+
+@pytest.mark.parametrize("break_node", [_no_client, _node_lookup_raises, _node_missing])
+async def test_unreachable_node_is_not_addressable(setup_matter, hass, break_node):
+    """No Matter client, a node lookup that raises, or no node: the target is not addressable."""
+    entry, send_cmd, _ = matter_device(hass, endpoint_id=EP)
+    break_node(entry)
+    add_matter_entity(hass, entry, "switch.gone", endpoint_id=EP)
+    second_entry, _, _ = matter_device(hass, endpoint_id=2)
+    add_matter_entity(hass, second_entry, "switch.plug", endpoint_id=2)
+
+    response = await call(hass, "turn_on_for", {"entity_id": ["switch.gone", "switch.plug"], "duration": 5})
+
+    assert response["switch.gone"]["detail"] == "not_addressable"
+    assert response["switch.plug"] == CONFIRMED
 
 
 async def test_dead_front_bit_alone_is_not_lt(setup_matter, hass):
@@ -121,43 +161,43 @@ async def test_readback_without_the_path_reports_timer_not_running(setup_matter,
     entry, _, read_attr = matter_device(hass, endpoint_id=EP, feature_map=0x0001)
     read_attr.side_effect = None
     read_attr.return_value = {}
-    add_matter_entity(hass, entry, "light.bulb", endpoint_id=EP)
+    add_matter_entity(hass, entry, "switch.bulb", endpoint_id=EP)
 
-    response = await call(hass, "turn_on_for", {"entity_id": "light.bulb", "duration": 5})
+    response = await call(hass, "turn_on_for", {"entity_id": "switch.bulb", "duration": 5})
 
-    assert response == {"light.bulb": {"status": "sent", "integration": "matter", "detail": "timer_not_reported"}}
+    assert response == {"switch.bulb": {"status": "sent", "integration": "matter", "detail": "timer_not_reported"}}
 
 
 async def test_readback_fails_returns_sent(setup_matter, hass):
     """If read_attribute raises, the result is SENT with readback_failed."""
     entry, send_cmd, read_attr = matter_device(hass, endpoint_id=EP, feature_map=0x0001)
     read_attr.side_effect = ConnectionError("lost connection")
-    add_matter_entity(hass, entry, "light.bulb", endpoint_id=EP)
+    add_matter_entity(hass, entry, "switch.bulb", endpoint_id=EP)
 
-    response = await call(hass, "turn_on_for", {"entity_id": "light.bulb", "duration": 5})
+    response = await call(hass, "turn_on_for", {"entity_id": "switch.bulb", "duration": 5})
 
-    assert response == {"light.bulb": {"status": "sent", "integration": "matter", "detail": "readback_failed"}}
+    assert response == {"switch.bulb": {"status": "sent", "integration": "matter", "detail": "readback_failed"}}
 
 
 async def test_readback_returns_zero_reports_timer_not_running(setup_matter, hass):
     """If read_attribute returns 0 (or falsy), the timer did not start -> timer_not_reported."""
     entry, send_cmd, read_attr = matter_device(hass, endpoint_id=EP, feature_map=0x0001)
     read_attr.side_effect = on_time_reads(0).side_effect
-    add_matter_entity(hass, entry, "light.bulb", endpoint_id=EP)
+    add_matter_entity(hass, entry, "switch.bulb", endpoint_id=EP)
 
-    response = await call(hass, "turn_on_for", {"entity_id": "light.bulb", "duration": 5})
+    response = await call(hass, "turn_on_for", {"entity_id": "switch.bulb", "duration": 5})
 
-    assert response == {"light.bulb": {"status": "sent", "integration": "matter", "detail": "timer_not_reported"}}
+    assert response == {"switch.bulb": {"status": "sent", "integration": "matter", "detail": "timer_not_reported"}}
 
 
 async def test_send_error_rejects_target(setup_matter, hass):
     """If send_device_command raises, the target is REJECTED and all_targets_failed is raised."""
     entry, send_cmd, _ = matter_device(hass, endpoint_id=EP, feature_map=0x0001)
     send_cmd.side_effect = ConnectionError("device unreachable")
-    add_matter_entity(hass, entry, "light.bulb", endpoint_id=EP)
+    add_matter_entity(hass, entry, "switch.bulb", endpoint_id=EP)
 
     with pytest.raises(HomeAssistantError) as raised:
-        await call(hass, "turn_on_for", {"entity_id": "light.bulb", "duration": 5})
+        await call(hass, "turn_on_for", {"entity_id": "switch.bulb", "duration": 5})
 
     assert raised.value.translation_key == "all_targets_failed"
 
@@ -165,11 +205,11 @@ async def test_send_error_rejects_target(setup_matter, hass):
 async def test_duration_beyond_limit_is_clamped(setup_matter, hass):
     """A duration longer than 6553.4 s is clamped to the limit."""
     entry, send_cmd, _ = matter_device(hass, endpoint_id=EP, feature_map=0x0001)
-    add_matter_entity(hass, entry, "light.bulb", endpoint_id=EP)
+    add_matter_entity(hass, entry, "switch.bulb", endpoint_id=EP)
 
-    response = await call(hass, "turn_on_for", {"entity_id": "light.bulb", "duration": {"hours": 2}})
+    response = await call(hass, "turn_on_for", {"entity_id": "switch.bulb", "duration": {"hours": 2}})
 
-    assert response["light.bulb"]["clamped_to"] == 6553.4
+    assert response["switch.bulb"]["clamped_to"] == 6553.4
     cmd = send_cmd.call_args.kwargs["command"]
     assert cmd.onTime == round(6553.4 * 10)
 
@@ -186,19 +226,19 @@ async def test_not_addressable_when_unique_id_unparseable(setup_matter, hass):
         identifiers={("matter", "deviceid_bad")},
     )
     er.async_get(hass).async_get_or_create(
-        "light", "matter", "bad-uid", suggested_object_id="broken", config_entry=entry, device_id=device.id
+        "switch", "matter", "bad-uid", suggested_object_id="broken", config_entry=entry, device_id=device.id
     )
-    hass.states.async_set("light.broken", "off", {})
+    hass.states.async_set("switch.broken", "off", {})
 
     # Need a successful entity alongside to avoid all_targets_failed.
     entry2, _, _ = matter_device(hass, endpoint_id=2, feature_map=0x0001)
-    add_matter_entity(hass, entry2, "light.good", endpoint_id=2)
+    add_matter_entity(hass, entry2, "switch.good", endpoint_id=2)
 
     response = await call(
         hass,
         "turn_on_for",
-        {"entity_id": ["light.broken", "light.good"], "duration": 5},
+        {"entity_id": ["switch.broken", "switch.good"], "duration": 5},
     )
 
-    assert response["light.broken"]["detail"] == "not_addressable"
-    assert response["light.good"] == CONFIRMED
+    assert response["switch.broken"]["detail"] == "not_addressable"
+    assert response["switch.good"] == CONFIRMED
