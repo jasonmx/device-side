@@ -15,6 +15,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import yaml
@@ -537,9 +538,11 @@ class CaseResult:
     outcome: Outcome
     detail: str = ""
     entity_ids: tuple[str, ...] = ()
-    # Fields in the adapter's scope that a call carried to the device, and whether any call reached it.
+    # Fields in the adapter's scope that a call carried to the device, whether any call reached it, and the
+    # capabilities those calls reached (empty when the adapter's scope.capabilities is None).
     fields: frozenset[str] = frozenset()
     reached: bool = False
+    capabilities: frozenset[str] = frozenset()
     twin: str | None = None  # Case.twin
 
 
@@ -729,6 +732,7 @@ class _CaseRun:
         self.query = False
         self.fields: set[str] = set()
         self.reached = False
+        self.capabilities: set[str] = set()
 
     def entity(self, args: Any) -> str:
         role = args.get("target") if isinstance(args, dict) else None
@@ -781,6 +785,7 @@ class _CaseRun:
         finally:
             await self.snapshot.restore()
         result.fields, result.reached = frozenset(self.fields), self.reached
+        result.capabilities = frozenset(self.capabilities)
         return result
 
     async def steps(self, steps: tuple[Step, ...], relaxed: bool = False) -> None:
@@ -932,12 +937,31 @@ class _CaseRun:
         entries = [entry for entry in (self.response or {}).values() if isinstance(entry, dict)]
         # A query returns only the targets it read, as core does, with no status to check. Only the action under
         # test counts: a move that sets up a stop proves nothing about the stop adapter.
-        if action != self.case.suite.action:
-            return
-        if entries and (self.query or any(entry.get("status") in _REACHED for entry in entries)):
-            self.reached = True
-            if (adapter := self.registry.adapter(action, self.integration)) is not None:
-                self.fields |= set(data) & adapter.scope.fields
+        if action == self.case.suite.action and (
+            entries and (self.query or any(entry.get("status") in _REACHED for entry in entries))
+        ):
+            await self.mark_reached(action, data)
+
+    async def mark_reached(self, action: str, data: dict) -> None:
+        """Note the fields the call carried and the capability it reached, as far as the adapter's scope covers."""
+        self.reached = True
+        if (adapter := self.registry.adapter(action, self.integration)) is not None:
+            self.fields |= set(data) & adapter.scope.fields
+            if adapter.scope.capabilities is not None:
+                self.capabilities.add(await self.capability(data["entity_id"]))
+
+    async def capability(self, entity_id: str) -> str:
+        """The capability a call on the entity reached, read as its adapter addresses it (Shelly: the RPC component)."""
+        if self.integration != "shelly":
+            raise StepFailure(f"the rig can't tell which {self.integration} capability {entity_id} reaches")
+        # Imported here: the component imports Home Assistant, and a tester's runner imports this module without it.
+        from custom_components.device_side.integrations.shelly.addressing import address  # noqa: PLC0415
+
+        entry = await self.ha.command({"type": "config/entity_registry/get", "entity_id": entity_id})
+        # address() reads only the registry entry's unique_id.
+        if (rpc := address(SimpleNamespace(entry=SimpleNamespace(unique_id=entry.get("unique_id") or "")))) is None:
+            raise StepFailure(f"{entity_id} is not a Shelly component the adapter addresses")
+        return rpc.component
 
     async def mark_busy(self, action: str, data: dict) -> None:
         """After a move or stop, hold its lights until the predictions it left expire (see await_settled)."""
@@ -1276,7 +1300,8 @@ def render_record(
     elif adapter.scope.capabilities is None:
         capabilities = "every capability the adapter addresses"
     else:
-        capabilities = ", ".join(f"`{name}`" for name in sorted(adapter.scope.capabilities))
+        reached = sorted({name for case in proven for name in case.capabilities})
+        capabilities = ", ".join(f"`{name}`" for name in reached) or "none"
     fields = sorted({name for case in proven for name in case.fields})
     rows = [
         ("Result", "pass"),
