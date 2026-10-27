@@ -202,17 +202,15 @@ requires it.
     address an HA group natively, which is fine because no device can. Goal throughout:
     minimize radio traffic and popcorning by sending to the largest unit the device accepts.
 - **Results:** `SupportsResponse.OPTIONAL`. Response maps entity_id to
-  `{status: unsupported|rejected|sent|confirmed|unchanged, integration, clamped_to?, detail?}`; `unchanged` means nothing was sent because the target is already where the call would leave it. Tier is not in the response: it is a subjective label about the code, not a fact
+  `{status: unsupported|rejected|sent|confirmed|unchanged, integration, clamped_to?, detail?}`; `unchanged` means nothing was sent because the target is already where the call would leave it. The release flag is not in the response: it is a label about the code, not a fact
   about this call. A query returns core's shape instead: each target's data under its entity_id, with
   targets that could not be read left out. Raise `HomeAssistantError` only on invalid input or when every
   target failed, so mixed rooms do not abort automations, until slice 9f moves the raise rule to core's.
-- **Stability tiers** per adapter (action x integration): `experimental | untested | beta |
-  stable`. Rules live in `CLAUDE.md` (Tiers, Releases); summary: only `experimental` is
-  declared (`AdapterScope.experimental`), the rest are computed by `scripts/check_tiers.py` from
-  coverage and bench records keyed by the adapter's fingerprint; `stable` means on `main`. A
-  tier covers the adapter's whole scope: there is no runtime tier gate and no options flow for
+- **Release flag** per adapter (action x integration): `AdapterScope.experimental` keeps it out
+  of a stable release; everything on `main` is stable. Rules live in `CLAUDE.md` (Release flag).
+  The flag covers the adapter's whole scope: there is no runtime gate and no options flow for
   it, and a capability or field nobody has tested is simply left out of
-  `AdapterScope.capabilities`/`.fields`, so `supports()` refuses it as not yet tested. Tier is not
+  `AdapterScope.capabilities`/`.fields`, so `supports()` refuses it as not yet tested. The flag is not
   logged per call and not returned in results.
 - **Quality bar:** HA quality scale Gold conventions (config flow, translations, tests,
   diagnostics, docs).
@@ -299,7 +297,7 @@ custom_components/device_side/
   icons.json             "services": {<action>: {"service": "mdi:..."}}
   translations/en.json   copy of strings.json
   core/
-    models.py            Status, Tier, ActionKind, Target, EntityResult, LightFields + validators
+    models.py            Status, ActionKind, Target, EntityResult, LightFields + validators
     scope.py             DurationLimits, AdapterScope, IntegrationInfo
     action.py            Action[RequestT] base class
     adapter.py              Adapter[RequestT] base class + gather() pacing helper
@@ -325,10 +323,9 @@ custom_components/device_side/
     hue/          __init__.py bridge.py transition_cache.py colors.py
                   set_attributes.py get_attributes.py set_scene.py move.py stop.py
 scripts/
-  check_tiers.py         computed tiers, coverage and scope-coverage checks for CI (slice 9c)
+  check_release.py       coverage bar for CI, and no experimental adapter in a release
   deploy.sh              the deploy sync command <branch>, then the deploy restart command (rig only)
   rig.py                 approval gate (inventory, adapters, duration, restart?) -> y/N -> deploy -> step files
-  fingerprint.py         adapter fingerprints: AST hash of the adapter and its package imports, without docstrings or AdapterScope
 docs/
   device_side_handoff-2026-10-23.md          existing
   plans/2026-10-23-device-side-repo-plan.md  this plan, saved in slice 0
@@ -353,7 +350,6 @@ copied from `/Users/jason/projects/hue-smooth-dimming`.
 ```python
 # core/models.py
 class Status(StrEnum): UNSUPPORTED, REJECTED, SENT, CONFIRMED, UNCHANGED
-class Tier(StrEnum): STABLE, BETA, UNTESTED, EXPERIMENTAL   # computed by check_tiers, never stored on an adapter
 class ActionKind(StrEnum): COMMAND, SETTING, QUERY
 
 @dataclass(frozen=True, slots=True)
@@ -491,23 +487,16 @@ of an adapter's targets at once so native group commands stay possible. Hue `mov
   `tests/core/test_actions_setup.py` asserts all three exist for every discovered action and
   every schema field has a strings entry.
 
-### Tier computation
+### Release gates
 
-`scripts/check_tiers.py` (slice 9c, `2026-10-25-release-gates.md`) imports the registry without `hass`
-and computes each adapter's tier from its records, found by path (`docs/bench/<integration>/<action>*.md`).
-It fails on a malformed record, a record with no adapter, or a non-experimental adapter under 95%
-coverage (`coverage.json`); CI runs it and prints the tier table. `--require-beta`, run only by
-`cut-release`, also fails on any `untested` adapter. It generates no docs: the README feature table and
-`docs/integrations.md` are hand-written. Fingerprint: AST hash of the adapter module and, in turn, the
-modules it imports from its own integration package, excluding docstrings and the `AdapterScope`
-declaration; bench records carry the fingerprint they tested and list the capabilities (Shelly: RPC components) and light fields they exercised. Proof
-follows the call: a record proves the device-side call, whatever HA domain the target shows, so a
-relay exposed as a `switch` or as an on/off `light` rides one record. `beta` needs a record with the
-current fingerprint, and every capability and field in scope covered: a capability by any passing
-record (any fingerprint), a field by a current-fingerprint record, an option in scope
-(`AdapterScope.options`) by current-fingerprint records with it on and with it off. Untested capabilities are left out of
-`AdapterScope.capabilities` and refused, not taken into scope on a sibling's proof. Adding a capability
-after a tester report is a scope edit plus a record listing it; the fingerprint survives it. Tier ladder: see `CLAUDE.md`. Tags come only from the `cut-release-candidate` and `cut-release`
+`scripts/check_release.py` (`2026-10-27-release-flag.md`, replacing slice 9c's computed tiers) imports the registry
+without `hass`. CI runs it with `--coverage coverage.json`, failing any adapter module under 95% line coverage, and
+prints which adapters are experimental; `--release`, run only by `cut-release`, fails on any experimental adapter. It
+generates no docs: the README feature table and `docs/integrations.md` are hand-written. A PR clears an adapter's flag
+by citing a passing bench record or tester issue covering its scope. Proof follows the call: a record proves the
+device-side call, whatever HA domain the target shows, so a relay exposed as a `switch` or as an on/off `light` rides
+one record. Untested capabilities are left out of `AdapterScope.capabilities` and refused, not taken into scope on a
+sibling's proof. Tags come only from the `cut-release-candidate` and `cut-release`
 workflows (a tag ruleset refuses any other), and `scripts/check_tag.py` refuses a tag not matching
 `^v\d+\.\d+\.\d+(rc\d+)?$` or not matching its branch.
 
@@ -596,9 +585,8 @@ Inventory format (per integration -> entities with role tags `light_dimmable`, `
 `light_color`, `switch_plug`, `group`, `scene`) is in `tests/rig/env.example` and
 `tests/rig/inventory.example.yaml`. **Claude asks before every rig run; the devices are
 in-use household lights.** Rig passes are recorded in `docs/bench/<integration>/<action>.md`
-(date, HA version, device model and firmware from `config/device_registry/list`, fingerprint from
-`scripts/fingerprint.py`, capabilities and fields reached, per-test table, source: rig run or
-test-report issue).
+(date, HA version, device model and firmware from `config/device_registry/list`, per-test table,
+source: rig run or test-report issue).
 
 ## Delivery sequence
 
@@ -721,7 +709,7 @@ the first action of that session is slice 0.
 
 ## Verification (end to end)
 
-- `pre-commit run --all-files`, `pytest` (unit), `scripts/check_tiers.py` all green in CI
+- `pre-commit run --all-files`, `pytest` (unit), `scripts/check_release.py --coverage` all green in CI
   on every PR.
 - On the rig, with approval (there is no dev HA): first deploy adds the single entry, every
   action appears with translated names, light fields hide for switch-only selections; call

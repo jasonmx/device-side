@@ -32,7 +32,6 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
 from custom_components.device_side.core.registry import AdapterRegistry  # noqa: E402
-from scripts.check_tiers import BENCH_DIR, compute  # noqa: E402
 from tests.rig.bridge import HueBridge  # noqa: E402
 from tests.rig.client import HAClient  # noqa: E402
 from tests.rig.engine import (  # noqa: E402
@@ -48,6 +47,7 @@ from tests.rig.engine import (  # noqa: E402
 from tests.rig.inventory import INVENTORY, Inventory, load_env  # noqa: E402
 
 COMPONENT = "custom_components/device_side"
+BENCH_DIR = REPO / "docs" / "bench"
 SERVICE = ("device_side", "turn_on_for")
 READY_TIMEOUT_S = 180
 RESTART_ESTIMATE_S = 90
@@ -88,20 +88,17 @@ def plan_lines(
     inventory: Inventory,
     registry: AdapterRegistry,
     keyword: str | None = None,
-    bench_dir: Path = BENCH_DIR,
 ) -> list[str]:
-    """Per adapter about to run: the household entities it will move and its tier now, then each test case."""
-    tiers = {(tier.action, tier.integration): tier.tier for tier in compute(registry, bench_dir)[0]}
+    """Per adapter about to run: the household entities it will move, then each test case."""
     lines = []
     for suite in suites:
         if registry.adapter(suite.action, suite.integration) is None:
             lines.append(f"{suite.integration} / {suite.action} (no adapter, will skip)")
             continue
-        tier = tiers[(suite.action, suite.integration)]
         roles = suite.file.roles
         entities = [entity for role in roles if (entity := inventory.entity(suite.integration, role))]
         targets = ", ".join(dict.fromkeys(entities)) or "no entity, will skip"
-        lines.append(f"{suite.integration} / {suite.name} -> {targets} ({tier})")
+        lines.append(f"{suite.integration} / {suite.name} -> {targets}")
         for case in cases(suite, inventory, keyword):
             lines.append(f"    {case.id}: {case.skip or ', '.join(dict.fromkeys(case.entities.values()))}")
     return lines

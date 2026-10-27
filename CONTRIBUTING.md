@@ -27,4 +27,4 @@ We're looking for four kinds of help in particular:
 - Set up with `uv sync`. To add a dependency, use `uv add --dev`, not `uv pip install`.
 - Run `.venv/bin/pytest` and `pre-commit run --all-files` before you push. CI runs both.
 - If you use Claude, run `/audit-code` on your diff before opening a pull request. Else ask for an audit in the PR.
-- A new action, field or integration starts with `experimental=True` on its adapter, which waives the coverage bar so you can try things quickly. Fixes and refactors don't set it.
+- A new action, field or integration starts with `experimental=True` on its adapter, which keeps it out of stable releases until it is tested on hardware. Every adapter needs 95% line coverage either way. Fixes and refactors don't set it.

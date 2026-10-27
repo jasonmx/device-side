@@ -2,7 +2,7 @@
 
 One file per action (`steps/<action>.yaml`) runs on every inventory integration that has that action's adapter; a
 file with `options` (`steps/<action>-<option>.yaml`) runs it again with those device_side options on. The registry
-supplies what differs per integration: the expected status, the tolerance, and the fields and options in scope.
+supplies what differs per integration: the expected status, the tolerance, and the options in scope.
 No pytest here: scripts/rig.py calls run(), and a tester's one-file runner can import this module unchanged.
 """
 
@@ -15,12 +15,9 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import yaml
-
-from scripts.fingerprint import adapter_path, fingerprint
 
 from .bridge import BridgeError, HueBridge
 from .client import HAClient, HAError
@@ -29,7 +26,6 @@ from .inventory import RIG_DIR, ROLES, SETTLE_S, TOLERANCE_S, Inventory
 _LOGGER = logging.getLogger(__name__)
 
 STEPS_DIR = RIG_DIR / "steps"
-COMPONENT_DIR = RIG_DIR.parents[1] / "custom_components" / "device_side"
 
 # Light attributes a restore puts back, in the order light.turn_on would accept one color at a time.
 _RESTORE_COLOR = ("color_temp_kelvin", "hs_color", "xy_color", "rgb_color")
@@ -38,9 +34,6 @@ _RESTORE_COLOR = ("color_temp_kelvin", "hs_color", "xy_color", "rgb_color")
 # HA_ADMIN_TOKEN. ZHA: issue_zigbee_cluster_command is registered with async_register_admin_service.
 # Zigbee2MQTT: the z2m_option steps publish and subscribe over MQTT, which only an admin may.
 ADMIN_INTEGRATIONS = frozenset({"zha", "zigbee2mqtt"})
-
-# Statuses that mean the command reached the device; unchanged sent nothing, so it proves no call.
-_REACHED = frozenset({"confirmed", "sent"})
 
 # An entity whose supply a case switched rejoins its network after power returns. ZHA keeps showing the last state
 # of a mains device for hours, so the restore waits, then retries until the device takes the command.
@@ -565,18 +558,12 @@ class CaseResult:
     outcome: Outcome
     detail: str = ""
     entity_ids: tuple[str, ...] = ()
-    # Fields in the adapter's scope that a call carried to the device, whether any call reached it, and the
-    # capabilities those calls reached (empty when the adapter's scope.capabilities is None).
-    fields: frozenset[str] = frozenset()
-    reached: bool = False
-    capabilities: frozenset[str] = frozenset()
     twin: str | None = None  # Case.twin
 
 
 @dataclass(slots=True)
 class SuiteResult:
     suite: Suite
-    adapter: Any
     cases: list[CaseResult]
     # False when -k left tests out: a partial run writes no record.
     complete: bool
@@ -588,7 +575,7 @@ class SuiteResult:
 
     @property
     def proven(self) -> list[CaseResult]:
-        """Passed cases whose twin passed too: only these go into a record's scope."""
+        """Passed cases whose twin passed too: a case with a twin proves nothing alone."""
         passed = {case.id for case in self.cases if case.outcome is Outcome.PASS}
         return [case for case in self.cases if case.id in passed and (case.twin is None or case.twin in passed)]
 
@@ -759,9 +746,6 @@ class _CaseRun:
         self.error: HAError | None = None
         self.last_action = case.suite.action
         self.query = False
-        self.fields: set[str] = set()
-        self.reached = False
-        self.capabilities: set[str] = set()
 
     def entity(self, args: Any) -> str:
         role = args.get("target") if isinstance(args, dict) else None
@@ -813,8 +797,6 @@ class _CaseRun:
             result.outcome = Outcome.NOT_OBSERVED
         finally:
             await self.snapshot.restore()
-        result.fields, result.reached = frozenset(self.fields), self.reached
-        result.capabilities = frozenset(self.capabilities)
         return result
 
     async def steps(self, steps: tuple[Step, ...], relaxed: bool = False) -> None:
@@ -995,34 +977,6 @@ class _CaseRun:
         if following == "expect_error":
             raise StepFailure(f"device_side.{action} succeeded where an error was expected: {self.response}")
         await self.mark_busy(action, data)
-        entries = [entry for entry in (self.response or {}).values() if isinstance(entry, dict)]
-        # A query returns only the targets it read, as core does, with no status to check. Only the action under
-        # test counts: a move that sets up a stop proves nothing about the stop adapter.
-        if action == self.case.suite.action and (
-            entries and (self.query or any(entry.get("status") in _REACHED for entry in entries))
-        ):
-            await self.mark_reached(action, data)
-
-    async def mark_reached(self, action: str, data: dict) -> None:
-        """Note the fields the call carried and the capability it reached, as far as the adapter's scope covers."""
-        self.reached = True
-        if (adapter := self.registry.adapter(action, self.integration)) is not None:
-            self.fields |= set(data) & adapter.scope.fields
-            if adapter.scope.capabilities is not None:
-                self.capabilities.add(await self.capability(data["entity_id"]))
-
-    async def capability(self, entity_id: str) -> str:
-        """The capability a call on the entity reached, read as its adapter addresses it (Shelly: the RPC component)."""
-        if self.integration != "shelly":
-            raise StepFailure(f"the rig can't tell which {self.integration} capability {entity_id} reaches")
-        # Imported here: the component imports Home Assistant, and a tester's runner imports this module without it.
-        from custom_components.device_side.integrations.shelly.addressing import address  # noqa: PLC0415
-
-        entry = await self.ha.command({"type": "config/entity_registry/get", "entity_id": entity_id})
-        # address() reads only the registry entry's unique_id.
-        if (rpc := address(SimpleNamespace(entry=SimpleNamespace(unique_id=entry.get("unique_id") or "")))) is None:
-            raise StepFailure(f"{entity_id} is not a Shelly component the adapter addresses")
-        return rpc.component
 
     async def mark_busy(self, action: str, data: dict) -> None:
         """After a move or stop, hold its lights until the predictions it left expire (see await_settled)."""
@@ -1224,8 +1178,8 @@ async def run(
             except Exception as err:  # noqa: BLE001
                 out(f"Could not put device_side's options back; set them in HA: {err}")
     suite_results = [
-        SuiteResult(suite, adapter, [rig_run.results[id(suite), case.id] for case in suite_cases], complete=not keyword)
-        for suite, adapter, _, suite_cases in planned
+        SuiteResult(suite, [rig_run.results[id(suite), case.id] for case in suite_cases], complete=not keyword)
+        for suite, _, _, suite_cases in planned
     ]
     for suite_result in suite_results:
         out("")
@@ -1356,35 +1310,20 @@ async def rig_facts(ha: HAClient, entity_ids: Iterable[str]) -> tuple[str, list[
 def render_record(
     suite_result: SuiteResult, title: str, ha_version: str, devices: list[Device], date: str, source: str
 ) -> str:
-    """The bench record check_tiers parses: a key/value table, then the per-test table."""
-    adapter, suite = suite_result.adapter, suite_result.suite
-    path = adapter_path(adapter)
-    proven = suite_result.proven
-    if not any(case.reached for case in proven):
-        capabilities = "none"
-    elif adapter.scope.capabilities is None:
-        capabilities = "every capability the adapter addresses"
-    else:
-        reached = sorted({name for case in proven for name in case.capabilities})
-        capabilities = ", ".join(f"`{name}`" for name in reached) or "none"
-    fields = sorted({name for case in proven for name in case.fields})
+    """The bench record: a key/value table, then the per-test table. It is evidence for people; no script reads it."""
+    suite = suite_result.suite
     rows = [
         ("Result", "pass"),
         ("Date", date),
         ("Source", source),
-        ("Fingerprint", f"`{fingerprint(path)}` (`{path.relative_to(COMPONENT_DIR)}`)"),
         ("Home Assistant", ha_version),
         ("Device", "; ".join(map(str, devices)) or "none"),
-        ("Capabilities", capabilities),
-        ("Fields", ", ".join(f"`{name}`" for name in fields) or "none"),
     ]
-    if suite.file.options:
-        rows.append(("Options", ", ".join(f"`{name}`" for name in sorted(suite.file.options))))
-    lines = [f"# {title} · {suite.action}", "", "| | |", "|---|---|"]
+    lines = [f"# {title} · {suite.name}", "", "| | |", "|---|---|"]
     lines += [f"| {name} | {value} |" for name, value in rows]
     lines += ["", "## Tests", "", *table(suite_result)]
     if any(case.outcome is Outcome.NOT_OBSERVED for case in suite_result.cases):
-        lines += ["", "Tests marked `not observed` had nobody watching; their fields and capabilities are not listed."]
+        lines += ["", "Tests marked `not observed` had nobody watching."]
     return "\n".join(lines) + "\n"
 
 
