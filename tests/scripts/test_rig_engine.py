@@ -1,6 +1,9 @@
 """The rig engine against a fake HAClient: a state machine plus scripted device_side responses. No HA, no rig."""
 
 import asyncio
+import contextlib
+import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -1404,3 +1407,24 @@ def test_a_bad_bridge_step_does_not_parse(tmp_path, args, message):
     text = BRIDGE_STEPS.replace("bridge: {put: {on: {on: true}}}", f"bridge: {args}", 1)
     with pytest.raises(ValueError, match=message):
         suite(tmp_path, text)
+
+
+def test_a_run_cancelled_at_a_prompt_exits_without_waiting_for_an_answer():
+    # asyncio.run waits for its executor's threads at exit, and a thread blocked in input() never ends by itself.
+    answered = threading.Event()
+
+    def nobody_answers(_text: str) -> str:
+        answered.wait(10)
+        return ""
+
+    async def cancelled_at_the_prompt():
+        prompt = asyncio.create_task(engine._prompt(nobody_answers, "Press Enter to start... "))
+        await asyncio.sleep(0.05)
+        prompt.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await prompt
+
+    started = time.monotonic()
+    asyncio.run(cancelled_at_the_prompt())
+    assert time.monotonic() - started < 2
+    answered.set()

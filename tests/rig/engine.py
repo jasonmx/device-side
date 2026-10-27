@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import logging
 import operator
+import threading
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
@@ -673,6 +674,31 @@ class Snapshot:
         await self.ha.call_service(domain, "turn_on", {"entity_id": entity_id, **data})
 
 
+async def _prompt(ask: Callable[[str], str], text: str) -> str:
+    """`ask(text)` on a daemon thread. A cancelled run can't interrupt a thread blocked in input(), and
+    asyncio.to_thread's executor would hold the exit until someone pressed Enter; a daemon thread is left behind."""
+    loop = asyncio.get_running_loop()
+    future: asyncio.Future[str] = loop.create_future()
+
+    def settle(result: str | None, error: BaseException | None) -> None:
+        if not future.done():  # cancelled while the person was at the prompt
+            if error is None:
+                future.set_result(result)
+            else:
+                future.set_exception(error)
+
+    def read() -> None:
+        try:
+            result, error = ask(text), None
+        except BaseException as err:  # noqa: BLE001 - EOFError and the like belong to the awaiting task
+            result, error = None, err
+        with contextlib.suppress(RuntimeError):  # the loop closed while the prompt waited
+            loop.call_soon_threadsafe(settle, result, error)
+
+    threading.Thread(target=read, name="rig prompt", daemon=True).start()
+    return await future
+
+
 def _is_off_light(entity_id: str, state: dict | None) -> bool:
     """A light that is off and not a group (a group lists its members in its entity_id attribute)."""
     return (
@@ -843,7 +869,7 @@ class _CaseRun:
         except StepFailure as err:
             self.out(f"    nothing to observe: {err}")
             with contextlib.suppress(EOFError):
-                await asyncio.to_thread(self.ask, "Press Enter to go on... ")
+                await _prompt(self.ask, "Press Enter to go on... ")
             raise
         while (answer := (await self.answer(f"    {observe.ask} [Y/n] ")).lower()) not in ("", "y", "yes", "n", "no"):
             self.out("    Answer y or n.")
@@ -872,7 +898,7 @@ class _CaseRun:
     async def answer(self, text: str) -> str:
         """The person's reply, stripped; EOF there means nobody is at the rig."""
         try:
-            return (await asyncio.to_thread(self.ask, text)).strip()
+            return (await _prompt(self.ask, text)).strip()
         except EOFError:
             raise _NoOneThere from None
 
