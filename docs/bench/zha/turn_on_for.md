@@ -3,13 +3,10 @@
 | | |
 |---|---|
 | Result | pass |
-| Date | 2026-10-25 |
-| Source | rig run (`scripts/rig.py`), commit `228d873` |
-| Fingerprint | `715f2c301a2ffd4e` (`integrations/zha/turn_on_for.py`) |
+| Date | 2026-10-27 |
+| Source | rig run (`scripts/rig.py`), commit `4ce60dc` |
 | Home Assistant | 2026.10.2 |
-| Device | LTA004, firmware `0x01001416` |
-| Capabilities | every capability the adapter addresses |
-| Fields | `brightness`, `color_temp_kelvin` |
+| Device | LTA004, firmware `0x01001416`; ZBDongle-E, firmware `unknown` |
 
 ## Tests
 
@@ -22,3 +19,8 @@
 | `bulb_on_then_off[light_dimmable]` | `light` (light_dimmable) | pass |
 | `bulb_brightness_then_off[light_dimmable]` | `light` (light_dimmable) | pass |
 | `bulb_color_temp_then_off[light_ct]` | `light` (light_ct) | pass |
+| `group_on_then_off[group]` | `light` (group) | pass |
+| `group_on_then_off[group] observed` | `light` (group) | not observed |
+| `group_brightness_then_off[group]` | `light` (group) | pass |
+
+Tests marked `not observed` had nobody watching.

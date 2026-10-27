@@ -62,3 +62,12 @@ async def test_without_zha_installed_raises_import_error(hass, monkeypatch):
 
     with pytest.raises(ImportError):
         await zcl.read_attributes(hass, ADDR, zcl.ON_OFF_CLUSTER, (zcl.ON_TIME,))
+
+
+async def test_optional_attribute_rides_the_request_and_is_left_out_when_missing(hass, gateway, cluster):
+    cluster.read_attributes.return_value = ({zcl.ON_OFF: True}, {zcl.ON_TIME: "UNSUPPORTED_ATTRIBUTE"})
+
+    read = await zcl.read_attributes(hass, ADDR, zcl.ON_OFF_CLUSTER, (zcl.ON_OFF,), optional=(zcl.ON_TIME,))
+
+    assert read == {zcl.ON_OFF: True}
+    cluster.read_attributes.assert_awaited_once_with([0x0000, 0x4001], allow_cache=False, only_cache=False)

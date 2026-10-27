@@ -8,7 +8,8 @@ DEVICE_SIDE_RIG_APPROVED=1 answers the gate for a non-interactive caller that al
 One run at a time: a lock in the git common dir, shared by every worktree; a second run waits for it. The tests are the
 step files in tests/rig/steps, run by tests/rig/engine.py; a full pass of an adapter rewrites its bench record.
 
-Usage: scripts/rig.py [--dry-run] [--no-deploy] [--no-restart] [--unattended] [--integration KEY ...] [-k TEXT]
+Usage: scripts/rig.py [--dry-run] [--no-deploy] [--no-restart] [--unattended] [--integration KEY ...]
+                      [--action NAME ...] [-k TEXT]
 """
 
 import argparse
