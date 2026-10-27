@@ -358,10 +358,9 @@ it.
 - **The Lighting (LT) feature must be present.** The command is rejected at the device if the
   endpoint lacks this feature. Device Side refuses early with `no_lt_feature` rather than
   forwarding a command the device will ignore.
-- **duck-typed attribute descriptor.** Device Side checks the LT feature by reading the OnOff
-  cluster's FeatureMap attribute from the cached node data, using a minimal attribute descriptor
-  class rather than importing chip.clusters. This should work with any python-matter-server
-  version that exposes endpoint.get_attribute_value. Verified assumption: to confirm on hardware.
+- **The LT check reads the raw attribute cache.** Device Side reads the OnOff FeatureMap from
+  python-matter-server's node data (`node_data.attributes["{endpoint}/6/65532"]`), which needs no
+  chip.clusters import. `MatterEndpoint.get_attribute_value` would need a real chip descriptor.
 
 ## Hue
 

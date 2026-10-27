@@ -18,20 +18,6 @@ _LT_FEATURE_BIT = 0x0001  # Lighting (LT) is bit 0; bit 1 (0x2) is DeadFrontBeha
 _ONTIME_ATTR_ID = 16385  # 0x4001 — counts down to 0 while the timed-on is running
 
 
-class _OnOffFeatureMapAttr:
-    """Minimal attribute descriptor for OnOff.FeatureMap.
-
-    Duck-types the chip.clusters attribute class interface (cluster_id + attribute_id) so
-    endpoint.get_attribute_value() can look up the cached value without chip being importable.
-    """
-
-    cluster_id = _ONOFF_CLUSTER_ID
-    attribute_id = _FEATUREMAP_ATTR_ID
-
-
-_ONOFF_FEATUREMAP = _OnOffFeatureMapAttr()
-
-
 def node_id_from_unique_id(unique_id: str) -> int | None:
     """Parse the Matter node_id (int) from an entity unique_id.
 
@@ -90,17 +76,12 @@ def matter_client(hass: HomeAssistant, config_entry_id: str | None = None):
 def lt_feature(node, endpoint_id: int) -> bool:
     """True if the OnOff cluster on the endpoint has the Lighting (LT) feature bit set.
 
-    Reads from the node's cached endpoint attribute data.  Sync and cheap: no I/O.
-    _OnOffFeatureMapAttr duck-types the chip.clusters attribute descriptor interface so the
-    endpoint's attribute lookup works without chip being importable at module level.
+    Reads the node's raw attribute cache, keyed "{endpoint}/{cluster}/{attribute}". Sync and cheap:
+    no I/O. MatterEndpoint.get_attribute_value would need a real chip.clusters descriptor.
     """
-    endpoint = node.endpoints.get(endpoint_id)
-    if endpoint is None:
-        return False
-    feature_map = endpoint.get_attribute_value(None, _ONOFF_FEATUREMAP)
-    if feature_map is None:
-        return False
-    return bool(feature_map & _LT_FEATURE_BIT)
+    path = f"{endpoint_id}/{_ONOFF_CLUSTER_ID}/{_FEATUREMAP_ATTR_ID}"
+    feature_map = node.node_data.attributes.get(path)
+    return isinstance(feature_map, int) and bool(feature_map & _LT_FEATURE_BIT)
 
 
 def ontime_attr_path(endpoint_id: int) -> str:
