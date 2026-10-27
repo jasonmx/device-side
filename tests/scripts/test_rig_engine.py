@@ -27,6 +27,7 @@ from tests.rig.engine import (
     write_report,
 )
 from tests.rig.inventory import Inventory, RigEntity
+from tests.rig.journal import Journal
 
 TOL = 0.2
 PENDING: list[asyncio.TimerHandle | asyncio.Task] = []
@@ -1197,6 +1198,82 @@ async def test_options_already_in_force_are_not_saved(tmp_path, monkeypatch):
     assert not result.failed
     assert admin.saved == []
     assert admin.aborted == 1
+
+
+RESTORED_MIDWAY = """
+action: move
+rig_seconds: 5
+tests:
+  - name: t
+    roles: [light_ct]
+    steps:
+      - set: {state: off}
+      - restore: null
+      - set: {state: off}
+"""
+WAITING_MIDWAY = RESTORED_MIDWAY.replace("      - restore: null\n", "      - wait: 30\n")
+
+
+async def test_the_journal_holds_each_change_before_it_is_made_and_is_gone_after_the_run(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "OPTIONS_RELOAD_S", 0)
+    journal = Journal(tmp_path / "journal.json")
+    admin = FakeAdmin({"light.a": {"state": "on", "attributes": {"brightness": 200}}})
+    admin.respond = options_seen(admin)
+    seen = []  # what the journal held as each change was sent
+    rest, call_service = admin.rest, admin.call_service
+
+    async def save(method, path, json=None):
+        if method == "post" and not path.endswith("/options/flow"):
+            seen.append(("save", journal.get("options")))
+        return await rest(method, path, json)
+
+    async def light(domain, service, data=None, return_response=False):
+        if domain == "light":
+            seen.append((service, list(journal.get("taken", {}))))
+        return await call_service(domain, service, data, return_response)
+
+    admin.rest, admin.call_service = save, light
+    result = await run(
+        [suite(tmp_path, RESTORED_MIDWAY, "fake")], inventory("fake", light_ct="light.a"), OPTION_REGISTRY,
+        admin, admin=admin, tolerance=TOLERANCE, out=lambda _: None, journal=journal,
+    )
+
+    assert not result.failed
+    original = {"opt": True, "other": False}
+    assert seen == [
+        ("save", original),
+        ("turn_off", ["light.a"]),
+        ("turn_on", ["light.a"]),  # the restore step: the case goes on, so the journal keeps the light
+        ("turn_off", ["light.a"]),
+        ("turn_on", ["light.a"]),
+        ("save", original),
+    ]
+    assert admin.states["light.a"]["attributes"] == {"brightness": 200}
+    assert not journal.path.exists()
+
+
+async def test_a_run_cancelled_mid_case_puts_back_and_clears_its_journal(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "OPTIONS_RELOAD_S", 0)
+    journal = Journal(tmp_path / "journal.json")
+    admin = FakeAdmin({"light.a": {"state": "on", "attributes": {"brightness": 200}}})
+    admin.respond = options_seen(admin)
+    task = asyncio.create_task(
+        run(
+            [suite(tmp_path, WAITING_MIDWAY, "fake")], inventory("fake", light_ct="light.a"), OPTION_REGISTRY,
+            admin, admin=admin, tolerance=TOLERANCE, out=lambda _: None, journal=journal,
+        )
+    )
+    while admin.states["light.a"]["state"] != "off":
+        await asyncio.sleep(0.005)
+    assert journal.path.exists()
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert admin.states["light.a"] == {"entity_id": "light.a", "state": "on", "attributes": {"brightness": 200}}
+    assert admin.options == {"opt": True, "other": False}
+    assert not journal.path.exists()
 
 
 async def test_a_save_the_flow_refuses_closes_the_flow_and_raises():

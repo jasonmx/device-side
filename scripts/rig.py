@@ -8,7 +8,11 @@ DEVICE_SIDE_RIG_APPROVED=1 answers the gate for a non-interactive caller that al
 One run at a time: a lock in the git common dir, shared by every worktree; a second run waits for it. The tests are the
 step files in tests/rig/steps, run by tests/rig/engine.py; a full pass of an adapter rewrites its bench record.
 
+SIGTERM and SIGHUP stop a run as Ctrl-C does, putting the devices back. What a run changes is journaled first (next to
+the lock), so whatever a killed run leaves changed, the next run puts back before its gate, or --recover alone does.
+
 Usage: scripts/rig.py [--dry-run] [--no-deploy] [--no-restart] [--unattended] [--integration KEY ...] [-k TEXT]
+       scripts/rig.py --recover
 """
 
 import argparse
@@ -17,13 +21,14 @@ import datetime
 import fcntl
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
@@ -36,6 +41,8 @@ from tests.rig.bridge import HueBridge  # noqa: E402
 from tests.rig.client import HAClient  # noqa: E402
 from tests.rig.engine import (  # noqa: E402
     ADMIN_INTEGRATIONS,
+    EntryOptions,
+    Snapshot,
     StepFile,
     Suite,
     cases,
@@ -45,6 +52,7 @@ from tests.rig.engine import (  # noqa: E402
     write_report,
 )
 from tests.rig.inventory import INVENTORY, Inventory, load_env  # noqa: E402
+from tests.rig.journal import Journal  # noqa: E402
 
 COMPONENT = "custom_components/device_side"
 BENCH_DIR = REPO / "docs" / "bench"
@@ -53,6 +61,8 @@ READY_TIMEOUT_S = 180
 RESTART_ESTIMATE_S = 90
 LOCK_NAME = "device_side-rig.lock"
 LOCK_POLL_S = 2.0  # how often a waiting run retries the lock
+JOURNAL_NAME = "device_side-rig.journal.json"
+ABORT_SIGNALS = (signal.SIGTERM, signal.SIGHUP)
 # Run reports go where the OS clears old files: they are for reviewing a run, not for keeping.
 REPORT_DIR = Path(tempfile.gettempdir()) / "device_side-rig"
 
@@ -238,12 +248,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--action", action="append", help="limit to an action's step files (repeatable)")
     parser.add_argument("-k", dest="keyword", help="run only test cases whose id contains this text")
     parser.add_argument("--unattended", action="store_true", help="skip observed tests, reporting them not observed")
+    parser.add_argument("--recover", action="store_true", help="put back what an aborted run left changed, then stop")
     args = parser.parse_args(argv)
 
-    if not args.dry_run:
-        lock = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir")) / LOCK_NAME
-        _held = lock_rig(lock, git("rev-parse", "--abbrev-ref", "HEAD"))  # noqa: F841 (held until exit)
+    _held, journal = hold_rig(args.dry_run)  # the lock is held until exit
     env = load_env()
+    replay(env, journal, args.dry_run, args.recover)
+    if args.recover:
+        return 1 if journal else 0
     if not INVENTORY.exists():
         raise SystemExit(f"{INVENTORY} is absent; copy inventory.example.yaml and fill it in")
     inventory = Inventory.load()
@@ -277,7 +289,36 @@ def main(argv: list[str] | None = None) -> int:
         }
         subprocess.run(command, check=True, env=deploy_env)
     wait_until_ready(env["HA_URL"].rstrip("/"), env["HA_TOKEN"], READY_TIMEOUT_S if restarting else 15)
-    return asyncio.run(run_rig(env, suites, inventory, registry, args.keyword, args.unattended))
+    return run_tests(run_rig(env, suites, inventory, registry, args.keyword, args.unattended, journal))
+
+
+def hold_rig(dry_run: bool) -> tuple[TextIO | None, Journal]:
+    """The rig lock, unless it is a dry run, and the journal, read once the lock is held: whoever last held it has
+    exited, so the journal is what it left."""
+    common_dir = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir"))
+    lock = None if dry_run else lock_rig(common_dir / LOCK_NAME, git("rev-parse", "--abbrev-ref", "HEAD"))
+    return lock, Journal(common_dir / JOURNAL_NAME)
+
+
+def run_tests(rig_run: Coroutine[Any, Any, int]) -> int:
+    """Run run_rig, saying "Aborted." when a signal cancelled it (cancel_on_signals)."""
+    try:
+        return asyncio.run(rig_run)
+    except asyncio.CancelledError:
+        print("Aborted.")
+        return 1
+
+
+def replay(env: dict, journal: Journal, dry_run: bool, asked: bool) -> None:
+    """Put back what an aborted run left changed. A dry run holds no lock, so the run may still be going: it only says
+    the journal is there."""
+    if not journal:
+        if asked:
+            print("No aborted run left anything to put back.")
+    elif dry_run:
+        print(f"An aborted run left changes in {journal.path}; the next run puts them back before its gate.")
+    else:
+        asyncio.run(recover_rig(env, journal))
 
 
 def check_tokens(env: dict, suites: list[Suite], registry: AdapterRegistry) -> None:
@@ -338,19 +379,17 @@ async def run_rig(
     registry: AdapterRegistry,
     keyword: str | None,
     unattended: bool,
+    journal: Journal | None = None,
 ) -> int:
     """Run the step files, then write a bench record for each adapter whose every test passed."""
-    ha = HAClient(env["HA_URL"], env["HA_TOKEN"])
-    admin = HAClient(env["HA_URL"], env["HA_ADMIN_TOKEN"]) if env.get("HA_ADMIN_TOKEN") else None
+    cancel_on_signals()
+    ha, admin = await connect(env)
     bridge = None
     if env.get("HUE_BRIDGE_HOST") and env.get("HUE_APP_KEY"):
         bridge = HueBridge(env["HUE_BRIDGE_HOST"], env["HUE_APP_KEY"])
-    await ha.connect()
-    if admin:
-        await admin.connect()
     paused: list[str] = []
     try:
-        await pause(ha, pause_list(env), paused)
+        await pause(ha, pause_list(env), paused, journal)
         result = await run(
             suites,
             inventory,
@@ -360,6 +399,7 @@ async def run_rig(
             keyword=keyword,
             ask=None if unattended else input,
             bridge=bridge,
+            journal=journal,
         )
         stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         print(f"\nReport: {write_report(result, REPORT_DIR, f'rig run {stamp}')}")
@@ -368,13 +408,76 @@ async def run_rig(
         for path in await write_records(result, ha, registry, BENCH_DIR, today, source):
             print(f"Wrote {path.relative_to(REPO)}; review the diff before committing it.")
     finally:
-        await resume(ha, paused)
+        await resume(ha, paused, journal)
         if bridge:
             await bridge.close()
         await ha.close()
         if admin:
             await admin.close()
     return 1 if result.failed else 0
+
+
+def cancel_on_signals() -> None:
+    """Have SIGTERM and SIGHUP cancel the running task, as asyncio.run does for Ctrl-C, so its finally blocks put the
+    devices back. The first one restores the default handlers: a second kills the process, leaving the journal."""
+    loop = asyncio.get_running_loop()
+    task = asyncio.current_task()
+
+    def abort() -> None:
+        for signum in ABORT_SIGNALS:
+            loop.remove_signal_handler(signum)
+        print("Aborting: putting devices back (signal again to leave it to the next run).")
+        task.cancel()
+
+    for signum in ABORT_SIGNALS:
+        loop.add_signal_handler(signum, abort)
+
+
+async def connect(env: dict) -> tuple[HAClient, HAClient | None]:
+    """The HA connection, and the admin one when .env.rig has HA_ADMIN_TOKEN."""
+    ha = HAClient(env["HA_URL"], env["HA_TOKEN"])
+    admin = HAClient(env["HA_URL"], env["HA_ADMIN_TOKEN"]) if env.get("HA_ADMIN_TOKEN") else None
+    await ha.connect()
+    if admin:
+        await admin.connect()
+    return ha, admin
+
+
+async def recover_rig(env: dict, journal: Journal) -> None:
+    if not (env.get("HA_URL") and env.get("HA_TOKEN")):
+        raise SystemExit("HA_URL and HA_TOKEN must be set in .env.rig to put back what an aborted run left changed")
+    ha, admin = await connect(env)
+    try:
+        await recover(ha, admin, journal)
+    finally:
+        await ha.close()
+        if admin:
+            await admin.close()
+
+
+async def recover(ha: HAClient, admin: HAClient | None, journal: Journal, out: Callable[[str], None] = print) -> None:
+    """Put back what an aborted run left changed, in the order its finally blocks would have: the case's entities,
+    device_side's options, the paused automations. A step that fails is printed and dropped from the journal;
+    options stay in it while there is no admin connection to set them."""
+    out(f"An aborted rig run left changes in {journal.path}; putting them back.")
+    if taken := journal.get("taken"):
+        for entity_id, state in taken.items():
+            if state is not None and state["state"] in ("on", "off"):
+                out(f"Putting {entity_id} back {state['state']}.")
+        power, stored = journal.get("power", {}), journal.get("stored", {})
+        await Snapshot(ha, power, taken=taken, stored=stored, journal=journal).restore()
+    if (options := journal.get("options")) is not None:
+        if admin is None:
+            out("Putting device_side's options back needs HA_ADMIN_TOKEN in .env.rig; they stay in the journal.")
+        else:
+            try:
+                await EntryOptions(admin).apply(options)
+                out("Put device_side's options back.")
+            except Exception as err:  # noqa: BLE001 - as resume: say so, and go on to the automations
+                out(f"Could not put device_side's options back; set them in HA: {err}")
+            journal.clear("options")
+    if paused := journal.get("paused"):
+        await resume(ha, paused, journal)
 
 
 PAUSABLE = ("automation", "switch")
@@ -388,8 +491,9 @@ def pause_list(env: dict) -> list[str]:
     return entity_ids
 
 
-async def pause(ha: HAClient, entity_ids: list[str], paused: list[str]) -> None:
-    """Turn off each listed automation or switch that is on, appending it to `paused` as it goes.
+async def pause(ha: HAClient, entity_ids: list[str], paused: list[str], journal: Journal | None = None) -> None:
+    """Turn off each listed automation or switch that is on, appending it to `paused` (and the journal, first) as it
+    goes.
 
     For automations that would fight the tests: motion lighting turning a light on as someone walks past, or an
     Adaptive Lighting instance resetting a light's color temperature whenever it turns on. One that is already off
@@ -399,12 +503,14 @@ async def pause(ha: HAClient, entity_ids: list[str], paused: list[str]) -> None:
         if (state := await ha.get_state(entity_id)) is None:
             raise SystemExit(f"{entity_id} in RIG_PAUSE has no state in Home Assistant")
         if state["state"] == "on":
+            if journal is not None:
+                journal.update(paused=[*paused, entity_id])
             await ha.call_service(entity_id.partition(".")[0], "turn_off", {"entity_id": entity_id})
             paused.append(entity_id)
             print(f"Paused {entity_id} for the run.")
 
 
-async def resume(ha: HAClient, paused: list[str]) -> None:
+async def resume(ha: HAClient, paused: list[str], journal: Journal | None = None) -> None:
     """Turn back on what pause turned off; a failure is printed, so it can be turned on by hand."""
     for entity_id in paused:
         try:
@@ -412,6 +518,8 @@ async def resume(ha: HAClient, paused: list[str]) -> None:
             print(f"Resumed {entity_id}.")
         except Exception as err:  # noqa: BLE001 - try every one, and say which stayed off
             print(f"Could not turn {entity_id} back on: {err}. Turn it on by hand.")
+    if journal is not None:
+        journal.clear("paused")
 
 
 if __name__ == "__main__":

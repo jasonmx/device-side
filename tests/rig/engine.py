@@ -22,6 +22,7 @@ import yaml
 from .bridge import BridgeError, HueBridge
 from .client import HAClient, HAError
 from .inventory import RIG_DIR, ROLES, SETTLE_S, TOLERANCE_S, Inventory
+from .journal import Journal
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -490,11 +491,13 @@ def cases(suite: Suite, inventory: Inventory, keyword: str | None = None) -> lis
 
 class EntryOptions:
     """device_side's options on the rig, set for each case through the entry's options flow (admin only) and put
-    back when the run ends. Saving a change reloads the entry."""
+    back when the run ends. Saving a change reloads the entry. The original options are journaled before the first
+    save."""
 
-    def __init__(self, admin: HAClient, reload_s: float = OPTIONS_RELOAD_S):
+    def __init__(self, admin: HAClient, reload_s: float = OPTIONS_RELOAD_S, journal: Journal | None = None):
         self.admin = admin
         self.reload_s = reload_s
+        self.journal = journal
         self.entry_id: str | None = None
         self.original: dict[str, Any] | None = None
         self.current: dict[str, Any] = {}
@@ -512,6 +515,8 @@ class EntryOptions:
         values = {field["name"]: field.get("default") for field in flow.get("data_schema", [])}
         if self.original is None:
             self.original = dict(values)
+            if self.journal is not None:
+                self.journal.update(options=self.original)
         flow_path = f"/api/config/config_entries/options/flow/{flow['flow_id']}"
         if all(values.get(name) == on for name, on in wanted.items()):
             # Saving would still reload an entry whose options were never saved: they go from none to these.
@@ -541,6 +546,8 @@ class EntryOptions:
     async def restore(self) -> None:
         if self.original is not None and self.current != self.original:
             await self.apply(self.original)
+        if self.journal is not None:
+            self.journal.clear("options")
 
 
 class Outcome(StrEnum):
@@ -596,6 +603,7 @@ class Snapshot:
     HA shows no brightness or color for a light that is off, so with `device_side` set (the integration has
     get_attributes and set_attributes adapters) an off light's device-side attributes are read when it is first
     touched and written back after it is turned off again. A group is skipped there: its members are touched too.
+    What it takes is journaled before the case moves the entity, and cleared once restored.
     """
 
     ha: HAClient
@@ -603,6 +611,7 @@ class Snapshot:
     device_side: bool = False
     taken: dict[str, dict | None] = field(default_factory=dict)
     stored: dict[str, dict] = field(default_factory=dict)
+    journal: Journal | None = None
 
     async def take(self, entity_id: str, group: bool = False) -> dict | None:
         """The entity's state before the case moved it, and that of every entity it powers."""
@@ -614,12 +623,15 @@ class Snapshot:
                 )
                 if attributes := (response or {}).get(entity_id):
                     self.stored[entity_id] = attributes
+            if self.journal is not None:
+                self.journal.update(taken=self.taken, stored=self.stored, power=self.power)
             for powered, supply in self.power.items():
                 if supply == entity_id:
                     await self.take(powered)
         return self.taken[entity_id]
 
-    async def restore(self) -> None:
+    async def restore(self, clear: bool = True) -> None:
+        """Put back every entity taken; `clear=False` keeps the journal, for a case that goes on moving them."""
         # A powered entity goes back after its supply, whatever order the case touched them in.
         cut = [entity_id for entity_id in self.taken if self.power.get(entity_id) in self.taken]
         for entity_id in [entity_id for entity_id in self.taken if entity_id not in cut] + cut:
@@ -633,6 +645,8 @@ class Snapshot:
                     _LOGGER.warning("Could not restore %s to %s: %s", entity_id, state["state"], err)
             elif (self.taken[self.power[entity_id]] or {}).get("state") == "on":  # unpowered before: nothing to restore
                 await self.put_back_after_power(entity_id, state)
+        if clear and self.journal is not None:
+            self.journal.clear("taken", "stored", "power")
 
     async def put_back_after_power(self, entity_id: str, state: dict) -> None:
         loop = asyncio.get_running_loop()
@@ -725,6 +739,7 @@ class _CaseRun:
         busy: dict[str, float] | None = None,
         settle: float = 0.0,
         bridge: HueBridge | None = None,
+        journal: Journal | None = None,
     ):
         self.bridge = bridge
         self.case, self.ha, self.registry, self.ask, self.out, self.position = case, ha, registry, ask, out, position
@@ -741,6 +756,7 @@ class _CaseRun:
                 registry.adapter(action, self.integration) is not None
                 for action in ("get_attributes", "set_attributes")
             ),
+            journal=journal,
         )
         self.response: dict | None = None
         self.error: HAError | None = None
@@ -1104,7 +1120,7 @@ class _CaseRun:
         await self.answer(f"    {instruction} Press Enter when done... ")
 
     async def _restore(self, _args: None, _following: str | None) -> None:
-        await self.snapshot.restore()
+        await self.snapshot.restore(clear=False)
 
     # Observed mode: a check becomes the wait it implies, and never fails.
 
@@ -1136,6 +1152,7 @@ async def run(
     settle: dict[str, float] = SETTLE_S,
     out: Callable[[str], None] = print,
     bridge: HueBridge | None = None,
+    journal: Journal | None = None,
 ) -> RunResult:
     """Run every case and print the table; ADMIN_INTEGRATIONS run on `admin`. `ask=None` is --unattended.
 
@@ -1160,8 +1177,8 @@ async def run(
         for suite, adapter, *_ in planned
     }
     rig_run = _Run(
-        registry, tolerance, settle, inventory.power(), ask, out, options, EntryOptions(admin) if admin else None,
-        bridge=bridge,
+        registry, tolerance, settle, inventory.power(), ask, out, options,
+        EntryOptions(admin, journal=journal) if admin else None, bridge=bridge, journal=journal,
     )
     try:
         waiting = [
@@ -1204,6 +1221,7 @@ class _Run:
     results: dict[tuple[int, str], CaseResult] = field(default_factory=dict)
     busy: dict[str, float] = field(default_factory=dict)  # _CaseRun.busy
     bridge: HueBridge | None = None
+    journal: Journal | None = None
 
     def case_run(self, case: Case, client: HAClient, ask: Callable[[str], str] | None, position: str = "") -> _CaseRun:
         integration = case.suite.integration
@@ -1219,6 +1237,7 @@ class _Run:
             self.busy,
             self.settle.get(integration, 0.0),
             self.bridge,
+            self.journal,
         )
 
     async def run_case(
