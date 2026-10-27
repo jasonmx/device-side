@@ -18,10 +18,9 @@ class ShellyTurnOnFor(Adapter[TurnOnForRequest]):
     scope: ClassVar[AdapterScope] = AdapterScope(
         domains=frozenset({"light", "switch"}),
         duration=TIMER_LIMITS,
-        # Light fields stay out of scope until a tester with a Shelly Light, CCT or RGB* component reports.
-        fields=frozenset(),
-        # A relay shown as a light sends the same Switch.Set; Light, CCT and RGB* wait for a tester's report.
-        capabilities=frozenset({"Switch"}),
+        fields=frozenset({"brightness", "color_temp_kelvin", "rgb_color", "transition"}),
+        # A relay shown as a light sends the same Switch.Set; Light, CCT, RGB and RGBW wait for a tester's report.
+        capabilities=frozenset({"Switch", "RGBCCT"}),
         confirmable=True,
     )
 
