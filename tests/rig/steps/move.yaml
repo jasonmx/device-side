@@ -187,7 +187,7 @@ tests:
       - set: {state: off}
     steps:
       - call: {color_temp: warmer}
-      - expect_response: {status: unchanged, integration: self, detail: off}
+      - expect_response: {status: unchanged, integration: self, detail: 'off'}
       - expect_state: {state: off}
 
   - name: brighter_and_cooler  # two writes, each with its own duration: the bridge runs them independently
@@ -200,7 +200,9 @@ tests:
       - sample: {attribute: brightness, for: 2, expect: rising, max: 50, source: device_side}
       - sample: {attribute: color_temp_kelvin, for: 2, expect: rising, max: 4500, source: device_side}
       - wait: 4 + tol
-      - expect_state: {state: on, brightness: {min: 250}, color_temp_kelvin: {min: 6400}}
+      # HA may end on a bulb's mid-fade report (Tested behavior), so read the prediction.
+      - sample: {attribute: brightness, for: 0.5, expect: steady, min: 99, source: device_side}
+      - sample: {attribute: color_temp_kelvin, for: 0.5, expect: steady, min: 6400, source: device_side}
     observe:
       see: The light dim and warm, brightening to full and cooling to daylight white together over about 8 s.
       watch: Whether both change all the way through, rather than one jumping or stalling.

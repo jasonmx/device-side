@@ -680,3 +680,18 @@ async def test_a_rooms_cut_stops_color_temp_light_by_light(hass, bridge, clock):
         ("light/one", BOTH_STOPS),
         ("light/two", {"on": {"on": True}, "dimming": {"brightness": pytest.approx(50.0)}}),
     ]
+
+
+async def test_a_room_with_a_light_in_color_mode_is_refused(hass, bridge):
+    bridge.light("one", on=True, mirek=300)
+    bridge.light("two", on=True, mirek=300, mirek_valid=False)
+    bridge.room("grouped-1", ["one", "two"], brightness=50.0)
+    entry = await hue_entry(hass, bridge)
+    members = [add_hue_entity(hass, entry, f"light.{light_id}", light_id, state="on") for light_id in ("one", "two")]
+    add_hue_group(hass, entry, "light.room", "grouped-1", members)
+
+    with pytest.raises(HomeAssistantError) as raised:
+        await call(hass, "move", {"entity_id": "light.room", "brightness": "up", "color_temp": "warmer"})
+
+    assert raised.value.translation_placeholders["summary"] == "light.room: not_in_color_temp_mode"
+    assert bridge.puts == []
