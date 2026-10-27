@@ -1,5 +1,6 @@
 """Zigbee2MQTT turn_on_for: turning on hue_native_control before a timer with a color."""
 
+import asyncio
 import json
 import logging
 from types import SimpleNamespace
@@ -25,23 +26,48 @@ LOGGER = "custom_components.device_side.integrations.zigbee2mqtt"
 
 
 class Broker:
-    """MQTT as the adapter sees it: retained messages on subscribe, and Z2M answering options requests."""
+    """MQTT as the adapter sees it, and Z2M answering options requests.
+
+    Like HA's client, a subscription goes live only when its debounced batch reaches the broker (here, on the next
+    loop turn), and a retained message is delivered then. A reply published before that is lost.
+    """
 
     def __init__(self) -> None:
         self.retained: dict[str, object] = {}
+        self.pending: list[tuple[str, object]] = []
         self.subscribers: dict[str, list] = {}
+        self.topics: list[str] = []  # every topic ever subscribed
         self.published: list[dict] = []
-        self.reply: dict | None = {"status": "ok"}  # merged with the request's transaction; None = no reply
+        self.reply: dict | str | None = {"status": "ok"}  # merged with the transaction; a str is sent as is
 
     async def subscribe(self, hass, topic, msg_callback):
-        self.subscribers.setdefault(topic, []).append(msg_callback)
-        if topic in self.retained:
-            msg_callback(SimpleNamespace(topic=topic, payload=json.dumps(self.retained[topic])))
-        return lambda: self.subscribers[topic].remove(msg_callback)
+        if not self.pending:
+            asyncio.get_running_loop().call_soon(self.flush)
+        self.pending.append((topic, msg_callback))
+        self.topics.append(topic)
 
-    def deliver(self, topic: str, payload) -> None:
+        def unsubscribe() -> None:
+            if (topic, msg_callback) in self.pending:
+                self.pending.remove((topic, msg_callback))
+            else:
+                self.subscribers[topic].remove(msg_callback)
+
+        return unsubscribe
+
+    def flush(self) -> None:
+        batch, self.pending = self.pending, []
+        for topic, msg_callback in batch:
+            self.subscribers.setdefault(topic, []).append(msg_callback)
+        for topic, msg_callback in batch:
+            if topic in self.retained:
+                msg_callback(SimpleNamespace(topic=topic, payload=json.dumps(self.retained[topic])))
+
+    def deliver(self, topic: str, payload: str) -> None:
         for msg_callback in list(self.subscribers.get(topic, [])):
-            msg_callback(SimpleNamespace(topic=topic, payload=json.dumps(payload)))
+            msg_callback(SimpleNamespace(topic=topic, payload=payload))
+
+    def listening(self, topic: str) -> bool:
+        return bool(self.subscribers.get(topic)) or any(t == topic for t, _ in self.pending)
 
     @callback
     def publish(self, service: ServiceCall) -> None:
@@ -49,8 +75,11 @@ class Broker:
         self.published.append({"topic": topic, "payload": payload})
         if topic.startswith("zigbee2mqtt/bridge/request/") and self.reply is not None:
             response = topic.replace("/request/", "/response/")
-            self.deliver(response, {"transaction": "someone else's", "status": "error"})
-            self.deliver(response, {**self.reply, "transaction": payload["transaction"]})
+            self.deliver(response, json.dumps({"transaction": "someone else's", "status": "error"}))
+            if isinstance(self.reply, str):
+                self.deliver(response, self.reply)
+            else:
+                self.deliver(response, json.dumps({**self.reply, "transaction": payload["transaction"]}))
 
     def requests(self) -> list[dict]:
         return [p for p in self.published if p["topic"].startswith("zigbee2mqtt/bridge/request/")]
@@ -93,7 +122,7 @@ async def test_hue_bulb_with_option_off_gets_it_before_the_timer(hass, setup_pro
     assert broker.published.index(request) < broker.published.index(broker.timers()[0])
     assert len(turn_ons) == 1
     assert "Turned on Zigbee2MQTT's hue_native_control for light.lamp" in caplog.text
-    assert not broker.subscribers.get(DEVICE_RESPONSE) and not broker.subscribers.get(INFO)
+    assert not broker.listening(DEVICE_RESPONSE) and not broker.listening(INFO)
 
 
 @pytest.mark.parametrize("field", [{"color_temp_kelvin": 3000}, {"hs_color": [120, 100]}, {"xy_color": [0.2, 0.3]}])
@@ -130,7 +159,7 @@ async def test_other_brands_are_left_alone(hass, setup_production, broker, turn_
     await call(hass, "turn_on_for", {"entity_id": "light.lamp", "duration": 6, "rgb_color": [255, 0, 0]})
 
     assert broker.requests() == []
-    assert broker.subscribers == {}
+    assert broker.topics == []
     assert len(broker.timers()) == 1
 
 
@@ -141,7 +170,7 @@ async def test_without_a_color_nothing_is_read(hass, setup_production, broker, t
     await call(hass, "turn_on_for", {"entity_id": "light.lamp", "duration": 6, **fields})
 
     assert broker.requests() == []
-    assert broker.subscribers == {}
+    assert broker.topics == []
 
 
 async def test_no_bridge_info_warns_and_still_sends(hass, setup_production, broker, turn_ons, caplog):
@@ -165,7 +194,8 @@ async def test_no_reply_warns_and_still_sends(hass, setup_production, broker, tu
     assert response == {"light.lamp": SENT}
     assert len(broker.timers()) == 1
     assert "Couldn't turn on Zigbee2MQTT's hue_native_control for light.lamp" in caplog.text
-    assert not broker.subscribers.get(DEVICE_RESPONSE)
+    assert caplog.text.rstrip().endswith("no reply from Zigbee2MQTT")
+    assert not broker.listening(DEVICE_RESPONSE)
 
 
 async def test_error_reply_warns_with_z2m_error_and_still_sends(hass, setup_production, broker, turn_ons, caplog):
@@ -190,20 +220,11 @@ async def test_reply_without_status_warns(hass, setup_production, broker, turn_o
 
 async def test_unreadable_reply_is_ignored(hass, setup_production, broker, turn_ons, caplog):
     hue_bulb(hass)
-    broker.reply = None
-    real_publish = broker.publish
-
-    @callback
-    def publish_then_garble(service):
-        real_publish(service)
-        for msg_callback in list(broker.subscribers.get(DEVICE_RESPONSE, [])):
-            msg_callback(SimpleNamespace(topic=DEVICE_RESPONSE, payload="not json"))
-
-    hass.services.async_register("mqtt", "publish", publish_then_garble)
+    broker.reply = "not json"
 
     await call(hass, "turn_on_for", {"entity_id": "light.lamp", "duration": 6, "rgb_color": [255, 0, 0]})
 
-    assert "Couldn't turn on Zigbee2MQTT's hue_native_control" in caplog.text
+    assert "may light at its last color first: no reply from Zigbee2MQTT" in caplog.text
     assert len(broker.timers()) == 1
 
 
@@ -231,7 +252,7 @@ async def test_group_with_a_hue_member_gets_the_group_option(hass, setup_product
     assert request["topic"] == GROUP_REQUEST
     assert request["payload"]["id"] == "7"
     assert "Turned on Zigbee2MQTT's hue_native_control for light.downstairs" in caplog.text
-    assert not broker.subscribers.get(GROUP_RESPONSE)
+    assert not broker.listening(GROUP_RESPONSE)
 
 
 async def test_group_with_option_on_sends_no_request(hass, setup_production, broker, turn_ons):

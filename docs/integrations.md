@@ -160,8 +160,9 @@ one Philips command instead, which lights in the new color from the start and ke
 
 So the first time a call carries `color_temp_kelvin`, `rgb_color`, `hs_color` or `xy_color` to a
 Hue bulb (manufacturer `Philips` in Home Assistant's device registry), Device Side turns that
-option on for it, and logs it at info level. It checks Z2M's settings on every such call, waits up
-to 5 s for Z2M's answer, and sends the timer either way. If Z2M doesn't answer, it logs a warning
+option on for it, and logs it at info level. It checks Z2M's settings on every such call, which adds
+a fraction of a second before the light turns on, waits up to 5 s for Z2M's answer when it changes
+the option, and sends the timer either way. If Z2M doesn't answer, it logs a warning
 and that one call may light at the last color first. Calls without a color or color temperature
 never touch the option.
 
