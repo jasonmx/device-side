@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from dataclasses import replace
 
 from homeassistant.config_entries import ConfigEntryState
@@ -52,6 +53,23 @@ def resolve(
     if integration.is_group is not None and integration.is_group(hass, target):
         target = replace(target, is_group=True)
     return target
+
+
+def resolve_members(
+    hass: HomeAssistant, registry: AdapterRegistry, group: Target, platform: str, unique_ids: Iterable[str]
+) -> list[Target]:
+    """A native group's members, for an integration's expand_group: each unique_id's entity in the group's domain
+    on `platform`, resolved with the group as via_group, sorted by entity_id.
+
+    A member with no entity in that domain, or one resolve refuses, is left out.
+    """
+    entities = er.async_get(hass)
+    members = []
+    for unique_id in unique_ids:
+        entity_id = entities.async_get_entity_id(group.domain, platform, unique_id)
+        if entity_id is not None and not isinstance(member := resolve(hass, registry, entity_id, group.entity_id), str):
+            members.append(member)
+    return sorted(members, key=lambda member: member.entity_id)
 
 
 def _resolve_wrapper(
