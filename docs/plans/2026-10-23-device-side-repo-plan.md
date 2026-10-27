@@ -155,6 +155,9 @@ requires it.
   ESPHome (too experimental; auto-off is compiled into device YAML, no runtime primitive),
   Tasmota (small, declining share), TP-Link Kasa (local, has a countdown module, but waits for
   someone to ask). A request with evidence reopens any of these.
+- **Set scene while off on Zigbee dropped (2026-10-27):** Zigbee scenes live on the device and recall turns
+  lights on, and an HA-scene composition over `set_attributes` changes `set_scene`'s scope. `set_scene` stays
+  Hue-only until users ask.
 - **Set Turn-On Levels dropped (2026-10-25):** `set_turn_on_defaults` (the level and fade a device
   remembers for a plain turn-on) is a big, complicated lift. Revisit once a large user base shows
   whether it's needed and what it should look like.
@@ -616,6 +619,7 @@ test-report issue).
 | 9d | Rig coverage sweep | **plan in /plan first**; audit every adapter's scope (domains, capabilities, fields, native groups) against the maintainer's rig hardware; add inventory roles and step files for everything the rig can reach; rig runs leave a current-fingerprint bench record for each, so v0.1.0 launches with the widest scope the rig can prove. What the rig can't reach is listed for 9b and stays out of scope. |
 | 9e | Native groups survey | **plan in /plan first**; a short exploration of integration-native groups beyond Hue (Z2M and ZHA group entities; Matter and Shelly where HA exposes any): how each is detected and addressed, whether its native group command keeps the device-side behavior (timed off, transitions) across members, and a rig check of each candidate. Outcome: per integration, `native_groups` on or off for v0.1.0, recorded as a decision here, with bench records for those turned on. Hue's `grouped_light` ships in 7 regardless. |
 | 9f | Core-aligned failure behavior | **plan in /plan first**; move the dispatcher's raise rule from "raise when every target failed" to core's, per `docs/action-behavior.md`: unavailable or missing targets skipped with core's warning; a field a target can't take dropped; a target the caller named that the action can never support raises (as `ServiceNotSupported`); a device or bridge error raises; a query that reads nothing raises. Decide whether command actions keep their optional status response, which core's commands don't have, and whether `nothing_to_set` becomes a warning (a hue_dimmer call passing only zeros did nothing). Every action's tests and the rig's `expect_error` steps follow. |
+| 13 | Zigbee parity and timer state | Plan: `docs/plans/2026-10-27-zigbee-parity-timer-state.md` (13a to 13k). `get_attributes` takes switches and reports a running timer (Shelly, Matter, ZHA, Z2M where readable); ZHA and Z2M gain `get_attributes`, `move`/`stop` (hue cycling included) and `set_attributes` while off; after a probe spike, by integration, with the Hue A60 visiting the Hue bridge, ZHA and Z2M once each after that integration's code freezes. Needs 7c and 9f first. |
 | 12 | `v0.1.0` ("v1" names the scope, not the version) | feature complete for this plan; scope limited to what rig runs (and any tester reports) cover; README feature table current; release checklist adapted from hue_dimmer; the `predicted_state` default reviewed (flip it to off if flaky), on the regression issues and rig runs since it landed. |
 | 9b | Remote tester flow (after `v0.1.0`) | **plan in /plan first**; starts when an adapter needs hardware the rig lacks (a reported bug on someone else's device, a community integration such as Z-Wave JS). Standalone tester runner: one file (`uv run`, PEP 723 inline metadata, aiohttp WebSocket + PyYAML), talks to HA_URL + long-lived token, assumes integration installed via HACS or by hand (no deploy), runs 9a's YAML step files with a confirmation gate on every run; `tests/rig/client.py` moved to a location both the runner and `scripts/rig.py` import; runner prints a prefilled `test-report.yml` issue body; RC-only umbrella Repairs issue with multi-select flow and prefilled per-test links; bench files filled from tester reports. |
 
@@ -632,6 +636,7 @@ so no later rig test is written twice, and the release gates (9c) land before th
 9d (rig coverage sweep) and 9e (native groups survey) were added on 2026-10-25, between 9c and v0.1.0.
 9f (core-aligned failure behavior) was added on 2026-10-26, after the Hue port showed device_side's raise rule
 differs from both core's and hue_dimmer's.
+13 (Zigbee parity and timer state) was added on 2026-10-27, after a v0.1.0 gap review.
 
 `v0.0.x` releases are cut between slices whenever a set of adapters reaches beta; one release may carry
 several integrations or actions.
