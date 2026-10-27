@@ -565,7 +565,8 @@ duration and whether a restart is needed, then requires interactive y/N (or
    `/api/config` until `RUNNING`, then wait for `device_side.turn_on_for` in `/api/services` (hard
    fail at 180 s).
 4. `tests/rig/engine.py` runs the step files on one `HAClient`. Flags: `--no-deploy`, `--no-restart`,
-   `--integration <key>`, `-k <test name substring>`, `--unattended` (skips `observe` steps).
+   `--integration <key>`, `--action <action>` (its step files, whole, so they still write records),
+   `-k <test name substring>`, `--unattended` (skips `observe` steps).
 
 Step files (`tests/rig/steps/<action>.yaml`, one per action) run against every inventory integration
 that has the adapter; the registry supplies the expected status (`confirmable` -> `confirmed`, else

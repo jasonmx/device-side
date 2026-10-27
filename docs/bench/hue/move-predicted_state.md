@@ -4,12 +4,12 @@
 |---|---|
 | Result | pass |
 | Date | 2026-10-27 |
-| Source | rig run (`scripts/rig.py`), commit `385b8bd` |
-| Fingerprint | `1d5a35f3ca9bac91` (`integrations/hue/move.py`) |
+| Source | rig run (`scripts/rig.py`), commit `b3bf589` |
+| Fingerprint | `31adc08629d34287` (`integrations/hue/move.py`) |
 | Home Assistant | 2026.10.2 |
 | Device | Hue ambiance lamp (`LTA009`), firmware `1.163.1`; Zone, firmware `unknown` |
 | Capabilities | every capability the adapter addresses |
-| Fields | `brightness` |
+| Fields | `brightness`, `color_temp` |
 | Options | `predicted_state` |
 
 ## Tests
@@ -26,5 +26,7 @@
 | `ha_change_mid_fade_shows_at_once[group]` | `light` (group) | pass |
 | `bridge_scene_recall_mid_fade_shows_at_once[group]` | `light` (group) | pass |
 | `bridge_scene_recall_mid_fade_shows_at_once[group] observed` | `light` (group) | not observed |
+| `color_temp_shows_what_the_bridge_reports[light_ct]` | `light` (light_ct) | pass |
+| `color_temp_shows_what_the_bridge_reports[group]` | `light` (group) | pass |
 
 Tests marked `not observed` had nobody watching; their fields and capabilities are not listed.
