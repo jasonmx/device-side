@@ -54,3 +54,17 @@ def topic(target: Target, suffix: str) -> str | None:
             return None
         return f"{_Z2M_BASE_TOPIC}/{group_id}/{suffix}"
     return f"{_Z2M_BASE_TOPIC}/{addr}/{suffix}"
+
+
+def group_id(target: Target) -> str | None:
+    """The Z2M group ID of a group entity on the default base topic, or None for anything else."""
+    if target.device is None or (addr := z2m_address(target.device)) is None:
+        return None
+    if (group := _GROUP_ADDRESS.match(addr)) is None or group.group(1) != _ENCODED_BASE_TOPIC:
+        return None
+    return group.group(2)
+
+
+def bridge_topic(suffix: str) -> str:
+    """Z2M's bridge topic <base>/bridge/<suffix>, under the default base topic like topic()."""
+    return f"{_Z2M_BASE_TOPIC}/bridge/{suffix}"

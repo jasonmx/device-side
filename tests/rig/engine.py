@@ -33,7 +33,8 @@ _RESTORE_COLOR = ("color_temp_kelvin", "hs_color", "xy_color", "rgb_color")
 
 # Integrations whose adapter calls an admin-only action with the caller's context, so their suites run on
 # HA_ADMIN_TOKEN. ZHA: issue_zigbee_cluster_command is registered with async_register_admin_service.
-ADMIN_INTEGRATIONS = frozenset({"zha"})
+# Zigbee2MQTT: the z2m_option steps publish and subscribe over MQTT, which only an admin may.
+ADMIN_INTEGRATIONS = frozenset({"zha", "zigbee2mqtt"})
 
 # Statuses that mean the command reached the device; unchanged sent nothing, so it proves no call.
 _REACHED = frozenset({"confirmed", "sent"})
@@ -265,6 +266,13 @@ def _parse_do(args: Any) -> str:
     return args.strip()
 
 
+def _parse_z2m_option(args: Any) -> dict:
+    args = _mapping(args)
+    if not set(args) - {"target"}:
+        raise ValueError("name an option")
+    return args
+
+
 def _parse_restore(args: Any) -> None:
     if args not in (None, {}):
         raise ValueError("restore takes no arguments")
@@ -280,6 +288,9 @@ PARSERS: dict[str, Callable[[Any], Any]] = {
     "sample": _parse_sample,
     "do": _parse_do,
     "restore": _parse_restore,
+    # Zigbee2MQTT device options; both steps do nothing in another integration's suite.
+    "z2m_option": _parse_z2m_option,
+    "expect_z2m_option": _parse_z2m_option,
 }
 
 
@@ -801,6 +812,30 @@ class _CaseRun:
             want["brightness"] = {"min": brightness - 2, "max": brightness + 2}
         await self.await_state(entity_id, want, self.names["tol"])
 
+    async def z2m_ieee(self, entity_id: str) -> str:
+        entry = await self.ha.command({"type": "config/entity_registry/get", "entity_id": entity_id})
+        for device in await self.ha.command({"type": "config/device_registry/list"}):
+            if device["id"] == entry.get("device_id"):
+                for domain, ident in device["identifiers"]:
+                    if domain == "mqtt" and ident.startswith("zigbee2mqtt_0x"):
+                        return ident.removeprefix("zigbee2mqtt_")
+        raise StepFailure(f"{entity_id} has no Zigbee2MQTT device")
+
+    async def _z2m_option(self, args: dict, _following: str | None) -> None:
+        if self.integration != "zigbee2mqtt":
+            return
+        options = {name: value for name, value in args.items() if name != "target"}
+        await self.ha.set_z2m_device_options(await self.z2m_ieee(self.entity(args)), options)
+
+    async def _expect_z2m_option(self, args: dict, _following: str | None) -> None:
+        if self.integration != "zigbee2mqtt":
+            return
+        entity_id = self.entity(args)
+        got = await self.ha.z2m_device_options(await self.z2m_ieee(entity_id))
+        for name, want in args.items():
+            if name != "target" and got.get(name) != want:
+                raise StepFailure(f"{entity_id}: Zigbee2MQTT option {name} is {got.get(name)!r}, expected {want!r}")
+
     async def _call(self, args: dict, following: str | None) -> None:
         action = args.get("action", self.case.suite.action)
         entity_id = self.entity(args)
@@ -969,6 +1004,7 @@ class _CaseRun:
         pass
 
     _relaxed_expect_error = _relaxed_expect_response
+    _relaxed_expect_z2m_option = _relaxed_expect_response
 
     async def _relaxed_expect_state(self, args: dict, following: str | None) -> None:
         if "within" in args:

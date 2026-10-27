@@ -28,7 +28,7 @@ from tests.rig.inventory import Inventory, RigEntity
 
 TOL = 0.2
 PENDING: list[asyncio.TimerHandle | asyncio.Task] = []
-TOLERANCE = {"shelly": TOL, "zha": TOL, "hue": TOL, "fake": TOL}
+TOLERANCE = {"shelly": TOL, "zha": TOL, "zigbee2mqtt": TOL, "hue": TOL, "fake": TOL}
 REGISTRY = AdapterRegistry.discover()
 
 ON_THEN_OFF = """
@@ -1074,3 +1074,90 @@ async def test_an_entity_that_never_rejoins_is_logged_after_the_deadline(tmp_pat
     result = await run_one(ha, suite(tmp_path, text, "zha"), powered_inventory(), admin=ha)
     assert outcomes(result)["t[switch_plug]"][0] is Outcome.PASS
     assert "Could not restore light.bulb after power returned: no route" in caplog.text
+
+
+Z2M_COLOR = """
+action: turn_on_for
+rig_seconds: 5
+tests:
+  - name: color_then_off
+    roles: [light_color]
+    setup:
+      - z2m_option: {hue_native_control: false}
+    steps:
+      - call: {duration: 0.6, rgb_color: [255, 0, 0]}
+      - expect_z2m_option: {hue_native_control: true}
+"""
+
+
+class Z2MHA(FakeHA):
+    """FakeHA with one Z2M device behind light.bulb and Z2M's device options, as Z2M's bridge holds them."""
+
+    def __init__(self, respond: Callable):
+        super().__init__({"light.bulb": {}}, respond)
+        self.options: dict = {}
+
+    async def command(self, payload: dict):
+        if payload["type"] == "config/entity_registry/get":
+            return {"entity_id": payload["entity_id"], "device_id": "d1"}
+        if payload["type"] == "config/device_registry/list":
+            return [{"id": "d1", "identifiers": [["mqtt", "zigbee2mqtt_0x0017880100000001"]]}]
+        return await super().command(payload)
+
+    async def set_z2m_device_options(self, ieee: str, options: dict) -> None:
+        self.calls.append(("z2m", "options", {"id": ieee, **options}))
+        self.options.update(options)
+
+    async def z2m_device_options(self, ieee: str) -> dict:
+        return dict(self.options)
+
+
+def native_control(turns_it_on: bool) -> Callable:
+    def respond(ha, action, data):
+        if turns_it_on:
+            ha.options["hue_native_control"] = True
+        return timer_on(ha, action, data)
+
+    return respond
+
+
+async def test_z2m_option_steps_set_and_check_a_device_option(tmp_path):
+    ha = Z2MHA(native_control(turns_it_on=True))
+    steps = suite(tmp_path, Z2M_COLOR, "zigbee2mqtt")
+    result = await run_one(ha, steps, inventory("zigbee2mqtt", light_color="light.bulb"), admin=ha)
+    assert outcomes(result) == {"color_then_off[light_color]": (Outcome.PASS, "")}
+    assert ("z2m", "options", {"id": "0x0017880100000001", "hue_native_control": False}) in ha.calls
+
+
+async def test_expect_z2m_option_fails_when_the_option_stays_off(tmp_path):
+    ha = Z2MHA(native_control(turns_it_on=False))
+    steps = suite(tmp_path, Z2M_COLOR, "zigbee2mqtt")
+    result = await run_one(ha, steps, inventory("zigbee2mqtt", light_color="light.bulb"), admin=ha)
+    outcome, detail = outcomes(result)["color_then_off[light_color]"]
+    assert outcome is Outcome.FAIL
+    assert "Zigbee2MQTT option hue_native_control is False, expected True" in detail
+
+
+async def test_z2m_option_steps_do_nothing_in_another_integrations_suite(tmp_path):
+    ha = FakeHA({"light.bulb": {}}, timer_on)
+    result = await run_one(ha, suite(tmp_path, Z2M_COLOR, "zha"), inventory("zha", light_color="light.bulb"), admin=ha)
+    assert outcomes(result) == {"color_then_off[light_color]": (Outcome.PASS, "")}
+
+
+async def test_a_light_without_a_z2m_device_fails_the_step(tmp_path):
+    ha = Z2MHA(timer_on)
+
+    async def no_device(payload):
+        return {"entity_id": "light.bulb", "device_id": None} if payload["type"] == "config/entity_registry/get" else []
+
+    ha.command = no_device
+    steps = suite(tmp_path, Z2M_COLOR, "zigbee2mqtt")
+    result = await run_one(ha, steps, inventory("zigbee2mqtt", light_color="light.bulb"), admin=ha)
+    assert "light.bulb has no Zigbee2MQTT device" in outcomes(result)["color_then_off[light_color]"][1]
+
+
+@pytest.mark.parametrize("args", ["null", "{}", "{target: light_color}"])
+def test_z2m_option_needs_an_option(tmp_path, args):
+    text = Z2M_COLOR.replace("z2m_option: {hue_native_control: false}", f"z2m_option: {args}")
+    with pytest.raises(ValueError, match="name an option"):
+        suite(tmp_path, text, "zigbee2mqtt")
