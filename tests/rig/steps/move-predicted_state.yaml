@@ -43,17 +43,21 @@ tests:
       - wait: 7
       - expect_state: {state: on, brightness: {min: 200, max: 208}}
 
-  - name: bridge_scene_recall_mid_fade_shows_at_once  # a soft off hides the lights' reports; the recall must end that
+  - name: bridge_scene_recall_mid_fade_shows_at_once  # the fade hides the lights' reports; the recall must end that
     roles: [group]
     setup:
-      - set: {state: on, brightness_pct: 100}
+      - set: {state: on, brightness_pct: 10, color_temp_kelvin: 6500}  # far from the scene, so the recall shows
+      - set: {state: off}
     steps:
-      - call: {brightness: down, sweep_time: 10}
-      - wait: 2
+      - call: {brightness: up, sweep_time: 20}
+      - wait: 3
       - bridge: {target: scene, recall: true}
-      - wait: 12  # past the soft off's end, which would show the zone off
-      - expect_state: {state: on}
+      - wait: 20  # past the fade's end, which would show the zone at full
+      # the scene's level, not the fade's full; needs the scene to hold light_ct (in the group) below full
+      - expect_state: {target: light_ct, state: on, brightness: {max: 240}}
     observe:
-      see: The zone fading down from full; 2 s in, the zone's scene is recalled on the Hue bridge.
-      watch: The lights at the recall, and HA's light card for the zone once 10 s have passed.
-      ask: Did the lights change to the scene and stay on, with HA showing the zone on?
+      see: The zone off, then fading up from its dimmest in cool white over 20 s; 3 s in, its scene is recalled on the
+        Hue bridge.
+      watch: The lights at the recall, then HA's card for the zone once the 20 s have passed.
+      ask: Did the lights jump to the scene's colors and levels at the recall and stay there, with HA showing the scene
+        rather than full brightness?
