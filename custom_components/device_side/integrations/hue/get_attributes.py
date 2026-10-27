@@ -8,8 +8,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util.color import color_temperature_mired_to_kelvin, color_xy_to_hs, color_xy_to_RGB
 
 from .bridge import bridge_api, resource_id
-from .move import BRIGHTNESS, lit
-from .transition_cache import TransitionCache, transition_cache
+from .move import lit
+from .transition_cache import BRIGHTNESS, TransitionCache, transition_cache
 from ...core.adapter import Adapter
 from ...core.models import EntityResult, Request, Status, Target
 from ...core.scope import AdapterScope

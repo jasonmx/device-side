@@ -26,5 +26,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
-    get_runtime(hass).cancel_pending()
+    runtime = get_runtime(hass)
+    runtime.cancel_pending()
+    runtime.detach_all()
     return True

@@ -2,7 +2,9 @@
 test_transition_errors."""
 
 import pytest
+from aiohue.v2.controllers.events import EventType
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from pytest_homeassistant_custom_component.common import async_mock_service
 
 from custom_components.device_side.integrations.hue.transition_cache import transition_cache
 
@@ -431,3 +433,58 @@ async def test_up_after_our_soft_off_starts_at_the_bottom(hass, bridge, clock):
     await call(hass, "move", {"entity_id": entity_id, "brightness": "up", "sweep_time": 5})
 
     assert bridge.puts[1] == ("light/light-1", move_put(100.0, 5000, on=True))
+
+
+async def test_a_change_from_elsewhere_mid_move_starts_the_next_move_from_it(hass, bridge, clock):
+    # The Hue app sets 80 % 3 s into a 20 % to 100 % fade: the next move starts there, not at the predicted 50 %.
+    entity_id = await lamp(hass, bridge, brightness_pct=20.0)
+    await call(hass, "move", {"entity_id": entity_id, "brightness": "up", "sweep_time": 10})
+    clock.now += 3
+    bridge.api.events.emit(
+        EventType.RESOURCE_UPDATED, {"id": "light-1", "type": "light", "dimming": {"brightness": 80}}
+    )
+    hass.states.async_set(entity_id, "on", {"brightness": percent(80.0)})
+    await hass.async_block_till_done()
+
+    await call(hass, "move", {"entity_id": entity_id, "brightness": "down", "sweep_time": 10})
+
+    assert bridge.puts[-1] == ("light/light-1", {"on": {"on": False}, "dynamics": {"duration": 8000}})
+
+
+async def test_a_late_stop_report_keeps_the_prediction(hass, bridge, clock):
+    entity_id = await lamp(hass, bridge, brightness_pct=20.0)
+    await call(hass, "move", {"entity_id": entity_id, "brightness": "up", "sweep_time": 10})
+    clock.now += 3
+    await call(hass, "stop", {"entity_id": entity_id})
+    clock.now += 5
+    bridge.api.events.emit(
+        EventType.RESOURCE_UPDATED, {"id": "light-1", "type": "light", "dimming": {"brightness": 50.2}}
+    )
+    await hass.async_block_till_done()
+
+    await call(hass, "move", {"entity_id": entity_id, "brightness": "down", "sweep_time": 10})
+
+    assert bridge.puts[-1] == ("light/light-1", {"on": {"on": False}, "dynamics": {"duration": 5000}})  # from 50 %
+
+
+@pytest.mark.parametrize(
+    ("service", "data"),
+    [
+        pytest.param("set_attributes", {"brightness": 80}, id="set_attributes"),
+        pytest.param("turn_on", {}, id="ha_light_call"),
+    ],
+)
+async def test_a_write_mid_move_starts_the_next_move_from_the_report(hass, bridge, clock, service, data):
+    entity_id = await lamp(hass, bridge, brightness_pct=20.0)
+    async_mock_service(hass, "light", "turn_on")
+    await call(hass, "move", {"entity_id": entity_id, "brightness": "up", "sweep_time": 10})
+    clock.now += 3
+    if service == "turn_on":
+        await hass.services.async_call("light", "turn_on", {"entity_id": entity_id}, blocking=True)
+    else:
+        await call(hass, service, {"entity_id": entity_id, **data})
+    hass.states.async_set(entity_id, "on", {"brightness": percent(80.0)})
+
+    await call(hass, "move", {"entity_id": entity_id, "brightness": "down", "sweep_time": 10})
+
+    assert bridge.puts[-1] == ("light/light-1", {"on": {"on": False}, "dynamics": {"duration": 8000}})

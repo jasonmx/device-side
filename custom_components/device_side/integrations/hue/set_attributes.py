@@ -6,6 +6,7 @@ from homeassistant.core import HomeAssistant
 
 from . import colors
 from .bridge import bridge_api, resource_id, write_light
+from .transition_cache import transition_cache
 from ...actions.set_attributes import SetAttributesRequest
 from ...core.adapter import Adapter
 from ...core.models import EntityResult, Status, Target
@@ -59,6 +60,7 @@ class HueSetAttributes(Adapter[SetAttributesRequest]):
     A grouped_light write does not reach the lights that are off, so a room is written light by light. A field the
     light cannot take (color on a white bulb) is dropped and the result says so; a light that can take none of the
     fields is unsupported. min/max_brightness clamp the brightness the bridge last stored, so they work while off.
+    A write ends any move's prediction for the light.
     """
 
     action: ClassVar[str] = "set_attributes"
@@ -90,6 +92,7 @@ class HueSetAttributes(Adapter[SetAttributesRequest]):
                     return self.result(target, Status.UNSUPPORTED, detail="fields_not_supported")
                 return self.result(target, Status.UNCHANGED, detail="within_limits")
             await write_light(api, light.id, **write)
+            transition_cache(hass).forget(light.id)
             return self.result(target, Status.SENT, detail="fields_dropped" if dropped else None)
 
         return await self.gather(hass, targets, send)

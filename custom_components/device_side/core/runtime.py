@@ -28,6 +28,8 @@ class DeviceSideData:
     integration_state: dict[str, Any] = field(default_factory=dict)
     # Delayed jobs not yet run, by the caller's key (the Z2M read-backs after a timer).
     pending: dict[str, list[CALLBACK_TYPE]] = field(default_factory=dict)
+    # Listeners attached on first use, by the caller's key, with what they were attached for (the Hue report filters).
+    listeners: dict[str, tuple[object, CALLBACK_TYPE]] = field(default_factory=dict)
 
     def semaphore(self, key: str, limit: int) -> asyncio.Semaphore:
         if (semaphore := self.semaphores.get(key)) is None:
@@ -49,6 +51,19 @@ class DeviceSideData:
             for unsub in handles:
                 unsub()
         self.pending.clear()
+
+    def listen(self, key: str, owner: object, attach: Callable[[], CALLBACK_TYPE]) -> None:
+        """Attach once per owner under key: a new owner (a reloaded bridge) detaches the old one's listeners first."""
+        if (current := self.listeners.get(key)) is not None:
+            if current[0] is owner:
+                return
+            current[1]()
+        self.listeners[key] = (owner, attach())
+
+    def detach_all(self) -> None:
+        for _owner, detach in self.listeners.values():
+            detach()
+        self.listeners.clear()
 
     def _call_later(
         self, hass: HomeAssistant, key: str, handles: list[CALLBACK_TYPE], delay: float, job: Job
