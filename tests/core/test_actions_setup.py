@@ -39,15 +39,17 @@ def test_translation_is_a_copy_of_strings():
 
 
 @pytest.mark.parametrize("action", ACTIONS, ids=lambda action: action.key)
-def test_target_filter_lists_exactly_the_integrations_with_an_adapter(action):
+def test_target_filter_lists_exactly_the_integrations_and_domains_in_scope(action):
     registry = AdapterRegistry.discover()
-    with_adapter = {
-        registry.integrations[integration].ha_domain
-        for key, integration, adapter in registry.matrix()
-        if key == action.key and adapter is not None
-    }
-    listed = {entry["integration"] for entry in SERVICES_YAML[action.key]["target"]["entity"]}
-    assert listed == with_adapter
+    in_scope: dict[str, set[str]] = {}
+    for key, integration, adapter in registry.matrix():
+        if key == action.key and adapter is not None:
+            in_scope.setdefault(registry.integrations[integration].ha_domain, set()).update(adapter.scope.domains)
+    listed: dict[str, set[str]] = {}
+    for entry in SERVICES_YAML[action.key]["target"]["entity"]:
+        domains = entry["domain"]
+        listed.setdefault(entry["integration"], set()).update([domains] if isinstance(domains, str) else domains)
+    assert listed == in_scope
 
 
 @pytest.mark.parametrize("action", ACTIONS, ids=lambda action: action.key)

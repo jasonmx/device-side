@@ -1,13 +1,19 @@
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.core import callback
 
-from .const import DOMAIN, NAME
+from .const import CONF_PREDICTED_STATE, DOMAIN, NAME, PREDICTED_STATE_DEFAULT
 
 
 class DeviceSideConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Device Side."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> DeviceSideOptionsFlow:
+        return DeviceSideOptionsFlow()
 
     async def async_step_user(self, user_input=None):
         """Handle the initial step when the user clicks 'Add Integration'."""
@@ -17,4 +23,18 @@ class DeviceSideConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({}),
+        )
+
+
+class DeviceSideOptionsFlow(config_entries.OptionsFlowWithReload):
+    """One page of options; saving reloads the entry, so the next action runs with them."""
+
+    async def async_step_init(self, user_input=None):
+        if user_input is not None:
+            return self.async_create_entry(data=user_input)
+
+        predicted_state = self.config_entry.options.get(CONF_PREDICTED_STATE, PREDICTED_STATE_DEFAULT)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema({vol.Required(CONF_PREDICTED_STATE, default=predicted_state): bool}),
         )

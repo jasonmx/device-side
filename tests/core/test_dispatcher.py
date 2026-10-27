@@ -31,6 +31,16 @@ async def test_response_shape(hass, fake, reset_script):
     assert request.duration_s == 5
 
 
+async def test_unchanged_everywhere_is_not_a_failure(hass, fake, reset_script):
+    # Nothing to do is a result, not an error: the call returns rather than stopping the automation.
+    add_fake_entity(hass, fake, "light.desk")
+    reset_script.outcomes["light.desk"] = Status.UNCHANGED
+
+    response = await call(hass, "turn_on_for", {"entity_id": "light.desk", "duration": 5})
+
+    assert response == {"light.desk": {"status": "unchanged", "integration": "fake"}}
+
+
 async def test_no_response_requested_returns_none(hass, fake):
     add_fake_entity(hass, fake, "light.desk")
 
@@ -135,7 +145,7 @@ async def test_native_group_expanding_to_nothing_is_unsupported(hass, fake, rese
     assert reset_script.calls[0][3] == ["light.a"]
 
 
-async def test_native_groups_adapter_may_report_member_rows(hass, fake):
+async def test_rows_for_untargeted_entities_are_dropped(hass, fake):
     add_fake_entity(hass, fake, "switch.a")
     add_fake_entity(hass, fake, "switch.b")
     add_fake_native_group(hass, fake, "switch.fake_group", ["switch.a", "switch.b"])
@@ -145,22 +155,19 @@ async def test_native_groups_adapter_may_report_member_rows(hass, fake):
         return [
             self.result(by_id["switch.fake_group"], Status.CONFIRMED),
             self.result(by_id["switch.a"], Status.SENT),
-            # A member the caller also targeted keeps its own row; a row claiming a non-group target is stray.
-            EntityResult("switch.a", Status.CONFIRMED, member_of="switch.fake_group"),
-            EntityResult("switch.b", Status.CONFIRMED, member_of="switch.fake_group"),
-            EntityResult("switch.c", Status.CONFIRMED, member_of="switch.a"),
+            # A second row for a target, and a row for a member nobody targeted, are both stray.
+            EntityResult("switch.a", Status.CONFIRMED),
+            EntityResult("switch.b", Status.CONFIRMED),
         ]
 
     with patch("tests.fakes.fake_integration.FakeTurnOffFor.execute", execute):
         response = await call(hass, "turn_off_for", {"entity_id": ["switch.fake_group", "switch.a"], "duration": 500})
 
-    # Member rows are clamped like any other.
     assert response == {
         "switch.a": {"status": "sent", "integration": "fake", "clamped_to": 100},
         "switch.fake_group": {"status": "confirmed", "integration": "fake", "clamped_to": 100},
-        "switch.b": {"status": "confirmed", "clamped_to": 100, "member_of": "switch.fake_group"},
     }
-    assert list(response) == ["switch.a", "switch.fake_group", "switch.b"]
+    assert list(response) == ["switch.a", "switch.fake_group"]
 
 
 async def test_native_group_without_expand_hook_is_unsupported(hass, fake, reset_script):

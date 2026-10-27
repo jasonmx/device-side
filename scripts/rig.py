@@ -1,11 +1,11 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
 """Run the rig tests against the live HA, behind a human approval gate.
 
 The rig is the household's own Home Assistant and its in-use lights. Nothing changes state before the gate:
 preflight reads the inventory, the adapter registry and the deployed tree hash, prints what will run, then asks.
 DEVICE_SIDE_RIG_APPROVED=1 answers the gate for a non-interactive caller that already has a human's yes.
 
-One run at a time: a lock in the git common dir, shared by every worktree, refuses a second. The tests are the
+One run at a time: a lock in the git common dir, shared by every worktree; a second run waits for it. The tests are the
 step files in tests/rig/steps, run by tests/rig/engine.py; a full pass of an adapter rewrites its bench record.
 
 Usage: scripts/rig.py [--dry-run] [--no-deploy] [--no-restart] [--unattended] [--integration KEY ...] [-k TEXT]
@@ -19,6 +19,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -32,6 +33,7 @@ sys.path.insert(0, str(REPO))
 
 from custom_components.device_side.core.registry import AdapterRegistry  # noqa: E402
 from scripts.check_tiers import BENCH_DIR, compute  # noqa: E402
+from tests.rig.bridge import HueBridge  # noqa: E402
 from tests.rig.client import HAClient  # noqa: E402
 from tests.rig.engine import (  # noqa: E402
     ADMIN_INTEGRATIONS,
@@ -41,6 +43,7 @@ from tests.rig.engine import (  # noqa: E402
     load_step_files,
     run,
     write_records,
+    write_report,
 )
 from tests.rig.inventory import INVENTORY, Inventory, load_env  # noqa: E402
 
@@ -49,6 +52,9 @@ SERVICE = ("device_side", "turn_on_for")
 READY_TIMEOUT_S = 180
 RESTART_ESTIMATE_S = 90
 LOCK_NAME = "device_side-rig.lock"
+LOCK_POLL_S = 2.0  # how often a waiting run retries the lock
+# Run reports go where the OS clears old files: they are for reviewing a run, not for keeping.
+REPORT_DIR = Path(tempfile.gettempdir()) / "device_side-rig"
 
 
 @dataclass(slots=True)
@@ -95,7 +101,7 @@ def plan_lines(
         roles = suite.file.roles
         entities = [entity for role in roles if (entity := inventory.entity(suite.integration, role))]
         targets = ", ".join(dict.fromkeys(entities)) or "no entity, will skip"
-        lines.append(f"{suite.integration} / {suite.action} -> {targets} ({tier})")
+        lines.append(f"{suite.integration} / {suite.name} -> {targets} ({tier})")
         for case in cases(suite, inventory, keyword):
             lines.append(f"    {case.id}: {case.skip or ', '.join(dict.fromkeys(case.entities.values()))}")
     return lines
@@ -153,19 +159,28 @@ def check_deploy(env: dict, no_restart: bool, deploy: Deploy) -> None:
         raise SystemExit(f"Cannot deploy: {deploy.blocker}.")
 
 
-def lock_rig(path: Path, holder: str) -> TextIO:
-    """Hold an exclusive lock on `path` for the process's life; exits naming the holder if another run has it.
+def lock_rig(path: Path, holder: str, out: Callable[[str], None] = print) -> TextIO:
+    """Hold an exclusive lock on `path` for the process's life, waiting while another run has it.
 
     One lock in the git common dir covers every worktree. flock drops when the process dies, so nothing goes stale.
+    A waiting run says who holds the lock, and again whenever that changes. Waiting runs poll rather than queue, so
+    when several wait, whichever polls first after a release goes next.
     """
     handle = path.open("a+")
-    try:
-        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        handle.seek(0)
-        held_by = handle.read().strip() or "an unnamed process"
-        handle.close()
-        raise SystemExit(f"Another rig run holds the lock: {held_by}.") from None
+    waiting_on = None
+    while True:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            handle.seek(0)
+            held_by = handle.read().strip() or "an unnamed process"
+            if held_by != waiting_on:
+                out(f"Another rig run holds the lock: {held_by}. Waiting for it to finish (Ctrl-C to give up)...")
+                waiting_on = held_by
+            time.sleep(LOCK_POLL_S)
+    if waiting_on is not None:
+        out("Rig lock acquired.")
     handle.truncate(0)
     handle.write(f"{holder} (pid {os.getpid()})\n")
     handle.flush()
@@ -202,7 +217,7 @@ def wait_until_ready(
                 services = {entry["domain"]: entry["services"] for entry in _get(f"{url}/api/services", token)}
                 if SERVICE[1] in services.get(SERVICE[0], {}):
                     return
-        except (urllib.error.URLError, OSError, ValueError, TypeError, KeyError, AttributeError):
+        except urllib.error.URLError, OSError, ValueError, TypeError, KeyError, AttributeError:
             pass
         sleep(3)
     if running:
@@ -220,7 +235,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-restart", action="store_true", help="sync the integration but do not restart HA")
     parser.add_argument("--integration", action="append", help="limit to an integration key (repeatable)")
     parser.add_argument("-k", dest="keyword", help="run only test cases whose id contains this text")
-    parser.add_argument("--unattended", action="store_true", help="skip observe steps, reporting them not observed")
+    parser.add_argument("--unattended", action="store_true", help="skip observed tests, reporting them not observed")
     args = parser.parse_args(argv)
 
     if not args.dry_run:
@@ -233,7 +248,7 @@ def main(argv: list[str] | None = None) -> int:
     registry = AdapterRegistry.discover()
     suites = select(load_step_files(), inventory, args.integration)
     if not args.dry_run:
-        check_tokens(env, suites)
+        check_tokens(env, suites, registry)
     if not any(registry.adapter(suite.action, suite.integration) for suite in suites):
         raise SystemExit("No rig test matches the inventory's integrations.")
     deploy = deploy_state(env.get("RIG_STATUS_CMD", ""))
@@ -263,13 +278,24 @@ def main(argv: list[str] | None = None) -> int:
     return asyncio.run(run_rig(env, suites, inventory, registry, args.keyword, args.unattended))
 
 
-def check_tokens(env: dict, suites: list[Suite]) -> None:
-    """Stop before the gate when .env.rig lacks a token the run needs."""
+def check_tokens(env: dict, suites: list[Suite], registry: AdapterRegistry) -> None:
+    """Stop before the gate when .env.rig lacks a token the run needs: ADMIN_INTEGRATIONS and any adapter with
+    options (they are set through device_side's options flow) need HA_ADMIN_TOKEN; a Hue file with a bridge step
+    needs the bridge's host and key."""
     if not (env.get("HA_URL") and env.get("HA_TOKEN")):
         raise SystemExit("HA_URL and HA_TOKEN must be set in .env.rig (see tests/rig/env.example)")
+    if any(suite.integration == "hue" and suite.file.uses_bridge for suite in suites) and not (
+        env.get("HUE_BRIDGE_HOST") and env.get("HUE_APP_KEY")
+    ):
+        raise SystemExit("HUE_BRIDGE_HOST and HUE_APP_KEY must be set in .env.rig for the bridge step")
     if env.get("HA_ADMIN_TOKEN"):
         return
-    if admin_only := sorted({suite.integration for suite in suites} & ADMIN_INTEGRATIONS):
+    with_options = {
+        suite.integration
+        for suite in suites
+        if (adapter := registry.adapter(suite.action, suite.integration)) is not None and adapter.scope.options
+    }
+    if admin_only := sorted(({suite.integration for suite in suites} & ADMIN_INTEGRATIONS) | with_options):
         raise SystemExit(
             f"{', '.join(admin_only)} needs HA_ADMIN_TOKEN in .env.rig (an admin user's token), "
             "or leave it out with --integration"
@@ -314,6 +340,9 @@ async def run_rig(
     """Run the step files, then write a bench record for each adapter whose every test passed."""
     ha = HAClient(env["HA_URL"], env["HA_TOKEN"])
     admin = HAClient(env["HA_URL"], env["HA_ADMIN_TOKEN"]) if env.get("HA_ADMIN_TOKEN") else None
+    bridge = None
+    if env.get("HUE_BRIDGE_HOST") and env.get("HUE_APP_KEY"):
+        bridge = HueBridge(env["HUE_BRIDGE_HOST"], env["HUE_APP_KEY"])
     await ha.connect()
     if admin:
         await admin.connect()
@@ -321,14 +350,25 @@ async def run_rig(
     try:
         await pause(ha, pause_list(env), paused)
         result = await run(
-            suites, inventory, registry, ha, admin=admin, keyword=keyword, ask=None if unattended else input
+            suites,
+            inventory,
+            registry,
+            ha,
+            admin=admin,
+            keyword=keyword,
+            ask=None if unattended else input,
+            bridge=bridge,
         )
+        stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"\nReport: {write_report(result, REPORT_DIR, f'rig run {stamp}')}")
         source = f"rig run (`scripts/rig.py`), commit `{git('rev-parse', '--short', 'HEAD')}`"
         today = datetime.date.today().isoformat()
         for path in await write_records(result, ha, registry, BENCH_DIR, today, source):
             print(f"Wrote {path.relative_to(REPO)}; review the diff before committing it.")
     finally:
         await resume(ha, paused)
+        if bridge:
+            await bridge.close()
         await ha.close()
         if admin:
             await admin.close()
@@ -373,4 +413,7 @@ async def resume(ha: HAClient, paused: list[str]) -> None:
 
 
 if __name__ == "__main__":
+    # Line by line even when stdout is a file, so a background caller sees "waiting for the lock" and each result
+    # as they happen rather than when the buffer fills.
+    sys.stdout.reconfigure(line_buffering=True)
     sys.exit(main())

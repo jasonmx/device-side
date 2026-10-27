@@ -65,24 +65,32 @@ requires it.
 - **No HA-side help.** Every feature runs on the device or bridge; nothing Device Side does
   depends on HA staying up. Emulation is never shipped; docs show how to build it with
   `set_attributes` plus an automation.
+- **Drop-in for hue_dimmer users.** `set_attributes`, `get_attributes` and `set_scene` take hue_dimmer's
+  field names, units (brightness in percent), names and descriptions, and return its response shape, so a
+  user changes only the domain. `move`/`stop` replace raise/lower by design and are the exception.
+- **Behave as core does.** When to raise, what to skip and what a response looks like follow HA core's own
+  actions: `docs/action-behavior.md`.
 - **Audience:** automation authors and dashboard users from v1. Actions for everything; entities
   only where a feature is a persistent setting, not a command.
 
 ### Scope
 
 - **Integrations (v1):** Zigbee2MQTT via `mqtt`, ZHA, Matter, Shelly Gen2+, Hue v2. Hue is v1 for the
-  hue_dimmer port first; Hue `turn_on_for`/`turn_off_for` follow in slice 7, once the
-  cancel experiments (open item 10) pass.
+  hue_dimmer port. Hue `turn_on_for`/`turn_off_for` are `unsupported` (2026-10-26): the bridge
+  can't honor the cancel contract (open item 10).
 - **Actions (v1):**
   - `turn_on_for` on Z2M, ZHA, Matter, Shelly.
   - `turn_off_for` on Shelly only: it is Shelly-only natively (Zigbee/Matter `OnWithTimedOff` is
     on-then-off only; `off_wait_time` is a re-on guard). Other integrations return `unsupported`.
   - **Cancel contract:** a regular `turn_on` or `turn_off` cancels the timed flip, on every
-    integration. The action descriptions promise this. Shelly honors it natively (bench, 2026-10-24,
+    integration but ZHA, where only `turn_off` does (cancel spike 2026-10-26, open item 3: nothing stops
+    an LTA004 timer with the light left on). The action descriptions promise this, ZHA caveat included.
+    Shelly honors it natively (bench, 2026-10-24,
     Gen3/Gen4 fw 2.0.1: any `Set` without `toggle_after` cancels; a new `toggle_after` replaces;
-    `toggle_after: 0` is rejected). An integration that can't honor it natively adds a
-    `cancel_delayed_toggle` action, offered across all integrations, and the descriptions change to
-    point at it. No HA-side cancel hook: users who want one wire an automation to the action.
+    `toggle_after: 0` is rejected). Hue can't honor it, so it doesn't get the timed actions
+    (2026-10-26, open item 10): its bridge timers ignore every manual on/off, aren't visible in the
+    Hue app, and drop their action if the bulb is unpowered at expiry. No `cancel_delayed_toggle`
+    action and no HA-side cancel hook.
   - `toggle_for` dropped (2026-10-23): no use case. HA's `flash` covers a short toggle, and nobody
     needs a long one.
   - `turn_on_for` accepts `light.turn_on` fields (`brightness`, `color_temp_kelvin`, `hs_color`,
@@ -100,12 +108,12 @@ requires it.
     every feature): fields describe what the light should do in human terms, never how the
     device does it.** No rates, steps, mireds or cluster vocabulary; the adapter converts.
     `move` fields, all optional but at least one direction required:
-    - `brightness: brighter | dimmer`, `color_temp: warmer | cooler`,
-      `saturation: richer | paler`, `hue: forward | backward` (around the color wheel,
-      red → yellow → green …). One field per attribute, each with its own direction, so
-      "brighter and cooler" is one call with no ambiguity. Directions use the words a person
-      would say for that attribute; `up`/`down` is wrong for color temperature (Kelvin up is
-      cooler, mireds up is warmer) and `increase`/`decrease` inherits the same ambiguity.
+    - `brightness: up | down`, `color_temp: warmer | cooler`, `saturation: up | down`,
+      `hue: up | down` (`up` = the hue angle increases, red → yellow → green, wrapping at
+      360°). One field per attribute, each with its own direction, so "brighter and cooler" is
+      one call with no ambiguity. Rule: `up | down` wherever the direction is unambiguous;
+      color temperature is the exception (Kelvin up is cooler, mireds up is warmer). Why, and
+      why not `brighter | dimmer`: `docs/plans/2026-10-25-hue-port.md`, Decisions.
     - `sweep_time` (seconds; hue_dimmer's existing field): how long a **full-range sweep**
       takes, 0 → 100 % brightness, coolest → warmest of this light's range, 0 → 100 %
       saturation, 360° of hue. Speed is therefore constant whatever the start point, which is
@@ -113,9 +121,11 @@ requires it.
       hue_dimmer.
     - Limits in a collapsed "Limits" section (`services.yaml` sections): `brightness_limit`
       (%), `color_temp_limit` (K), `saturation_limit` (%). A limit is "stop here instead of
-      the range end"; hue has no limit (it is a cycle).
-    `stop` takes no fields and halts every move in flight on the target. A move that is
-    already at its range end returns `confirmed` with `detail: at_limit`. (Per-attribute
+      the range end". A move already at or past its limit (or range end) in its direction does
+      nothing and returns `unchanged` with `detail: at_limit`: `down` to 30 % from 20 % never
+      brightens (decided 2026-10-26). Hue has no limit: a wrapping hue range was considered and
+      dropped as needless complexity for a niche feature; revisit only if users ask.
+    `stop` takes no fields and halts every move in flight on the target. (Per-attribute
     direction words and the reserved `hue` field confirmed by Jason, 2026-10-23.)
     Hue implementation: target = limit or range end, `dynamics.duration` = sweep_time ×
     fraction of range still to travel; brightness and color_temp each as one write;
@@ -189,9 +199,10 @@ requires it.
     address an HA group natively, which is fine because no device can. Goal throughout:
     minimize radio traffic and popcorning by sending to the largest unit the device accepts.
 - **Results:** `SupportsResponse.OPTIONAL`. Response maps entity_id to
-  `{status: unsupported|rejected|sent|confirmed, integration, clamped_to?, detail?}`. Tier is not in the response: it is a subjective label about the code, not a fact
-  about this call. Raise `HomeAssistantError` only on invalid input or when every target
-  failed, so mixed rooms do not abort automations.
+  `{status: unsupported|rejected|sent|confirmed|unchanged, integration, clamped_to?, detail?}`; `unchanged` means nothing was sent because the target is already where the call would leave it. Tier is not in the response: it is a subjective label about the code, not a fact
+  about this call. A query returns core's shape instead: each target's data under its entity_id, with
+  targets that could not be read left out. Raise `HomeAssistantError` only on invalid input or when every
+  target failed, so mixed rooms do not abort automations, until slice 9f moves the raise rule to core's.
 - **Stability tiers** per adapter (action x integration): `experimental | untested | beta |
   stable`. Rules live in `CLAUDE.md` (Tiers, Releases); summary: only `experimental` is
   declared (`AdapterScope.experimental`), the rest are computed by `scripts/check_tiers.py` from
@@ -260,7 +271,8 @@ Load-bearing facts read from HA core 2026.2.1 (hue_dimmer venv) during planning:
   `entry.runtime_data`; `bridge.api` is `HueBridgeV2`.
 - Re-read against 2026.10.2 in slice 1: validators are `probatio` (voluptuous fork), so schemas import
   `probatio` and reuse `light.const.LIGHT_TURN_ON_SCHEMA` entries verbatim (`brightness` is 0-255 as in
-  `light.turn_on`); `async_extract_entity_ids(call, expand_group)` is a coroutine; `helpers/group.py` gained a
+  `light.turn_on`), except `set_attributes`, which keeps hue_dimmer's percent brightness and several-colors
+  rule so its calls work unchanged; `async_extract_entity_ids(call, expand_group)` is a coroutine; `helpers/group.py` gained a
   group-entity registry (`GenericGroup`) that no component uses yet, so group helpers still need our expansion.
 
 ### Directory layout
@@ -313,7 +325,7 @@ scripts/
   check_tiers.py         computed tiers, coverage and scope-coverage checks for CI (slice 9c)
   deploy.sh              the deploy sync command <branch>, then the deploy restart command (rig only)
   rig.py                 approval gate (inventory, adapters, duration, restart?) -> y/N -> deploy -> step files
-  fingerprint.py         adapter fingerprints: AST hash without docstrings or the AdapterScope declaration
+  fingerprint.py         adapter fingerprints: AST hash of the adapter and its package imports, without docstrings or AdapterScope
 docs/
   device_side_handoff-2026-10-23.md          existing
   plans/2026-10-23-device-side-repo-plan.md  this plan, saved in slice 0
@@ -326,7 +338,7 @@ tests/
   fixtures/{z2m,zha,matter,shelly,hue,groups}.py   fabricate registry entries + boundary mocks
   core/   actions/   integrations/<i>/               one module per adapter; see Testing
   rig/    client.py (HA WS/REST client), inventory.py, engine.py (step runner, snapshot/restore, bench writer),
-          inventory.yaml (gitignored), inventory.example.yaml, steps/<action>.yaml, steps/examples/
+          inventory.yaml (gitignored), inventory.example.yaml, steps/<action>.yaml
 ```
 
 Repo root: README.md (hand-written feature table), hacs.json, pyproject.toml,
@@ -337,7 +349,7 @@ copied from `/Users/jason/projects/hue-smooth-dimming`.
 
 ```python
 # core/models.py
-class Status(StrEnum): UNSUPPORTED, REJECTED, SENT, CONFIRMED
+class Status(StrEnum): UNSUPPORTED, REJECTED, SENT, CONFIRMED, UNCHANGED
 class Tier(StrEnum): STABLE, BETA, UNTESTED, EXPERIMENTAL   # computed by check_tiers, never stored on an adapter
 class ActionKind(StrEnum): COMMAND, SETTING, QUERY
 
@@ -350,7 +362,7 @@ class Target: entity_id, domain, integration, entry: er.RegistryEntry, device, c
 
 @dataclass(slots=True)
 class EntityResult: entity_id, status, integration, clamped_to, detail, data
-    def as_response(self) -> dict   # drops None; data under "attributes"; no tier
+    def as_response(self) -> dict   # drops None; data under "attributes"; no tier (a query returns data alone)
 
 # core/scope.py
 @dataclass(frozen=True) class DurationLimits: min_s, max_s
@@ -413,7 +425,9 @@ class Adapter[RequestT](ABC):
   `HomeAssistantError(translation_key="all_targets_failed")` with a per-entity summary; no
   targets raises `ServiceValidationError("no_targets")`.
 - **Setting-class actions** (none planned): same `Action`/`Adapter` contract with `kind=SETTING`.
-- **Query actions** (`get_attributes`): payload in `EntityResult.data`, `supports_response=ONLY`.
+- **Query actions** (`get_attributes`): payload in `EntityResult.data`, `supports_response=ONLY`. The
+  response is `{entity_id: data}` for every target that was read, one entry per target, as core's
+  `weather.get_forecasts` returns, so templates index it by entity_id and `merge_response` flattens it.
 - **Actions:** one `hass.services.async_register(DOMAIN, action.key, ...)` per discovered
   action in `async_setup`; `_call_if_loaded` raises `ServiceValidationError("not_loaded")` until
   the entry is loaded.
@@ -481,13 +495,14 @@ and computes each adapter's tier from its records, found by path (`docs/bench/<i
 It fails on a malformed record, a record with no adapter, or a non-experimental adapter under 95%
 coverage (`coverage.json`); CI runs it and prints the tier table. `--require-beta`, run only by
 `cut-release`, also fails on any `untested` adapter. It generates no docs: the README feature table and
-`docs/integrations.md` are hand-written. Fingerprint: AST hash of the adapter module, excluding
-docstrings and the `AdapterScope` declaration; bench records carry the fingerprint they
-tested and list the capabilities (Shelly: RPC components) and light fields they exercised. Proof
+`docs/integrations.md` are hand-written. Fingerprint: AST hash of the adapter module and, in turn, the
+modules it imports from its own integration package, excluding docstrings and the `AdapterScope`
+declaration; bench records carry the fingerprint they tested and list the capabilities (Shelly: RPC components) and light fields they exercised. Proof
 follows the call: a record proves the device-side call, whatever HA domain the target shows, so a
 relay exposed as a `switch` or as an on/off `light` rides one record. `beta` needs a record with the
 current fingerprint, and every capability and field in scope covered: a capability by any passing
-record (any fingerprint), a field by a current-fingerprint record. Untested capabilities are left out of
+record (any fingerprint), a field by a current-fingerprint record, an option in scope
+(`AdapterScope.options`) by current-fingerprint records with it on and with it off. Untested capabilities are left out of
 `AdapterScope.capabilities` and refused, not taken into scope on a sibling's proof. Adding a capability
 after a tester report is a scope edit plus a record listing it; the fingerprint survives it. Tier ladder: see `CLAUDE.md`. Tags come only from the `cut-release-candidate` and `cut-release`
 workflows (a tag ruleset refuses any other), and `scripts/check_tag.py` refuses a tag not matching
@@ -566,8 +581,7 @@ color of its entities (group members too) and restores in a `finally` (Hue will 
 `device_side.get_attributes` so off-light attributes restore). Timing assertions are windows:
 still on at `duration - tol`, off by `duration + tol`. Rig durations are 5 to 8 s. Rig tests cover one
 happy path and one refusal path per adapter; branches stay in unit tests, which never touch the rig.
-`tests/rig/steps/examples/` writes hue_dimmer's release checklist (§2-5) as step files the parser tests
-load, proving the format before those adapters exist.
+hue_dimmer's release checklist (§2-5) became the Hue step files.
 
 When every test of an adapter passes (no `-k`, nothing failed), the engine writes its bench record;
 Jason reviews and commits the diff. A test with an unobserved `observe` step proves no capability or field.
@@ -597,11 +611,12 @@ test-report issue).
 | 6 | Z2M `turn_on_for` | **Done** (#22, #23, #25). detect, addressing, publish; `light.turn_on` precedes when fields present; group topic when `native_groups`; rig test. |
 | 11 | Matter `turn_on_for` | **Done** (#24). LT check; `OnWithTimedOff`; optional read-back; rig test on bulb and plug. |
 | 10 | ZHA `turn_on_for` | **Done** (#31, #32, #34, #39). ZHA set up on the maintainer's rig first: a second Zigbee coordinator on its own channel, apart from Z2M's network; devices paired to it for the rig roles; steps in the private rig notes; addressing; admin context passthrough; ValueError -> rejected; rig test, run with an admin token (`.env.rig`) for ZHA suites only. |
-| 7 | Hue port | Plan: `docs/plans/2026-10-25-hue-port.md` (four PRs, 7a to 7d). five adapters + bridge/transition_cache/colors; `move` across brightness, color_temp, saturation (`hue` unsupported on Hue); `grouped_light` native for move/stop and get_attributes, expanded for set_attributes; hue_dimmer tests ported to real-hass fixtures; rig parity with hue_dimmer `tests/RELEASE_CHECKLIST.md`; then Hue `turn_on_for`/`turn_off_for` once open item 10 is answered (`experimental=True`), with `cancel_delayed_toggle` across all integrations if the cancel contract needs it. |
+| 7 | Hue port | Plan: `docs/plans/2026-10-25-hue-port.md` (three PRs, 7a to 7c). five adapters + bridge/transition_cache/colors; `move` across brightness, color_temp, saturation (`hue` unsupported on Hue); `grouped_light` native for move/stop and get_attributes, expanded for set_attributes; hue_dimmer tests ported to real-hass fixtures; rig parity with hue_dimmer `tests/RELEASE_CHECKLIST.md`. Hue `turn_on_for`/`turn_off_for` dropped after the open item 10 bench (2026-10-26): `unsupported`. |
 | 9c | Release gates | **Done** (#33, #35, #36, #37). Plan: `docs/plans/2026-10-25-release-gates.md`. Computed tiers and the scope-coverage check in `scripts/check_tiers.py`, run in CI; per-adapter coverage check; `test-report.yml` issue form (bug reports need it whenever 9b lands); every `v*` tag from a workflow (`cut-release-candidate` with the RC audit gate of `2026-10-23-rc-audit-gate.md`, `cut-release` with `check_tiers --require-beta`) behind a tag ruleset. Lands before the first RC (`v0.0.2rc1`), wherever in this sequence a release is first wanted. |
 | 9d | Rig coverage sweep | **plan in /plan first**; audit every adapter's scope (domains, capabilities, fields, native groups) against the maintainer's rig hardware; add inventory roles and step files for everything the rig can reach; rig runs leave a current-fingerprint bench record for each, so v0.1.0 launches with the widest scope the rig can prove. What the rig can't reach is listed for 9b and stays out of scope. |
 | 9e | Native groups survey | **plan in /plan first**; a short exploration of integration-native groups beyond Hue (Z2M and ZHA group entities; Matter and Shelly where HA exposes any): how each is detected and addressed, whether its native group command keeps the device-side behavior (timed off, transitions) across members, and a rig check of each candidate. Outcome: per integration, `native_groups` on or off for v0.1.0, recorded as a decision here, with bench records for those turned on. Hue's `grouped_light` ships in 7 regardless. |
-| 12 | `v0.1.0` ("v1" names the scope, not the version) | feature complete for this plan; scope limited to what rig runs (and any tester reports) cover; README feature table current; release checklist adapted from hue_dimmer. |
+| 9f | Core-aligned failure behavior | **plan in /plan first**; move the dispatcher's raise rule from "raise when every target failed" to core's, per `docs/action-behavior.md`: unavailable or missing targets skipped with core's warning; a field a target can't take dropped; a target the caller named that the action can never support raises (as `ServiceNotSupported`); a device or bridge error raises; a query that reads nothing raises. Decide whether command actions keep their optional status response, which core's commands don't have, and whether `nothing_to_set` becomes a warning (a hue_dimmer call passing only zeros did nothing). Every action's tests and the rig's `expect_error` steps follow. |
+| 12 | `v0.1.0` ("v1" names the scope, not the version) | feature complete for this plan; scope limited to what rig runs (and any tester reports) cover; README feature table current; release checklist adapted from hue_dimmer; the `predicted_state` default reviewed (flip it to off if flaky), on the regression issues and rig runs since it landed. |
 | 9b | Remote tester flow (after `v0.1.0`) | **plan in /plan first**; starts when an adapter needs hardware the rig lacks (a reported bug on someone else's device, a community integration such as Z-Wave JS). Standalone tester runner: one file (`uv run`, PEP 723 inline metadata, aiohttp WebSocket + PyYAML), talks to HA_URL + long-lived token, assumes integration installed via HACS or by hand (no deploy), runs 9a's YAML step files with a confirmation gate on every run; `tests/rig/client.py` moved to a location both the runner and `scripts/rig.py` import; runner prints a prefilled `test-report.yml` issue body; RC-only umbrella Repairs issue with multi-select flow and prefilled per-test links; bench files filled from tester reports. |
 
 Slice 9 was split on 2026-10-25. Color bulbs from Shelly and Hue let the maintainer's rig cover the v1
@@ -615,6 +630,8 @@ devices: the README table stays hand-written and tier computation moves to 9c. M
 ahead of the Hue port now that the rig can run both networks. 9a was split: rig step files land before slice 6
 so no later rig test is written twice, and the release gates (9c) land before the first RC.
 9d (rig coverage sweep) and 9e (native groups survey) were added on 2026-10-25, between 9c and v0.1.0.
+9f (core-aligned failure behavior) was added on 2026-10-26, after the Hue port showed device_side's raise rule
+differs from both core's and hue_dimmer's.
 
 `v0.0.x` releases are cut between slices whenever a set of adapters reaches beta; one release may carry
 several integrations or actions.
@@ -641,6 +658,9 @@ the first action of that session is slice 0.
    down live; a new timer replaces the old), so `CONFIRMED` = OnTime at or just under the request.
    Built: `integrations/zha/zcl.py` reads it through ZHA internals (`get_zha_gateway`), since the
    public read is an admin websocket command. Per-device results: `docs/integrations.md`, ZHA, Tested behavior.
+   Cancel spike 2026-10-26 (`docs/plans/2026-10-26-zha-ontime-cancel-spike.md`), LTA004 fw `0x01001416`,
+   HA 2026.10.2: no flicker-free cancel. Writing `OnTime` = 0, `OnWithTimedOff` `on_time: 0` and
+   `turn_on_for` 0.05 s (clamped to 0.1 s) each end the timer by turning the bulb off.
 4. Z2M: `zigbee2mqtt_` identifier prefix [M]; IEEE as topic segment [M]; `command_topic` from the
    entity object vs base-topic derivation; whether `on_time` + `brightness` in one payload is
    safe (would remove the two-step on Z2M).
@@ -653,20 +673,42 @@ the first action of that session is slice 0.
     with `dynamics` (hue_dimmer only moved brightness on groups); whether a dimming dynamic and
     a color_temperature dynamic sent as separate writes run independently or the second cancels
     the first (decides per-attribute vs shared duration for combined moves); the bulb's gamut
-    from `colors.py` for the saturation end point; whether `sections:` with `collapsed: true`
-    in `services.yaml` passes hassfest for a custom component.
+    from `colors.py` for the saturation end point. Answered in 7b (#48): hassfest accepts
+    `sections:` with `collapsed: true` in a custom component's `services.yaml`.
 6. Frontend: does the `integration:` filter match entity registry platform (UI convenience only).
 7. Blocking-import detector vs `pkgutil` discovery in the executor job.
 8. `pytest-homeassistant-custom-component` version paired with the chosen HA 2026.x pin; fixture
    names above are from memory.
 9. hassfest on custom components: accepts `services.yaml` without name/description when
    `strings.json` has `services`; `integration_type: service` + `single_config_entry`.
-10. Hue `turn_on_for`/`turn_off_for` (slice 7): bench handoff 7.1 (whether a one-shot
-    `behavior_instance` can express the timer), then the cancel experiments. Does a regular
-    `light.turn_on`/`turn_off` through the bridge cancel the instance? Does a Hue app or dimmer
-    switch press cancel it? Does deleting or disabling the instance cancel it? What happens to a
-    second `turn_on_for` while one is running? If the bridge can't honor the cancel contract, Hue's
-    `cancel_delayed_toggle` deletes the instance.
+10. Hue `turn_on_for`/`turn_off_for` (slice 7). Answered by bench spike 2026-10-26
+    (`docs/plans/2026-10-26-hue-timer-spike.md`): bridge BSB002 sw 6.1.1978418030, two LTA009 sw 1.163.1.
+    The bridge does **not** honor the cancel contract natively. **Decision:** Hue is `unsupported`
+    for both actions (Scope, cancel contract).
+    - **Expressible:** yes, as an instance of the built-in "Timers" `behavior_script` (raw
+      `POST clip/v2/resource/behavior_instance`). Configuration: `duration: {seconds: int}` (1 s
+      resolution; 0 fires at once), `where: [{group: room, items: [lights]}]`,
+      `what: [{group: room, actions: [{target: light, action: {on: {on: false}}}]}]`. Action targets
+      must be `light`: `room` and `grouped_light` are rejected, so a group needs one action per member.
+      `turn_off_for` is the same with `on: true` after an immediate off.
+    - **Start:** creating or enabling doesn't start it; `PUT {"trigger": {"start": {}}}` does (aiohue
+      `start`). POST rejects `trigger`, so it is always two calls. `state.next_trigger_time` appears once
+      started, a read-back for `confirmed`.
+    - **Accuracy:** fired within about 1 s of the duration at 1, 10, 12, 15, 45 and 60 s (1 s
+      sampling), inside `TOLERANCE_S`.
+    - **Plain on/off through HA:** no cancel. Off then on mid-timer, the timer still fired.
+    - **Hue app toggle, dimmer press:** no cancel. Both fired on time.
+    - **Delete, `stop` trigger:** both cancel. **Disable:** does not; a disabled started timer still fired.
+    - **Second call:** a second instance stacks (both fire). `metadata.name` isn't unique, so
+      find-and-replace by name is the adapter's job. Re-sending `start` restarts an instance from now;
+      a new duration is a `configuration` PUT (which stops it) then `start`, as the bridge refuses
+      both in one PUT.
+    - **Cleanup:** a fired instance stays (`timer_state: stopped`) until deleted. Not shown in the
+      Hue app. Cap: 43 `behavior_instance`s per bridge, shared with the app's own automations
+      (`507 Instance capacity limit error`).
+    - **Unreachable at expiry:** the bulb stays on. Power cut across expiry: the bridge still showed
+      it connected, sent the off, recorded it as off, and never retried; on power-up the bulb came on
+      and stayed on.
 11. Rig transport: WebSocket `call_service` `return_response` payload key and whether REST
     `?return_response` still exists in 2026.x (`websocket_api/commands.py:handle_call_service`,
     `api/__init__.py:APIDomainServicesView`); restart needs an admin token; SSH port and config

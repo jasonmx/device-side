@@ -3,6 +3,8 @@
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 
+from custom_components.device_side.integrations.hue.transition_cache import transition_cache
+
 from ...conftest import call
 from ...fixtures.hue import add_hue_entity, hue_entry, light_action
 
@@ -88,7 +90,7 @@ async def test_actions_with_nothing_to_write_are_skipped(hass, bridge, action):
 
     response = await call(hass, "set_scene", {"entity_id": "scene.relax"})
 
-    assert response == {"scene.relax": {"status": "confirmed", "integration": "hue", "detail": "nothing_to_set"}}
+    assert response == {"scene.relax": {"status": "unchanged", "integration": "hue", "detail": "nothing_to_set"}}
     assert bridge.puts == []
 
 
@@ -167,3 +169,22 @@ async def test_v1_bridge_is_refused(hass, bridge):
         await call(hass, "set_scene", {"entity_id": "scene.relax"})
 
     assert raised.value.translation_placeholders["summary"] == "scene.relax: bridge_v1"
+
+
+async def test_the_lights_written_forget_their_move_predictions(hass, bridge):
+    await scene(
+        hass,
+        bridge,
+        light_action("light-1", dimming={"brightness": 20.0}),
+        light_action("light-2", dimming={"brightness": 90.0}),
+        lights=("light-1", "light-2"),
+    )
+    cache = transition_cache(hass)
+    for light_id in ("light-1", "light-2"):
+        cache.stopped(light_id, "brightness", 42.0)
+    bridge.failing.add("light-2")
+
+    await call(hass, "set_scene", {"entity_id": "scene.relax"})
+
+    assert not cache.follows("light-1")
+    assert cache.follows("light-2")  # its write failed, so the light is still where the move left it

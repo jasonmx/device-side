@@ -14,6 +14,19 @@
       "default": "Success! You can now use device_side actions in your automations."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Device Side options",
+        "data": {
+          "predicted_state": "Show predicted brightness during Hue fades"
+        },
+        "data_description": {
+          "predicted_state": "A Hue bridge reports a fade's end brightness as soon as it starts, and where a stopped fade halted late or never. With this on, Home Assistant shows the brightness at the start, where a stop halted it, and the end once the fade has run. Turn it off to show what the bridge reports."
+        }
+      }
+    }
+  },
   "exceptions": {
     "not_loaded": {
       "message": "Device Side is not loaded. Check the integration is set up and enabled."
@@ -29,50 +42,103 @@
     },
     "nothing_to_set": {
       "message": "Nothing to set. Give a brightness, a color temperature, a color, or a brightness limit."
+    },
+    "nothing_to_move": {
+      "message": "Nothing to move. Give a direction for brightness, color temperature, saturation or hue."
+    },
+    "limit_without_direction": {
+      "message": "A limit needs a direction for the same attribute: {limits}."
     }
   },
   "services": {
     "get_attributes": {
       "name": "Get attributes",
-      "description": "Reads brightness, color temperature and color from the device side, even for lights that are off. A room or zone returns its own entry and one per light."
+      "description": "Get brightness, color temp, and color (RGB, HS, XY), even if lights are off. Returns one record per target."
+    },
+    "move": {
+      "name": "Move: dim, brighten, warm or cool",
+      "description": "Starts brightness, color temperature or saturation moving at a steady speed until it reaches its range end or a limit. Stop halts it where it is. Built for hold-to-dim buttons.",
+      "fields": {
+        "brightness": {
+          "name": "Brightness",
+          "description": "Direction to move brightness. Moving up turns the light on; moving down to 0% turns it off."
+        },
+        "color_temp": {
+          "name": "Color temperature",
+          "description": "Direction to move color temperature."
+        },
+        "saturation": {
+          "name": "Saturation",
+          "description": "Direction to move saturation: up is a richer color, down is paler, toward white."
+        },
+        "hue": {
+          "name": "Hue",
+          "description": "Direction to move around the color wheel: up is red to yellow to green."
+        },
+        "sweep_time": {
+          "name": "Sweep time",
+          "description": "Seconds a full sweep takes, such as 0% to 100% brightness. The speed is the same wherever the move starts."
+        },
+        "brightness_limit": {
+          "name": "Brightness limit",
+          "description": "Brightness to stop at instead of the range end, in percent. Moving down to 0% turns the light off."
+        },
+        "color_temp_limit": {
+          "name": "Color temperature limit",
+          "description": "Color temperature to stop at instead of the light's warmest or coolest, in Kelvin."
+        },
+        "saturation_limit": {
+          "name": "Saturation limit",
+          "description": "Saturation to stop at instead of the range end, in percent."
+        }
+      },
+      "sections": {
+        "limits": {
+          "name": "Limits"
+        }
+      }
     },
     "set_attributes": {
       "name": "Set attributes",
-      "description": "Sets brightness, color temperature or color without turning lights on or off. Lights that are off take the new settings when they next turn on.",
+      "description": "Set brightness, color temp, or color without changing on/off state.",
       "fields": {
         "brightness": {
-          "name": "Brightness value",
-          "description": "Brightness to set, from 1 (minimum) to 255 (maximum)."
-        },
-        "color_temp_kelvin": {
-          "name": "Color temperature",
-          "description": "Color temperature in Kelvin to set."
-        },
-        "hs_color": {
-          "name": "Hue/Sat color",
-          "description": "Color in hue/sat format to set. A list of two numbers: hue 0-360, saturation 0-100."
-        },
-        "rgb_color": {
-          "name": "Color",
-          "description": "Color in RGB format to set. A list of three integers between 0 and 255."
-        },
-        "xy_color": {
-          "name": "XY-color",
-          "description": "Color in XY format to set. A list of two decimal numbers between 0 and 1."
+          "name": "Brightness",
+          "description": "Brightness level (%)"
         },
         "min_brightness": {
           "name": "Minimum brightness",
-          "description": "Raises any light dimmer than this, in percent. Ignored when a brightness is given."
+          "description": "Enforce a minimum brightness (%)"
         },
         "max_brightness": {
           "name": "Maximum brightness",
-          "description": "Lowers any light brighter than this, in percent. Ignored when a brightness is given."
+          "description": "Enforce a maximum brightness (%)"
+        },
+        "color_temp_kelvin": {
+          "name": "Color temperature",
+          "description": "Color temperature (K)"
+        },
+        "rgb_color": {
+          "name": "RGB color",
+          "description": "Color as [red, green, blue] (0–255 each)"
+        },
+        "hs_color": {
+          "name": "Hue/Sat color",
+          "description": "Color as [hue, saturation] (0–360, 0–100)"
+        },
+        "xy_color": {
+          "name": "XY color",
+          "description": "Color as [x, y]"
         }
       }
     },
     "set_scene": {
       "name": "Set scene",
-      "description": "Sets a scene's brightness and colors on its lights without turning them on. Lights already on change straight away."
+      "description": "Set a Hue scene without turning on its lights."
+    },
+    "stop": {
+      "name": "Stop",
+      "description": "Stops every move in flight on the target, where it is now."
     },
     "turn_off_for": {
       "name": "Turn off for",
@@ -86,7 +152,7 @@
     },
     "turn_on_for": {
       "name": "Turn on for",
-      "description": "Devices turn on, then off again after a delay. To cancel the timed off, send a regular turn on.",
+      "description": "Devices turn on, then off again after a delay. To cancel the timed off, send a regular turn on (on ZHA, a turn off).",
       "fields": {
         "duration": {
           "name": "Duration",
@@ -116,6 +182,32 @@
           "name": "Transition",
           "description": "Seconds the light takes to reach the brightness and color above. Lights only."
         }
+      }
+    }
+  },
+  "selector": {
+    "brightness_direction": {
+      "options": {
+        "up": "Brighten",
+        "down": "Dim"
+      }
+    },
+    "color_temp_direction": {
+      "options": {
+        "warmer": "Warmer",
+        "cooler": "Cooler"
+      }
+    },
+    "saturation_direction": {
+      "options": {
+        "up": "Richer",
+        "down": "Paler"
+      }
+    },
+    "hue_direction": {
+      "options": {
+        "up": "Up (red to yellow to green)",
+        "down": "Down (red to magenta to blue)"
       }
     }
   }

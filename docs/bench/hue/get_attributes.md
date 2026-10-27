@@ -3,9 +3,9 @@
 | | |
 |---|---|
 | Result | pass |
-| Date | 2026-10-25 |
-| Source | rig run (`scripts/rig.py`), commit `f0d49e5` |
-| Fingerprint | `5f39b58de10830a2` (`integrations/hue/get_attributes.py`) |
+| Date | 2026-10-27 |
+| Source | rig run (`scripts/rig.py`), commit `d16a62b` |
+| Fingerprint | `28db2d547daaefd1` (`integrations/hue/get_attributes.py`) |
 | Home Assistant | 2026.10.2 |
 | Device | Hue ambiance lamp (`LTA009`), firmware `1.163.1`; Zone, firmware `unknown` |
 | Capabilities | every capability the adapter addresses |
@@ -17,3 +17,5 @@
 |---|---|---|
 | `reads_while_off[light_ct]` | `light` (light_ct) | pass |
 | `reads_while_off[group]` | `light` (group) | pass |
+| `predicts_mid_move[light_ct]` | `light` (light_ct) | pass |
+| `predicts_mid_move[group]` | `light` (group) | pass |

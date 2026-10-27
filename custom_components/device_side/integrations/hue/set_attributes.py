@@ -6,6 +6,7 @@ from homeassistant.core import HomeAssistant
 
 from . import colors
 from .bridge import bridge_api, resource_id, write_light
+from .report_filter import write_forgetting
 from ...actions.set_attributes import SetAttributesRequest
 from ...core.adapter import Adapter
 from ...core.models import EntityResult, Status, Target
@@ -33,11 +34,11 @@ def _write_for(light: Light, request: SetAttributesRequest) -> tuple[dict, bool]
     fields = request.light
     write: dict = {}
     dropped = False
-    if fields.brightness is not None or request.min_brightness is not None or request.max_brightness is not None:
+    if request.brightness is not None or request.min_brightness is not None or request.max_brightness is not None:
         if light.dimming is None:
             dropped = True
-        elif fields.brightness is not None:
-            write["brightness"] = colors.to_percent(fields.brightness)
+        elif request.brightness is not None:
+            write["brightness"] = request.brightness
         elif (clamped := _clamp(light.dimming.brightness, request.min_brightness, request.max_brightness)) is not None:
             write["brightness"] = clamped
     if fields.color_temp_kelvin is not None:
@@ -59,6 +60,7 @@ class HueSetAttributes(Adapter[SetAttributesRequest]):
     A grouped_light write does not reach the lights that are off, so a room is written light by light. A field the
     light cannot take (color on a white bulb) is dropped and the result says so; a light that can take none of the
     fields is unsupported. min/max_brightness clamp the brightness the bridge last stored, so they work while off.
+    A write ends any move's prediction for the light.
     """
 
     action: ClassVar[str] = "set_attributes"
@@ -88,8 +90,8 @@ class HueSetAttributes(Adapter[SetAttributesRequest]):
             if not write:
                 if dropped:
                     return self.result(target, Status.UNSUPPORTED, detail="fields_not_supported")
-                return self.result(target, Status.CONFIRMED, detail="within_limits")
-            await write_light(api, light.id, **write)
+                return self.result(target, Status.UNCHANGED, detail="within_limits")
+            await write_forgetting(hass, light.id, write_light(api, light.id, **write))
             return self.result(target, Status.SENT, detail="fields_dropped" if dropped else None)
 
         return await self.gather(hass, targets, send)

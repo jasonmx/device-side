@@ -1,7 +1,7 @@
 # The device's own timer turns the target back off. A relay sends the same call whether HA shows it as a switch,
 # a light, or a switch_as_x light over the switch, so a pass on any of the three roles proves on/off for all.
 action: turn_on_for
-rig_seconds: 60
+rig_seconds: 120
 tests:
   - name: on_then_off
     roles: [switch_plug, light_onoff, light_wrapped]
@@ -58,11 +58,13 @@ tests:
       - expect_state: {state: on}
       - expect_state: {state: off, within: 2 * tol}
 
-  # Color temperature rides the same light.turn_on as brightness.
+  # Color temperature rides the same light.turn_on as brightness. On Z2M the option is turned off first, so the run
+  # proves the adapter turns Hue native control on (z2m_option steps do nothing on ZHA).
   - name: bulb_color_temp_then_off
     roles: [light_ct]
     only: [zha, zigbee2mqtt]
     steps:
+      - z2m_option: {hue_native_control: false}
       - set: {state: off}
       - wait: 2  # ZHA ignores a light's "on" report for 1.5 s after light.turn_off
       - call: {duration: 6, color_temp_kelvin: 4000}
@@ -71,3 +73,78 @@ tests:
       - wait: duration - tol
       - expect_state: {state: on}
       - expect_state: {state: off, within: 2 * tol}
+      - expect_z2m_option: {hue_native_control: true}
+
+  # A color rides the same light.turn_on as brightness. Setup leaves the bulb in color temperature, so color_mode
+  # xy shows the call moved it to color; Z2M reports every color field in xy. One test per field, as a record
+  # covers only the fields its calls sent; the RGB test is also watched, since no automated check reads the hue.
+  - name: bulb_rgb_then_off
+    roles: [light_color]
+    only: [zigbee2mqtt]
+    setup:
+      - z2m_option: {hue_native_control: false}
+      - set: {state: on, color_temp_kelvin: 2700}
+      - set: {state: off}
+    steps:
+      - call: {duration: 6, rgb_color: [255, 0, 0]}
+      - expect_response: {status: expected, integration: self}
+      - expect_state: {state: on, color_mode: xy, within: tol}
+      - wait: duration - tol
+      - expect_state: {state: on}
+      - expect_state: {state: off, within: 2 * tol}
+      - expect_z2m_option: {hue_native_control: true}
+    observe:
+      see: The color bulb, off and last warm white, turns on red for 6 seconds, then turns itself off.
+      watch: 'The first moment it lights: red from the start, with no flash of warm white.'
+      ask: Did it come on red and turn itself off about 6 seconds later?
+
+  - name: bulb_hs_then_off
+    roles: [light_color]
+    only: [zigbee2mqtt]
+    setup:
+      - z2m_option: {hue_native_control: false}
+      - set: {state: on, color_temp_kelvin: 2700}
+      - set: {state: off}
+    steps:
+      - call: {duration: 6, hs_color: [120, 100]}
+      - expect_response: {status: expected, integration: self}
+      - expect_state: {state: on, color_mode: xy, within: tol}
+      - wait: duration - tol
+      - expect_state: {state: on}
+      - expect_state: {state: off, within: 2 * tol}
+      - expect_z2m_option: {hue_native_control: true}
+
+  - name: bulb_xy_then_off
+    roles: [light_color]
+    only: [zigbee2mqtt]
+    setup:
+      - z2m_option: {hue_native_control: false}
+      - set: {state: on, color_temp_kelvin: 2700}
+      - set: {state: off}
+    steps:
+      - call: {duration: 6, xy_color: [0.15, 0.06]}
+      - expect_response: {status: expected, integration: self}
+      - expect_state: {state: on, color_mode: xy, within: tol}
+      - wait: duration - tol
+      - expect_state: {state: on}
+      - expect_state: {state: off, within: 2 * tol}
+      - expect_z2m_option: {hue_native_control: true}
+
+  # A Z2M group takes one OnWithTimedOff on its group ID topic, so every member runs the same timer.
+  - name: group_on_then_off
+    roles: [group]
+    only: [zigbee2mqtt]
+    setup:
+      - set: {state: off}
+      - wait: 2
+    steps:
+      - call: {duration: 6}
+      - expect_response: {status: expected, integration: self}
+      - expect_state: {state: on, within: tol}
+      - wait: duration - tol
+      - expect_state: {state: on}
+      - expect_state: {state: off, within: 2 * tol}
+    observe:
+      see: Both bulbs in the group, off, turn on together for 6 seconds, then turn themselves off.
+      watch: 'The moment they turn off: both at once, not one after the other.'
+      ask: Did both bulbs turn on together and turn off at the same moment?

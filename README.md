@@ -4,6 +4,8 @@
 
 Device Side unlocks popular on-device features for lights and switches, like timed on/off, via Matter, Zigbee, Shelly or Hue. Device-side features run natively on your lights and switches, so survive HA restarts.
 
+It also extends Home Assistant's shared light model. It lets you read a light's attributes while it's off, keeps brightness and color temperature accurate when you stop a transition partway, and handles protocol-specific quirks found in testing on real hardware.
+
 **Disclaimers:**
 
 1. **Compatibility warning:** Some device makes and models act on commands but don't acknowledge them, and some acknowledge but don't act. Test each of your devices with Device Side before relying on its features.
@@ -16,8 +18,8 @@ If you're OK with that, let's dive in.
 
 |                        |         Shelly          | Zigbee2MQTT | ZHA | Matter | Hue |
 |:---------------------- |:-----------------------:|:-----------:|:---:|:------:|:---:|
-| On With Timed Off      | ✅ switches<br>🙋 lights |          |   |      |   |
-| Off With Timed On      | ✅ switches<br>🙋 lights |     ❌      | ❌  |   ❌   |   |
+| On With Timed Off      | ✅ switches<br>🙋 lights |          |   |      | ❌ |
+| Off With Timed On      | ✅ switches<br>🙋 lights |     ❌      | ❌  |   ❌   | ❌ |
 | Smooth Dimming         |                         |           |   |      | ✅¹ |
 | Set Without Turning On |                         |           |   |      | ✅¹ |
 
@@ -25,7 +27,9 @@ If you're OK with that, let's dive in.
 
 ¹ Available now in [Hue Smooth Dimming](https://github.com/jasonmx/hue-smooth-dimming).
 
-Details per integration are in [docs/integrations.md](docs/integrations.md). Shelly Gen 1, Hue Bridge v1, and Zigbee plugs and switches are unsupported.
+Details per integration are in [docs/integrations.md](docs/integrations.md), including the Zigbee2MQTT option Device Side turns on for Hue bulbs timed with a color. Shelly Gen 1, Hue Bridge v1, and Zigbee plugs and switches are unsupported.
+
+During a Hue fade, Home Assistant shows the brightness Device Side predicts, rather than the end value the bridge reports as the fade starts. This is on by default; turn it off in Device Side's options.
 
 ## Get Started
 Requires at least one core integration to be installed: Matter, ZHA, Z2M via MQTT, Shelly, or Philips Hue.
@@ -75,6 +79,7 @@ Timer runs on the device. Use it to:
 A field marked 🔒 is `unsupported` in the release, as it's awaiting testing on real hardware. You can test it for us: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 **Cancel:** to cancel a timer, send a new action (e.g. `turn_on`, `turn_off`, `toggle` or a new timed on/off).
+On ZHA, only `turn_off` or a new `turn_on_for` cancels; to keep the light on, turn it off, then on.
 
 #### Results
 

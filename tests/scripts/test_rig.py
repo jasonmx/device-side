@@ -9,7 +9,7 @@ import pytest
 
 from custom_components.device_side.core.registry import AdapterRegistry
 from scripts.fingerprint import adapter_path, fingerprint
-from tests.rig.engine import load_step_files
+from tests.rig.engine import load_step_file, load_step_files
 from tests.rig.inventory import Inventory, load_env, main_checkout
 
 REPO = Path(__file__).parents[2]
@@ -63,6 +63,33 @@ def test_inventory_rejects_an_unlisted_supply(tmp_path):
         tmp_path, "inventory.yaml", "zha:\n  - entity_id: light.bulb\n    roles: [light_ct]\n    powered_by: switch.x\n"
     )
     with pytest.raises(ValueError, match="powered_by switch.x, which the inventory doesn't list"):
+        Inventory.load(path)
+
+
+def test_inventory_reads_a_groups_members(tmp_path):
+    path = write(
+        tmp_path,
+        "inventory.yaml",
+        "zigbee2mqtt:\n  - entity_id: light.g\n    roles: [group]\n    members: [light.a, light.b]\n",
+    )
+    inventory = Inventory.load(path)
+    assert inventory.members("zigbee2mqtt", "light.g") == ("light.a", "light.b")
+    assert inventory.members("zigbee2mqtt", "light.other") == ()
+
+
+def test_inventory_rejects_members_without_the_group_role(tmp_path):
+    path = write(
+        tmp_path, "inventory.yaml", "zha:\n  - entity_id: light.a\n    roles: [light_ct]\n    members: [light.b]\n"
+    )
+    with pytest.raises(ValueError, match="lists members but has no group role"):
+        Inventory.load(path)
+
+
+def test_inventory_rejects_members_given_as_one_string(tmp_path):
+    path = write(
+        tmp_path, "inventory.yaml", "zha:\n  - entity_id: light.g\n    roles: [group]\n    members: light.a\n"
+    )
+    with pytest.raises(ValueError, match="members must be a list of entity IDs"):
         Inventory.load(path)
 
 
@@ -249,26 +276,68 @@ def test_main_checkout_falls_back_outside_a_repo(tmp_path, monkeypatch):
     assert main_checkout(tmp_path) == tmp_path
 
 
-def test_a_held_rig_lock_refuses_a_second_run_naming_the_holder(tmp_path):
+def test_a_held_rig_lock_makes_a_second_run_wait_naming_the_holder(tmp_path, monkeypatch):
     path = tmp_path / rig.LOCK_NAME
     held = rig.lock_rig(path, "wt/first")
-    with pytest.raises(SystemExit, match=rf"wt/first \(pid {rig.os.getpid()}\)"):
-        rig.lock_rig(path, "wt/second")
-    held.close()
-    rig.lock_rig(path, "wt/second").close()
+    printed: list[str] = []
+    polls: list[float] = []
+
+    def release_on_second_poll(seconds):
+        if len(polls) == 1:
+            held.close()
+        polls.append(seconds)
+
+    monkeypatch.setattr(rig.time, "sleep", release_on_second_poll)
+    rig.lock_rig(path, "wt/second", out=printed.append).close()
+
+    assert len(polls) == 2
+    assert printed == [
+        f"Another rig run holds the lock: wt/first (pid {rig.os.getpid()}). "
+        "Waiting for it to finish (Ctrl-C to give up)...",
+        "Rig lock acquired.",
+    ]
     assert path.read_text().startswith("wt/second ")
 
 
+def test_a_waiting_run_names_each_new_holder_once(tmp_path, monkeypatch):
+    path = tmp_path / rig.LOCK_NAME
+    held = [rig.lock_rig(path, "wt/first")]
+    printed: list[str] = []
+
+    def hand_over(_seconds):
+        if len(printed) == 1:  # the first holder finishes and a third run takes the lock before us
+            held[0].close()
+            held[0] = rig.lock_rig(path, "wt/third")
+        elif len(printed) == 2:
+            held[0].close()
+
+    monkeypatch.setattr(rig.time, "sleep", hand_over)
+    rig.lock_rig(path, "wt/second", out=printed.append).close()
+
+    assert [line.split(" (pid")[0] for line in printed[:2]] == [
+        "Another rig run holds the lock: wt/first",
+        "Another rig run holds the lock: wt/third",
+    ]
+    assert printed[2] == "Rig lock acquired."
+
+
+def test_an_uncontested_lock_says_nothing(tmp_path):
+    printed: list[str] = []
+    rig.lock_rig(tmp_path / rig.LOCK_NAME, "wt/first", out=printed.append).close()
+    assert printed == []
+
+
 def test_check_tokens_stops_a_zha_run_without_an_admin_token():
+    registry = AdapterRegistry.discover()
     step_file = next(f for f in load_step_files() if f.action == "turn_on_for")
     zha, shelly = rig.Suite(step_file, "zha"), rig.Suite(step_file, "shelly")
     env = {"HA_URL": "http://ha:8123", "HA_TOKEN": "tok"}
     with pytest.raises(SystemExit, match="HA_URL and HA_TOKEN"):
-        rig.check_tokens({}, [shelly])
+        rig.check_tokens({}, [shelly], registry)
     with pytest.raises(SystemExit, match="zha needs HA_ADMIN_TOKEN"):
-        rig.check_tokens(env, [shelly, zha])
-    rig.check_tokens(env, [shelly])
-    rig.check_tokens({**env, "HA_ADMIN_TOKEN": "admin"}, [zha])
+        rig.check_tokens(env, [shelly, zha], registry)
+    rig.check_tokens(env, [shelly], registry)
+    rig.check_tokens({**env, "HA_ADMIN_TOKEN": "admin"}, [zha], registry)
 
 
 class PauseHA:
@@ -318,3 +387,31 @@ async def test_pause_stops_on_an_unknown_entity():
 def test_pause_list_refuses_other_domains():
     with pytest.raises(SystemExit, match="automations and switches only, got light.hall"):
         rig.pause_list({"RIG_PAUSE": "switch.al_office, light.hall"})
+
+
+def test_check_tokens_stops_a_hue_bridge_step_without_the_bridge_settings(tmp_path):
+    registry = AdapterRegistry.discover()
+    path = tmp_path / "steps.yaml"
+    path.write_text(
+        "action: set_scene\nrig_seconds: 5\ntests:\n  - name: t\n    roles: [light_onoff]\n"
+        "    steps:\n      - bridge: {put: {on: {on: true}}}\n"
+    )
+    step_file = load_step_file(path)
+    env = {"HA_URL": "http://ha:8123", "HA_TOKEN": "tok", "HA_ADMIN_TOKEN": "admin"}
+    with pytest.raises(SystemExit, match="HUE_BRIDGE_HOST and HUE_APP_KEY"):
+        rig.check_tokens(env, [rig.Suite(step_file, "hue")], registry)
+    with pytest.raises(SystemExit, match="HUE_BRIDGE_HOST and HUE_APP_KEY"):
+        rig.check_tokens({**env, "HUE_BRIDGE_HOST": "bridge"}, [rig.Suite(step_file, "hue")], registry)
+    ready = {**env, "HUE_BRIDGE_HOST": "bridge", "HUE_APP_KEY": "key"}
+    rig.check_tokens(ready, [rig.Suite(step_file, "hue")], registry)
+    rig.check_tokens(env, [rig.Suite(step_file, "shelly")], registry)
+
+
+def test_check_tokens_stops_a_run_of_an_adapter_with_options_without_an_admin_token():
+    # Its options are pinned through device_side's options flow, which is admin only.
+    registry = AdapterRegistry.discover()
+    step_file = next(f for f in load_step_files() if f.action == "move")
+    env = {"HA_URL": "http://ha:8123", "HA_TOKEN": "tok"}
+    with pytest.raises(SystemExit, match="hue needs HA_ADMIN_TOKEN"):
+        rig.check_tokens(env, [rig.Suite(step_file, "hue")], registry)
+    rig.check_tokens({**env, "HA_ADMIN_TOKEN": "admin"}, [rig.Suite(step_file, "hue")], registry)

@@ -3,11 +3,17 @@
     "get_attributes": {
       "service": "mdi:lightbulb-question"
     },
+    "move": {
+      "service": "mdi:tune-vertical"
+    },
     "set_attributes": {
       "service": "mdi:tune-variant"
     },
     "set_scene": {
       "service": "mdi:palette"
+    },
+    "stop": {
+      "service": "mdi:stop-circle-outline"
     },
     "turn_off_for": {
       "service": "mdi:timer-outline"

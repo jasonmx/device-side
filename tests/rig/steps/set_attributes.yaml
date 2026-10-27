@@ -2,13 +2,13 @@
 # A room is written light by light, so on the group role the response and expect_state cover every member.
 # Color steps run on the light_color role only.
 action: set_attributes
-rig_seconds: 70
+rig_seconds: 80
 tests:
   - name: sets_while_off  # §3.1
     roles: [light_ct, group]
     steps:
       - set: {state: off}
-      - call: {brightness: 102, color_temp_kelvin: 2700}
+      - call: {brightness: 40, color_temp_kelvin: 2700}
       - expect_response: {status: expected, integration: self}
       - wait: 1
       - expect_state: {state: off}
@@ -17,13 +17,17 @@ tests:
 
   - name: sets_color_while_off  # §3.2
     roles: [light_color]
-    steps:
+    setup:
       - set: {state: off}
+    steps:
       - call: {rgb_color: [255, 0, 0]}
       - expect_response: {status: expected, integration: self}
       - expect_state: {state: off}
       - set: {state: on}
-      - observe: Did it come on red?
+    observe:
+      see: The color lamp, off, gets red set while off, then turns on.
+      watch: 'The first moment it lights: red from the start, with no flash of its old color.'
+      ask: Did it come on red?
 
   - name: min_brightness_raises  # §3.3
     roles: [light_ct, group]
@@ -37,7 +41,7 @@ tests:
     steps:
       - set: {state: on, brightness_pct: 70}
       - call: {min_brightness: 50}
-      - expect_response: {status: confirmed, detail: within_limits}
+      - expect_response: {status: unchanged, detail: within_limits}
       - wait: tol
       - expect_state: {brightness: {min: 177, max: 180}}
 

@@ -101,18 +101,22 @@ are not detected.
 ### How targets resolve
 
 An entity belongs to this integration when its device carries the identifier
-`("mqtt", "zigbee2mqtt_<address>")` that Z2M writes during MQTT discovery. The address is
-the device's IEEE address for individual devices.
-
-Device Side builds the command topic from the identifier: `zigbee2mqtt/<address>/set`. This assumes
-the default Z2M base topic; see Sharp edges if you changed it.
+`("mqtt", "zigbee2mqtt_<address>")` that Z2M writes during MQTT discovery. For a device, the
+address is its IEEE address and the command topic is `zigbee2mqtt/<ieee>/set`. For a group, the
+address is `<encoded base topic>_<group ID>`, the base topic written as character codes with no
+separator (`1221051039810110150109113116116` for `zigbee2mqtt`; `getEncodedBaseTopic` in
+[`lib/extension/homeassistant.ts`](https://github.com/Koenkk/zigbee2mqtt/blob/master/lib/extension/homeassistant.ts)),
+and the command topic is `zigbee2mqtt/<group ID>/set`. Both assume the default Z2M base topic; see
+Sharp edges if you changed it.
 
 The topic uses the IEEE address, which Z2M accepts alongside the `friendly_name`, so it still
 reaches a renamed device (`resolveEntity` in
 [`lib/zigbee.ts`](https://github.com/Koenkk/zigbee2mqtt/blob/master/lib/zigbee.ts) looks the
 segment up with `getDevice` in
 [`lib/util/settings.ts`](https://github.com/Koenkk/zigbee2mqtt/blob/master/lib/util/settings.ts),
-which matches the IEEE-keyed `devices` map before `friendly_name`).
+which matches the IEEE-keyed `devices` map before `friendly_name`). A group's ID topic likewise
+survives a rename: `resolveEntity` falls back to `getGroup`, which matches the ID-keyed `groups` map
+before `friendly_name`.
 
 ### `turn_on_for`
 
@@ -121,10 +125,17 @@ device topic. Z2M translates `on_time` (in seconds, rounded to 1 decimal place) 
 `OnWithTimedOff` command.
 
 For **light entities with fields** (`brightness`, `color_temp_kelvin`, `rgb_color`, `hs_color`,
-`xy_color`, `transition`): calls `light.turn_on` first (blocking) so HA's MQTT light entity
-handles the color mode, sets the attributes through its own protocol, then publishes
-`{"state":"ON","on_time":<seconds>}` separately. The two-step approach keeps HA's light state in
-sync and delegates attribute handling to the integration that knows the device's capabilities.
+`xy_color`, `transition`): calls `light.turn_on` first so HA's MQTT light entity handles the color
+mode and sets the attributes through its own protocol, waits for Z2M to publish the light's state on
+`zigbee2mqtt/<friendly name>`, then publishes `{"state":"ON","on_time":<seconds>}` separately. The
+two-step approach keeps HA's light state in sync and delegates attribute handling to the integration
+that knows the device's capabilities.
+
+The wait matters because Z2M handles two messages for one light at once: sent straight after
+`light.turn_on`, the timer's message would publish the light's state from before the fields landed,
+which Home Assistant keeps, and contend with them on the mesh, so the timer could start seconds
+late. The wait is usually a fraction of a second. If Z2M publishes nothing within 5 s, Device Side
+logs a warning and sends the timer anyway, so that light stays on up to 5 s longer than asked.
 
 Lights only. Zigbee plugs and switches (`switch`) are unsupported on Zigbee2MQTT and ZHA alike: few
 honor `OnWithTimedOff` (IKEA's are moving to Thread, and Sonoff and Tuya run their own countdowns),
@@ -133,11 +144,52 @@ so a timer sent to one usually does nothing. If you have one that does, open an 
 Returns `sent` (fire-and-forget). Z2M does not report the timer back; confirmation is not
 available.
 
+**State read-backs.** Z2M publishes no state for a timed command (the `on_time` branch of `on_off`
+in zigbee-herdsman-converters returns none), and Z2M turns reporting off for Hue bulbs on purpose,
+so without help Home Assistant shows a light that is on as off, or one that turned itself off as
+still on. Device Side asks Z2M to read the state back by publishing `{"state":""}` to
+`zigbee2mqtt/<address>/get`:
+
+- 1 s after the timer starts, without fields only (with fields, `light.turn_on` already updated
+  the state);
+- at the end of the timer plus 1 s, and again plus 5 s or 2% of the duration, whichever is
+  longer, in case the bulb's clock runs slow on a long timer.
+
+A new call on the same entity replaces its pending reads. The reads never change the result, and a
+failed read is logged at debug level. We don't use or recommend configuring attribute reporting
+instead: it would have to be set up on every bulb, and Z2M's maintainers turned it off for Hue to
+avoid reports that conflict with its optimistic state.
+
+**Hue native control.** Z2M sends on and color as separate Zigbee commands, and a Hue bulb drops a
+color it receives while off, so a timer with a color would light at the bulb's last color first.
+Z2M's per-device option `hue_native_control` sends on, brightness, color and color temperature as
+one Philips command instead, which lights in the new color from the start and keeps the timer.
+
+So the first time a call carries `color_temp_kelvin`, `rgb_color`, `hs_color` or `xy_color` to a
+Hue bulb (manufacturer `Philips` in Home Assistant's device registry), Device Side turns that
+option on for it, and logs it at info level. It checks Z2M's settings on every such call, which adds
+a fraction of a second before the light turns on, waits up to 5 s for Z2M's answer when it changes
+the option, and sends the timer either way. If Z2M doesn't answer, it logs a warning
+and that one call may light at the last color first. Calls without a color or color temperature
+never touch the option.
+
+The option is Z2M's, so it applies to every command Z2M sends the bulb, not just Device Side's: all
+of them use the Philips protocol, and Z2M no longer simulates on/off transitions for it. To turn it
+back off, set `hue_native_control` to false in the device's settings in Z2M's frontend; Device Side
+turns it on again at the next timer with a color.
+
 ### Groups
 
-Z2M group entities are passed through to the adapter as a single target when `native_groups` is
-supported. The adapter publishes to the group's command topic. Detection of group entities in the
-HA registry needs verification on hardware; see the rig verification list.
+A Z2M group entity is one target: Device Side publishes once to the group's ID topic, and Z2M
+sends one `OnWithTimedOff` to the Zigbee group, so every member starts its timer at once. With
+fields, `light.turn_on` goes to the group entity first, as for a device. The state read-backs go
+to the group's own topic, `zigbee2mqtt/<group ID>/get`; Z2M rebuilds the group's state from its
+members' answers and shows it off only once every member is off.
+
+A command to a group uses the group's Z2M options, not its members', so for a timer with a color
+Device Side turns `hue_native_control` on as an option of the group itself when any member is a Hue
+bulb (members read from `zigbee2mqtt/bridge/groups`). A group takes a color only when every member
+can show one, as Z2M exposes the features its members share.
 
 ### Cancelling
 
@@ -151,9 +203,24 @@ firmware. Most Z2M-supported lights cancel the timer on any state change.
 - **Duration limits.** Zigbee `on_time` is a uint16 in tenths of a second, so the maximum is
   65534 tenths = 6553.4 s (about 1.8 hours). A duration over 6553.4 s is clamped and the result
   carries `clamped_to`. Durations under 50 ms are floored to 50 ms.
-- **Custom base topic.** If Z2M is configured with a base topic other than `zigbee2mqtt`, the
-  command topic Device Side builds will be wrong and the publish will reach no device. Check your
-  Z2M configuration; there is no workaround in v1.
+- **Custom base topic.** A group's identifier carries its base topic, so a group on any base
+  topic other than `zigbee2mqtt` is refused as `not_addressable`. A device's identifier doesn't,
+  so for a device the command topic is wrong and the publish reaches nothing, while the result
+  still says `sent`. Check your Z2M configuration; there is no workaround yet.
+- **A device named after a group's ID.** Z2M accepts a purely numeric friendly name and looks up
+  devices before groups, so a device whose friendly name is exactly a group's ID takes that
+  group's command. Don't name a device with a bare number.
+- **Other brands' color bulbs.** Hue native control is Philips-only, so a color bulb of any other
+  brand, timed with a color from off, may light at its last color for a moment first. Untested;
+  if yours does, open an issue.
+- **Old color shown at first.** With Hue native control on, a Hue light may report its old color
+  for the first seconds of a timer while it shows the new one, so Home Assistant shows the old
+  color until the next report.
+- **Restart during a timer.** Pending state reads are lost when Home Assistant restarts or Device
+  Side unloads, so the light's state stays stale until the device next reports or is next
+  commanded.
+- **Zigbee traffic.** Each call adds up to three Zigbee reads per target, spread over the timer.
+  A group read is one groupcast that every member answers.
 - **No confirmation.** Z2M's MQTT interface does not synchronously confirm the timer started.
   The result is always `sent`, never `confirmed`, regardless of whether the device accepted the
   command.
@@ -198,6 +265,9 @@ TS011F, stores OnTime as its own countdown and never switches on, so it reads ba
 Send `light.turn_off`. Turning the light on again does not cancel the timer on the one bulb tested
 (below), so don't rely on it. A second `turn_on_for` replaces the first.
 
+There is no way to stop the timer and keep the light on: on the tested bulb, every call that ends
+it early also turns the light off. Keeping it on means off, then on, which blinks.
+
 ### Tested behavior
 
 How a device treats a running timer is up to its firmware, so this holds only for the bulb it was
@@ -213,6 +283,13 @@ devices may differ.
   `brightness` (ZHA sends `move_to_level_with_on_off`) both left the timer running, and the bulb
   still turned off on time.
 - **`light.turn_off` cancels it.** After off then on, `OnTime` read 0.
+- **Nothing cancels it with the light left on.** Writing `OnTime` = 0 through
+  `zha.set_zigbee_cluster_attribute` (ZCL write status `SUCCESS`) and sending `OnWithTimedOff` with
+  `on_time: 0` each ended a running timer as if it had expired: the bulb turned off within 0.3 s.
+  `turn_on_for` with `duration: 0.05` is clamped to 0.1 s and did the same.
+- **Writing `OnTime` resets the remaining time.** Writing 100 with 15.6 s left set it to 10 s, and
+  the bulb turned off 10 s later.
+- **With no timer running, writing `OnTime` = 0 changes nothing,** whether the bulb is on or off.
 
 ### Sharp edges
 
@@ -312,26 +389,29 @@ One write per light, with brightness, color temperature or color and never `on`,
 is off stays off and comes on with the new settings. A room is written light by light, with one
 result per light, because a write to the room's `grouped_light` misses the lights that are off.
 
-`brightness` converts to Hue's percent as the Hue integration does; `color_temp_kelvin`
-is clamped to the light's range; colors convert to xy. `min_brightness` and `max_brightness` are
-percent and move the brightness the bridge last stored into that range, so they work while off; a
-light already inside it is `confirmed` with `within_limits` and nothing is written. An explicit
-`brightness` overrides both.
+The fields, units and names are hue_dimmer's, so its calls work unchanged under `device_side`.
+`brightness` is percent, as Hue stores it; `color_temp_kelvin` is clamped to the light's range;
+colors convert to xy, and given more than one, `rgb_color` wins, then `hs_color`, then `xy_color`.
+`min_brightness` and `max_brightness` are percent and move the brightness the bridge last stored
+into that range, so they work while off; a light already inside it is `unchanged` with
+`within_limits` and nothing is written. An explicit `brightness` overrides both. A `0` leaves
+`min_brightness`, `max_brightness` or `color_temp_kelvin` unset.
 
 A field a light can't take (color on a white bulb) is dropped and the result is `sent` with
 `fields_dropped`. A light that can take none of them is `unsupported` with `fields_not_supported`.
 
 ### `get_attributes`
 
-Returns `brightness` (0 to 255), `color_temp_kelvin`, `xy_color`, `rgb_color` and `hs_color` under
-Home Assistant's names, for lights that are off too. `color_temp_kelvin` is left out while a light
-is in color mode, since the value the bridge keeps is stale.
+Returns `brightness` (percent, to one decimal), `color_temp_kelvin`, `xy_color`, `rgb_color` and
+`hs_color` under Home Assistant's names, for lights that are off too. The response is hue_dimmer's
+and core's shape, each target's attributes under its entity ID (`response['light.desk'].brightness`),
+so `merge_response` works on it; a target that can't be read is left out. `color_temp_kelvin` is
+left out while a light is in color mode, since the value the bridge keeps is stale.
 
-A room returns its own row, then one per light marked `member_of` the room. While any light is on,
-the room's brightness is the bridge's (the average of the lights that are on) and its color
-temperature and color average the lights that are on, matching what the Hue integration shows for
-the room. With every light off the bridge reports nothing useful, so the room row averages all of
-its lights.
+A room returns one entry, as any target does. While any light is on, the room's brightness is the
+bridge's (the average of the lights that are on) and its color temperature and color average the
+lights that are on, matching what the Hue integration shows for the room. With every light off the
+bridge reports nothing useful, so the room's entry averages all of its lights.
 
 ### `set_scene`
 
@@ -344,6 +424,92 @@ sets its first frame.
 One failing light doesn't stop the rest: the result is `sent` with `some_lights_failed`, or
 `rejected` if every light failed. All-Day (smart) scenes are `unsupported` with `smart_scene`;
 a scene the bridge no longer has is `rejected` with `scene_not_found`.
+
+### `move` and `stop`
+
+`move` covers `brightness` for now; `color_temp` and `saturation` are refused with
+`fields_not_tested` until they are tested, and `hue` is refused because a hue rotation isn't a
+straight line the bridge can fade along. A brightness move is one write: the end point
+(`brightness_limit`, or 0 % or 100 %) with a duration of `sweep_time` × the fraction of the range
+left, which the bridge then runs on its own. Moving up turns the light on, from the bottom if it was
+off. Moving down to 0 % is a plain soft off: `on: false` with the duration, so the bridge keeps the
+stored brightness and the next plain on comes back at it. A light already at or past its limit is
+`unchanged` with `at_limit` and nothing is sent.
+
+A room moves with one write to its `grouped_light`, so its lights converge on the end point
+together. `stop` sends the bridge's dimming stop to the light or room. The bridge refuses that stop
+during a soft off, so a soft off Device Side started is cut by writing `on: true` with the predicted
+brightness and no duration, light by light for a room. A light that is off, or fading off from
+elsewhere, has nothing Device Side can stop: it is `unchanged` with `off` and nothing is sent.
+
+While a fade runs the bridge reports its end value, and after a stop it reports where the light
+halted late or not at all (Tested behavior, below). Device Side remembers each move and stop for its
+duration plus 15 seconds and predicts the brightness of each light meanwhile, so a move after a stop
+continues from where the light halted, and `get_attributes` returns the predicted brightness.
+
+A change made elsewhere ends the prediction, so the next move starts from the brightness the bridge
+reports. Device Side tells the bridge's reports of its own fades from any other report: the end value
+at the start, the bulb's reports anywhere between a fade's start and end while it runs (a bulb's fade
+isn't a straight line), and anything the bulb reports for 15 seconds after a stop (a late report may
+be its halt, or a value from before the move). A light or scene call from Home Assistant ends the
+prediction of every Hue light it targets at once, whatever its value, as do `set_attributes` and
+`set_scene`. Not caught: a change from outside Home Assistant (the Hue app, a dimmer switch) to a
+value between a running fade's start and end, or within 15 seconds of a stop, and
+`hue.activate_scene`.
+
+With **Show predicted brightness during Hue fades** on (the default), Home Assistant shows Device
+Side's predictions in place of those reports: the brightness at the start while a fade runs, where a
+stop halted the light, and the end once the fade has run. A fade to off shows the light on until it
+ends, a move up from off shows it on at its dimmest, and a room shows the mean of its lit lights. A
+change made elsewhere shows at once. Nothing is sent while a fade runs, so a dashboard slider holds
+still and then jumps to the stop or the end. After Home Assistant restarts, or reconnects to the
+bridge, mid-fade, it shows what the bridge reports. To always show what the bridge reports, turn the
+option off: Settings › Devices & services › Device Side › Configure.
+
+### `turn_on_for`, `turn_off_for`
+
+`unsupported` with `no_adapter`. The bridge's own timers can do the flip, but nothing cancels
+them except removing them on the bridge: a plain on/off from Home Assistant, the Hue app or a dimmer switch
+leaves the timer running, and the Hue app doesn't show it. A bulb without power when its timer
+fires misses the flip and the bridge doesn't retry. For timed Hue bulbs, pair them through ZHA,
+Zigbee2MQTT or Matter.
+
+### Tested behavior
+
+What the bridge reports during a transition (a write with a duration), measured 2026-10-26 on a
+BSB002 bridge (software 6.1.1978418030) and two LTA009 bulbs (firmware 1.163.1), with Home
+Assistant 2026.10.2 and aiohue 4.9.0. The Hue integration copies each event into Home Assistant as
+it arrives, so Home Assistant shows what is listed here.
+
+- **A transition reports its end value at the start.** One event per light, about 70 ms after the
+  write returns, holding the target the bridge stored (80 % reads 79.84). Nothing is sent when it
+  ends. A second transition to the value the bridge already holds sends no event.
+- **Where a stopped light halted is reported late, or not at all.** The report arrived 0.1 to 27 s
+  after the stop; its varying timing suggests it comes from the bulb, not a bridge timer. After 4 of
+  16 stops followed by 30 s of waiting, none came, and Home Assistant kept showing the end value.
+  When a report did come, it matched a straight-line interpolation within 0.3 % for brightness and
+  1 mirek for color temperature. On 2026-10-27 a bulb in a zone instead reported, 4 s after a stop,
+  the brightness it held before the write that preceded the move (56 %, against a 40 % halt).
+- **A report can arrive in the middle of a transition**, and may be the last one sent. The one
+  measured was the transition's own value about 1 s stale, so on the path the light had travelled.
+  Every stop report that came was within 0.4 % of the straight-line value.
+- **Rooms and zones:** each light reports its end value at once, then the `grouped_light` reports
+  the average about 1 s later. After a stop the lights report separately, up to 16 s apart.
+- **A change from elsewhere is reported promptly:** a `light.turn_on` from Home Assistant within
+  0.25 s, and a Hue app slider with an event about once a second while it moves.
+- **Dimming to off:** `on: false` (and brightness 0, if the write set it) is reported at the start. In
+  1 of 2 runs, a report mid-transition then showed the light on at 17 % with nothing after it. A
+  dimming stop is refused while the light dims to off ("soft off"), but writing `on: true` with a
+  brightness and no duration ends the fade there; set to the straight-line value, it showed no jump
+  or flash. A plain `on: false` with a duration keeps the stored brightness, and the next plain on
+  comes back at it; with brightness 0 in the write, it comes back at the minimum.
+- **Brightness 0 with the light left on** (`on: true`, brightness 0, with a duration) is accepted,
+  reported as 0 at the start, and ends with the light on at its minimum (the bridge's
+  `min_dim_level`, 0.2 % on the LTA009). Home Assistant shows it on at brightness 0. A dimming stop
+  halts it.
+- **A color temperature write reports only `color_temperature`,** never `dimming`. Color
+  temperature transitions and their stop (`color_temperature_delta`) behave as brightness does
+  above, on a light and on a zone.
 
 ### Sharp edges
 

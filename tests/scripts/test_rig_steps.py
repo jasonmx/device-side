@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from custom_components.device_side.core.registry import AdapterRegistry
-from tests.rig.engine import STEPS_DIR, Expr, SchemaError, load_step_file, load_step_files
+from tests.rig.engine import STEPS_DIR, Expr, Observe, SchemaError, load_step_file, load_step_files
 
 
 @pytest.mark.parametrize("path", sorted(STEPS_DIR.rglob("*.yaml")), ids=lambda path: path.name)
@@ -13,9 +13,9 @@ def test_every_shipped_step_file_parses(path):
     assert load_step_file(path).tests
 
 
-def test_load_step_files_skips_the_examples():
+def test_every_step_file_has_an_action():
     actions = {step_file.action for step_file in load_step_files()}
-    assert actions == {"get_attributes", "set_attributes", "set_scene", "turn_on_for", "turn_off_for"}
+    assert actions == {"get_attributes", "move", "set_attributes", "set_scene", "stop", "turn_on_for", "turn_off_for"}
     assert actions <= set(AdapterRegistry.discover().actions)
 
 
@@ -27,11 +27,18 @@ def test_the_step_files_keep_their_roles():
         "light_wrapped",
         "light_dimmable",
         "light_ct",
+        "light_color",
+        "group",
     )
     assert by_action["turn_off_for"].roles == ("switch_plug", "light_onoff", "light_wrapped", "light_dimmable")
 
 
 HEADER = "action: turn_on_for\nrig_seconds: 5\ntests:\n  - name: broken\n    roles: [switch_plug]\n    steps:\n"
+
+
+def observed(observe: str = "{see: s, watch: w, ask: a}", setup: str = "[{wait: 0}]") -> str:
+    """HEADER for an observed test, its steps to follow."""
+    return HEADER.replace("    steps:\n", f"    setup: {setup}\n    observe: {observe}\n    steps:\n")
 
 
 @pytest.mark.parametrize(
@@ -59,7 +66,31 @@ HEADER = "action: turn_on_for\nrig_seconds: 5\ntests:\n  - name: broken\n    rol
         (HEADER + "      - expect_state: {brightness: {min: a}}\n", "range bounds must be numbers"),
         (HEADER + "      - expect_response: {attributes: 3}\n", "attributes must be a mapping"),
         (HEADER + "      - sample: {attribute: brightness, for: 1, expect: wobbly}\n", "rising, falling or steady"),
-        (HEADER + "      - observe: {question: x}\n", "observe takes the question"),
+        (HEADER + "      - sample: {attribute: brightness, for: 1, source: hue}\n", "source must be ha or device_side"),
+        (HEADER + "      - observe: ok?\n", "step 1 (observe): the observe step is gone; give the test observe:"),
+        (
+            HEADER.replace("    steps:\n", "    brief: {see: s, watch: w}\n    steps:\n") + "      - wait: 0\n",
+            "test broken, brief is gone; give the test observe:",
+        ),
+        (observed("{see: s, watch: w}") + "      - wait: 0\n", "observe: missing ask"),
+        (
+            observed("{see: s, watch: w, ask: ''}") + "      - wait: 0\n",
+            "observe: see, watch and ask must be non-empty",
+        ),
+        (observed("[a]") + "      - wait: 0\n", "observe: expected a mapping"),
+        (observed(setup="[]") + "      - wait: 0\n", "setup must be a non-empty list"),
+        (
+            HEADER.replace("    steps:\n", "    observe: {see: s, watch: w, ask: a}\n    steps:\n")
+            + "      - wait: 0\n",
+            "a test with observe needs setup",
+        ),
+        (observed() + "      - do: Flip it.\n", "step 1 (do): do belongs in setup"),
+        (
+            HEADER.replace("    steps:\n", "    setup: [{do: Flip it.}]\n    steps:\n") + "      - wait: 0\n",
+            "setup step 1 (do): do is only for a test with observe",
+        ),
+        (observed("{see: s, watch: w, ask: a}", "[{do: ''}]") + "      - wait: 0\n", "do takes the instruction"),
+        (observed(setup="[{observe: x}]") + "      - wait: 0\n", "setup step 1 (observe): the observe step is gone"),
         (HEADER + "      - restore: 1\n", "restore takes no arguments"),
         (HEADER + "      - expect_response: 1\n", "expected a mapping"),
         (HEADER + "      - expect_response: {status: fine, colour: red}\n", "unknown key(s) colour"),
@@ -85,3 +116,23 @@ def test_a_schema_error_names_where_it_is(tmp_path: Path, text, message):
 )
 def test_expressions_evaluate_against_the_run(text, value):
     assert Expr.parse(text).eval({"duration": 10, "tol": 0.5}) == value
+
+
+def test_an_observed_test_is_parsed_with_its_setup(tmp_path: Path):
+    path = tmp_path / "observed.yaml"
+    text = observed("{see: ' It clicks. ', watch: Twice., ask: 'Two?'}", "[{do: Flip it.}, {set: {state: off}}]")
+    path.write_text(text + "      - call: {}\n      - expect_state: {state: on}\n")
+    (test,) = load_step_file(path).tests
+    assert test.observe == Observe("It clicks.", "Twice.", "Two?")
+    assert [step.label for step in test.setup] == ["setup step 1 (do)", "setup step 2 (set)"]
+    assert not test.automated  # its setup needs the person
+
+
+@pytest.mark.parametrize(
+    ("steps", "automated"),
+    [("      - call: {}\n", False), ("      - call: {}\n      - sample: {attribute: b, for: 1}\n", True)],
+)
+def test_an_observed_test_is_automated_too_when_its_steps_check_something(tmp_path: Path, steps, automated):
+    path = tmp_path / "observed.yaml"
+    path.write_text(observed() + steps)
+    assert load_step_file(path).tests[0].automated is automated

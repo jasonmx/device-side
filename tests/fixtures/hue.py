@@ -14,6 +14,25 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 MIREK_SCHEMA = {"mirek_minimum": 153, "mirek_maximum": 454}
 
+# The bridge and its device: aiohue checks the software version before a grouped_light write.
+BRIDGE_RESOURCES = [
+    {"id": "bridge", "type": "bridge", "bridge_id": "001788fffe000000", "time_zone": {"time_zone": "UTC"}},
+    {
+        "id": "device-bridge",
+        "type": "device",
+        "services": [{"rid": "bridge", "rtype": "bridge"}],
+        "product_data": {
+            "model_id": "BSB002",
+            "manufacturer_name": "Signify Netherlands B.V.",
+            "product_name": "Hue Bridge",
+            "product_archetype": "bridge_v2",
+            "certified": True,
+            "software_version": "1.70.1970000000",
+        },
+        "metadata": {"archetype": "bridge_v2", "name": "Bridge"},
+    },
+]
+
 
 class HueBridge:
     """Resources to load, PUTs sent, and light ids whose writes the bridge refuses."""
@@ -106,8 +125,8 @@ class HueBridge:
     async def load(self) -> HueBridgeV2:
         api = HueBridgeV2("bridge.invalid", "app-key")
         api.request = self._request
-        for controller in (api.devices, api.lights, api.groups, api.scenes):
-            await controller.initialize(self.resources)
+        for controller in (api.devices, api.lights, api.groups, api.scenes, api.config):
+            await controller.initialize([*self.resources, *BRIDGE_RESOURCES])
         self.api = api
         return api
 

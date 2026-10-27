@@ -11,7 +11,8 @@ IEEE = "0x00124b0012345678"
 
 def z2m_entry(hass: HomeAssistant) -> MockConfigEntry:
     """One loaded MQTT config entry for Z2M (all Z2M devices share a single entry)."""
-    entry = MockConfigEntry(domain="mqtt")
+    # Untitled, as HA names a device without one after its entry; Z2M names every device after its friendly name.
+    entry = MockConfigEntry(domain="mqtt", title="")
     entry.add_to_hass(hass)
     entry.mock_state(hass, ConfigEntryState.LOADED)
     return entry
@@ -24,6 +25,8 @@ def add_z2m_entity(
     ieee: str = IEEE,
     state: str = "off",
     attributes: dict | None = None,
+    manufacturer: str | None = None,
+    name: str | None = None,
 ) -> str:
     """Register one Z2M device entity with the identifier Z2M writes via MQTT discovery.
 
@@ -33,6 +36,8 @@ def add_z2m_entity(
     device = dr.async_get(hass).async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={("mqtt", f"zigbee2mqtt_{ieee}")},
+        manufacturer=manufacturer,
+        name=name,
     )
     er.async_get(hass).async_get_or_create(
         domain,
@@ -44,3 +49,21 @@ def add_z2m_entity(
     )
     hass.states.async_set(entity_id, state, attributes or {})
     return entity_id
+
+
+def add_z2m_group(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    entity_id: str,
+    group_id: int,
+    base_topic: str = "zigbee2mqtt",
+    state: str = "off",
+    name: str | None = None,
+) -> str:
+    """Register one Z2M group entity with the identifier Z2M writes via MQTT discovery.
+
+    Z2M encodes the base topic as character codes joined with no separator, then appends the
+    group ID (getDevicePayload and getEncodedBaseTopic in lib/extension/homeassistant.ts).
+    """
+    encoded = "".join(str(ord(c)) for c in base_topic)
+    return add_z2m_entity(hass, entry, entity_id, ieee=f"{encoded}_{group_id}", state=state, name=name)

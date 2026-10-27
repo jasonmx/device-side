@@ -1,16 +1,18 @@
 """Runs the rig's YAML step files against the live HA and renders bench records from the results.
 
-One file per action (`steps/<action>.yaml`) runs on every inventory integration that has that action's adapter.
-The registry supplies what differs per integration: the expected status, the tolerance and the fields in scope.
+One file per action (`steps/<action>.yaml`) runs on every inventory integration that has that action's adapter; a
+file with `options` (`steps/<action>-<option>.yaml`) runs it again with those device_side options on. The registry
+supplies what differs per integration: the expected status, the tolerance, and the fields and options in scope.
 No pytest here: scripts/rig.py calls run(), and a tester's one-file runner can import this module unchanged.
 """
 
 import ast
 import asyncio
+import contextlib
 import logging
 import operator
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -19,8 +21,9 @@ import yaml
 
 from scripts.fingerprint import adapter_path, fingerprint
 
+from .bridge import BridgeError, HueBridge
 from .client import HAClient, HAError
-from .inventory import RIG_DIR, ROLES, TOLERANCE_S, Inventory
+from .inventory import RIG_DIR, ROLES, SETTLE_S, TOLERANCE_S, Inventory
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,9 +35,10 @@ _RESTORE_COLOR = ("color_temp_kelvin", "hs_color", "xy_color", "rgb_color")
 
 # Integrations whose adapter calls an admin-only action with the caller's context, so their suites run on
 # HA_ADMIN_TOKEN. ZHA: issue_zigbee_cluster_command is registered with async_register_admin_service.
-ADMIN_INTEGRATIONS = frozenset({"zha"})
+# Zigbee2MQTT: the z2m_option steps publish and subscribe over MQTT, which only an admin may.
+ADMIN_INTEGRATIONS = frozenset({"zha", "zigbee2mqtt"})
 
-# Statuses that mean the command reached the device.
+# Statuses that mean the command reached the device; unchanged sent nothing, so it proves no call.
 _REACHED = frozenset({"confirmed", "sent"})
 
 # An entity whose supply a case switched rejoins its network after power returns. ZHA keeps showing the last state
@@ -42,6 +46,18 @@ _REACHED = frozenset({"confirmed", "sent"})
 POWER_SETTLE_S = 5.0
 POWER_REJOIN_S = 60.0
 POWER_RETRY_S = 3.0
+
+# A light reports off as its fade starts: an observed case waits this long after setup, so the brief comes once the
+# lights have reached the start state it describes.
+SETUP_SETTLE_S = 2.0
+
+# How long after saving options the engine waits before checking the entry has reloaded.
+OPTIONS_RELOAD_S = 1.0
+
+# Actions whose calls leave a prediction behind (SETTLE_S), and move's default sweep_time (actions/move.py
+# DEFAULT_SWEEP_TIME), the longest a move without one can run.
+_PREDICTED = frozenset({"move", "stop"})
+MOVE_SWEEP_TIME_S = 5.0
 
 
 class SchemaError(ValueError):
@@ -117,15 +133,39 @@ class Step:
 
 
 @dataclass(frozen=True, slots=True)
+class Observe:
+    """What an observed test asks of the person: what the lights will do, what to watch for, and the question."""
+
+    see: str
+    watch: str
+    ask: str
+
+
+# Steps that check something; an observed run turns them into the waits they imply.
+CHECKS = frozenset({"expect_response", "expect_error", "expect_state", "sample"})
+
+
+@dataclass(frozen=True, slots=True)
 class RigTest:
     name: str
     roles: tuple[str, ...]
     only: frozenset[str] | None
     steps: tuple[Step, ...]
+    setup: tuple[Step, ...] = ()
+    observe: Observe | None = None
+
+    @property
+    def automated(self) -> bool:
+        """Whether the test has an automated case: always without `observe`, else when its steps check something
+        and its setup needs no one."""
+        if self.observe is None:
+            return True
+        return any(step.kind in CHECKS for step in self.steps) and not any(step.kind == "do" for step in self.setup)
 
     def roles_needed(self, role: str) -> list[str]:
         """The case's own role and every role a step targets, in first-use order."""
-        targets = (step.args.get("target") for step in self.steps if isinstance(step.args, dict))
+        steps = (*self.setup, *self.steps)
+        targets = (step.args.get("target") for step in steps if isinstance(step.args, dict))
         return list(dict.fromkeys([role, *filter(None, targets)]))
 
 
@@ -135,10 +175,16 @@ class StepFile:
     action: str
     rig_seconds: int
     tests: tuple[RigTest, ...]
+    # The device_side options its suites run with on; every other option in the adapter's scope runs off.
+    options: frozenset[str] = frozenset()
 
     @property
     def roles(self) -> tuple[str, ...]:
         return tuple(dict.fromkeys(role for test in self.tests for role in test.roles))
+
+    @property
+    def uses_bridge(self) -> bool:
+        return any(step.kind == "bridge" for test in self.tests for step in (*test.setup, *test.steps))
 
 
 def _state(value: Any) -> Any:
@@ -213,18 +259,49 @@ def _parse_expect_state(args: Any) -> dict:
 
 
 def _parse_sample(args: Any) -> dict:
-    args = _mapping(args, required=["attribute", "for"], allowed=["target", "every", "expect", "min", "max"])
+    args = _mapping(
+        args, required=["attribute", "for"], allowed=["target", "every", "expect", "min", "max", "source"]
+    )
     args["for"] = Expr.parse(args["for"])
     args["every"] = Expr.parse(args.get("every", 0.5))
     if args.get("expect", "rising") not in ("rising", "falling", "steady"):
         raise ValueError(f"expect must be rising, falling or steady, got {args['expect']!r}")
+    if args.get("source", "ha") not in ("ha", "device_side"):
+        raise ValueError(f"source must be ha or device_side, got {args['source']!r}")
     return args
 
 
-def _parse_observe(args: Any) -> str:
+def _parse_do(args: Any) -> str:
     if not isinstance(args, str) or not args.strip():
-        raise ValueError("observe takes the question to ask, as a string")
+        raise ValueError("do takes the instruction for the person, as a string")
     return args.strip()
+
+
+def _parse_z2m_option(args: Any) -> dict:
+    args = _mapping(args)
+    if not set(args) - {"target"}:
+        raise ValueError("name an option")
+    return args
+
+
+def _body_keys(value: Any) -> Any:
+    """A body with YAML 1.1's boolean keys put back: a bare `on:` key reads as True, and Hue's is `on`."""
+    if isinstance(value, dict):
+        return {_state(key): _body_keys(inner) for key, inner in value.items()}
+    return value
+
+
+def _parse_bridge(args: Any) -> dict:
+    args = _mapping(args, allowed=["target", "put", "recall"])
+    if ("put" in args) == ("recall" in args):
+        raise ValueError("give put or recall, one of them")
+    if "put" in args and (not isinstance(args["put"], dict) or not args["put"]):
+        raise ValueError("put takes the body to write, as a mapping")
+    if "put" in args:
+        args["put"] = _body_keys(args["put"])
+    if "recall" in args and args["recall"] is not True:
+        raise ValueError("recall takes true")
+    return args
 
 
 def _parse_restore(args: Any) -> None:
@@ -240,16 +317,23 @@ PARSERS: dict[str, Callable[[Any], Any]] = {
     "expect_state": _parse_expect_state,
     "wait": Expr.parse,
     "sample": _parse_sample,
-    "observe": _parse_observe,
+    "do": _parse_do,
     "restore": _parse_restore,
+    # A write to the Hue bridge that bypasses HA; fails in any other integration's suite.
+    "bridge": _parse_bridge,
+    # Zigbee2MQTT device options; both steps do nothing in another integration's suite.
+    "z2m_option": _parse_z2m_option,
+    "expect_z2m_option": _parse_z2m_option,
 }
 
 
-def _parse_step(raw: Any, index: int) -> Step:
+def _parse_step(raw: Any, label: str) -> Step:
     if not isinstance(raw, dict) or len(raw) != 1:
-        raise ValueError(f"step {index}: expected one `kind: args` mapping, got {raw!r}")
+        raise ValueError(f"{label}: expected one `kind: args` mapping, got {raw!r}")
     ((kind, args),) = raw.items()
-    label = f"step {index} ({kind})"
+    label = f"{label} ({kind})"
+    if kind == "observe":
+        raise ValueError(f"{label}: the observe step is gone; give the test observe: {{see, watch, ask}}")
     if kind not in PARSERS:
         raise ValueError(f"{label}: unknown step; use one of {', '.join(PARSERS)}")
     try:
@@ -258,11 +342,30 @@ def _parse_step(raw: Any, index: int) -> Step:
         raise ValueError(f"{label}: {err}") from None
 
 
+def _parse_steps(raw: Any, key: str) -> tuple[Step, ...]:
+    if not isinstance(raw, list) or not raw:
+        raise ValueError(f"{key} must be a non-empty list")
+    prefix = "setup step" if key == "setup" else "step"
+    return tuple(_parse_step(step, f"{prefix} {index}") for index, step in enumerate(raw, 1))
+
+
+def _parse_observe(raw: Any) -> Observe:
+    try:
+        args = _mapping(raw, required=("see", "watch", "ask"), allowed=())
+        if not all(isinstance(value, str) and value.strip() for value in args.values()):
+            raise ValueError("see, watch and ask must be non-empty strings")
+    except ValueError as err:
+        raise ValueError(f"observe: {err}") from None
+    return Observe(args["see"].strip(), args["watch"].strip(), args["ask"].strip())
+
+
 def _parse_test(raw: Any) -> RigTest:
     if not isinstance(raw, dict) or not isinstance(name := raw.get("name"), str):
         raise ValueError(f"a test needs a name, got {raw!r}")
     try:
-        if unknown := sorted(set(raw) - {"name", "roles", "only", "steps"}):
+        if "brief" in raw:
+            raise ValueError("brief is gone; give the test observe: {see, watch, ask}")
+        if unknown := sorted(set(raw) - {"name", "roles", "only", "setup", "steps", "observe"}):
             raise ValueError(f"unknown key(s) {', '.join(unknown)}")
         roles = raw.get("roles")
         if not isinstance(roles, list) or not roles:
@@ -272,12 +375,24 @@ def _parse_test(raw: Any) -> RigTest:
         only = raw.get("only")
         if only is not None and (not isinstance(only, list) or not only):
             raise ValueError("only must be a non-empty list of integration keys")
-        if not isinstance(steps := raw.get("steps"), list) or not steps:
-            raise ValueError("steps must be a non-empty list")
-        parsed = tuple(_parse_step(step, index) for index, step in enumerate(steps, 1))
+        steps, setup, observe = _parse_phases(raw)
     except ValueError as err:
         raise ValueError(f"test {name}, {err}") from None
-    return RigTest(name, tuple(roles), frozenset(only) if only else None, parsed)
+    return RigTest(name, tuple(roles), frozenset(only) if only else None, steps, setup, observe)
+
+
+def _parse_phases(raw: dict) -> tuple[tuple[Step, ...], tuple[Step, ...], Observe | None]:
+    """A test's steps, setup and observe block, with `do` only in the setup of an observed test."""
+    steps = _parse_steps(raw.get("steps"), "steps")
+    setup = _parse_steps(raw["setup"], "setup") if "setup" in raw else ()
+    observe = _parse_observe(raw["observe"]) if "observe" in raw else None
+    if observe is not None and not setup:
+        raise ValueError("a test with observe needs setup: the steps that bring the lights to where see begins")
+    if do := next((step for step in steps if step.kind == "do"), None):
+        raise ValueError(f"{do.label}: do belongs in setup, before the brief")
+    if observe is None and (do := next((step for step in setup if step.kind == "do"), None)):
+        raise ValueError(f"{do.label}: do is only for a test with observe")
+    return steps, setup, observe
 
 
 def load_step_file(path: Path) -> StepFile:
@@ -285,10 +400,13 @@ def load_step_file(path: Path) -> StepFile:
         raw = yaml.safe_load(path.read_text())
         if not isinstance(raw, dict):
             raise ValueError("expected a mapping with action, rig_seconds and tests")
-        if unknown := sorted(set(raw) - {"action", "rig_seconds", "tests"}):
+        if unknown := sorted(set(raw) - {"action", "rig_seconds", "options", "tests"}):
             raise ValueError(f"unknown key(s) {', '.join(unknown)}")
         if not isinstance(action := raw.get("action"), str):
             raise ValueError("action must name the device_side action under test")
+        options = raw.get("options", [])
+        if not isinstance(options, list) or not all(isinstance(name, str) and name for name in options):
+            raise ValueError("options must be a list of device_side option names")
         if isinstance(seconds := raw.get("rig_seconds"), bool) or not isinstance(seconds, int) or seconds <= 0:
             raise ValueError("rig_seconds must be a positive whole number")
         if not isinstance(raw_tests := raw.get("tests"), list) or not raw_tests:
@@ -298,11 +416,11 @@ def load_step_file(path: Path) -> StepFile:
             raise ValueError(f"duplicate test name(s) {', '.join(duplicates)}")
     except (ValueError, yaml.YAMLError) as err:
         raise SchemaError(f"{path.name}: {err}") from None
-    return StepFile(path, action, seconds, tests)
+    return StepFile(path, action, seconds, tests, frozenset(options))
 
 
 def load_step_files(steps_dir: Path = STEPS_DIR) -> list[StepFile]:
-    """Every `<action>.yaml` directly in steps_dir; `examples/` below it is for the parser tests only."""
+    """Every `<action>.yaml` directly in steps_dir."""
     return [load_step_file(path) for path in sorted(steps_dir.glob("*.yaml"))]
 
 
@@ -320,41 +438,115 @@ class Suite:
     def action(self) -> str:
         return self.file.action
 
+    @property
+    def name(self) -> str:
+        """The name its record takes: the action, then any options it runs with on (`move-predicted_state`)."""
+        return "-".join([self.action, *sorted(self.file.options)])
+
 
 @dataclass(frozen=True, slots=True)
 class Case:
-    """One test on one role: the entities it moves, or why it is skipped."""
+    """One run of a test on one role, automated or observed: the entities it moves, or why it is skipped."""
 
     suite: Suite
     test: RigTest
     role: str
     entities: dict[str, str]
     skip: str | None = None
+    observed: bool = False
+    members: tuple[str, ...] = ()  # the inventory's members for the group role, if it lists them
 
     @property
     def id(self) -> str:
-        return f"{self.test.name}[{self.role}]"
+        return f"{self.test.name}[{self.role}]" + (" observed" if self.observed else "")
+
+    @property
+    def twin(self) -> str | None:
+        """The id of the test's other case on this role, when it has both: either proves nothing alone."""
+        if self.test.observe is None or not self.test.automated:
+            return None
+        return replace(self, observed=not self.observed).id
 
 
 def cases(suite: Suite, inventory: Inventory, keyword: str | None = None) -> list[Case]:
-    """The suite's cases in file order; `keyword` keeps only case ids containing it."""
+    """The suite's cases in file order, a test's automated case before its observed one; `keyword` keeps only case
+    ids containing it."""
     result = []
     for test in suite.file.tests:
         if test.only is not None and suite.integration not in test.only:
             continue
         for role in test.roles:
-            case = Case(suite, test, role, {})
-            if keyword and keyword not in case.id:
-                continue
-            entities = {needed: inventory.entity(suite.integration, needed) for needed in test.roles_needed(role)}
-            if missing := [needed for needed, entity_id in entities.items() if entity_id is None]:
-                result.append(Case(suite, test, role, {}, f"no {missing[0]} entity in inventory"))
-            else:
-                result.append(Case(suite, test, role, entities))
+            for observed in [False] * test.automated + [True] * (test.observe is not None):
+                case = Case(suite, test, role, {}, observed=observed)
+                if keyword and keyword not in case.id:
+                    continue
+                needed = test.roles_needed(role)
+                entities = {name: inventory.entity(suite.integration, name) for name in needed}
+                if missing := [name for name, entity_id in entities.items() if entity_id is None]:
+                    case = Case(suite, test, role, {}, f"no {missing[0]} entity in inventory", observed)
+                else:
+                    members = inventory.members(suite.integration, entities["group"]) if "group" in entities else ()
+                    case = Case(suite, test, role, entities, observed=observed, members=members)
+                result.append(case)
     return result
 
 
 # --- Running -------------------------------------------------------------------------------------------------
+
+
+class EntryOptions:
+    """device_side's options on the rig, set for each case through the entry's options flow (admin only) and put
+    back when the run ends. Saving a change reloads the entry."""
+
+    def __init__(self, admin: HAClient, reload_s: float = OPTIONS_RELOAD_S):
+        self.admin = admin
+        self.reload_s = reload_s
+        self.entry_id: str | None = None
+        self.original: dict[str, Any] | None = None
+        self.current: dict[str, Any] = {}
+
+    async def apply(self, wanted: dict[str, bool]) -> None:
+        if self.original is not None and all(self.current.get(name) == on for name, on in wanted.items()):
+            return
+        if self.entry_id is None:
+            entries = await self.admin.command({"type": "config_entries/get", "domain": "device_side"})
+            if not entries:
+                raise RuntimeError("no device_side config entry to set options on")
+            self.entry_id = entries[0]["entry_id"]
+        flow = await self.admin.rest("post", "/api/config/config_entries/options/flow", {"handler": self.entry_id})
+        # The form's defaults are the options in force.
+        values = {field["name"]: field.get("default") for field in flow.get("data_schema", [])}
+        if self.original is None:
+            self.original = dict(values)
+        flow_path = f"/api/config/config_entries/options/flow/{flow['flow_id']}"
+        if all(values.get(name) == on for name, on in wanted.items()):
+            # Saving would still reload an entry whose options were never saved: they go from none to these.
+            await self.admin.rest("delete", flow_path)
+            self.current = values
+            return
+        values |= wanted
+        try:
+            result = await self.admin.rest("post", flow_path, values)
+            if result.get("type") != "create_entry":
+                raise RuntimeError(f"device_side's options flow did not save: {result}")
+        except Exception:
+            with contextlib.suppress(Exception):  # don't leave the flow open in HA; the save's error is the one raised
+                await self.admin.rest("delete", flow_path)
+            raise
+        self.current = values
+        await self.reloaded()
+
+    async def reloaded(self) -> None:
+        """Wait for the reload a saved change schedules: it starts after the save returns."""
+        await asyncio.sleep(self.reload_s)
+        query = {"type": "config_entries/get", "domain": "device_side"}
+        async with asyncio.timeout(30):
+            while not (entries := await self.admin.command(query)) or entries[0]["state"] != "loaded":
+                await asyncio.sleep(0.5)
+
+    async def restore(self) -> None:
+        if self.original is not None and self.current != self.original:
+            await self.apply(self.original)
 
 
 class Outcome(StrEnum):
@@ -375,6 +567,7 @@ class CaseResult:
     # Fields in the adapter's scope that a call carried to the device, and whether any call reached it.
     fields: frozenset[str] = frozenset()
     reached: bool = False
+    twin: str | None = None  # Case.twin
 
 
 @dataclass(slots=True)
@@ -392,8 +585,9 @@ class SuiteResult:
 
     @property
     def proven(self) -> list[CaseResult]:
-        """Cases whose every step was checked, observed ones included: only these go into a record's scope."""
-        return [case for case in self.cases if case.outcome is Outcome.PASS]
+        """Passed cases whose twin passed too: only these go into a record's scope."""
+        passed = {case.id for case in self.cases if case.outcome is Outcome.PASS}
+        return [case for case in self.cases if case.id in passed and (case.twin is None or case.twin in passed)]
 
 
 @dataclass(slots=True)
@@ -420,15 +614,15 @@ class Snapshot:
     taken: dict[str, dict | None] = field(default_factory=dict)
     stored: dict[str, dict] = field(default_factory=dict)
 
-    async def take(self, entity_id: str) -> dict | None:
+    async def take(self, entity_id: str, group: bool = False) -> dict | None:
         """The entity's state before the case moved it, and that of every entity it powers."""
         if entity_id not in self.taken:
             state = self.taken[entity_id] = await self.ha.get_state(entity_id)
-            if self.device_side and _is_off_light(entity_id, state):
+            if self.device_side and not group and _is_off_light(entity_id, state):
                 response = await self.ha.call_service(
                     "device_side", "get_attributes", {"entity_id": entity_id}, return_response=True
                 )
-                if attributes := ((response or {}).get(entity_id) or {}).get("attributes"):
+                if attributes := (response or {}).get(entity_id):
                     self.stored[entity_id] = attributes
             for powered, supply in self.power.items():
                 if supply == entity_id:
@@ -513,8 +707,20 @@ def _describe(state: dict | None, names: Iterable[str]) -> str:
     return ", ".join(f"{name}={_value(state, name)!r}" for name in names)
 
 
+def _bold(text: str) -> str:
+    return f"\033[1m{text}\033[0m"
+
+
+class _NoOneThere(Exception):
+    """EOF at a prompt: nobody is at the rig, so the observed case ends not observed."""
+
+
 class _CaseRun:
-    """The steps of one case, against one HA connection, with what earlier steps left behind."""
+    """The steps of one case, against one HA connection, with what earlier steps left behind.
+
+    An observed case runs its setup, briefs the person and waits for Enter, runs its steps with every check relaxed to
+    the wait it implies (so the timing matches the automated case), then asks its question.
+    """
 
     def __init__(
         self,
@@ -524,9 +730,19 @@ class _CaseRun:
         tolerance: float,
         ask: Callable[[str], str] | None,
         power: dict[str, str] | None = None,
+        out: Callable[[str], None] = print,
+        position: str = "",
+        busy: dict[str, float] | None = None,
+        settle: float = 0.0,
+        bridge: HueBridge | None = None,
     ):
-        self.case, self.ha, self.registry, self.ask = case, ha, registry, ask
+        self.bridge = bridge
+        self.case, self.ha, self.registry, self.ask, self.out, self.position = case, ha, registry, ask, out, position
         self.integration = case.suite.integration
+        # Each light's loop time once the predictions an earlier move or stop left on it have expired; shared
+        # by every case in the run.
+        self.busy = {} if busy is None else busy
+        self.settle = settle
         self.names: dict[str, float] = {"tol": tolerance}
         self.snapshot = Snapshot(
             ha,
@@ -539,9 +755,9 @@ class _CaseRun:
         self.response: dict | None = None
         self.error: HAError | None = None
         self.last_action = case.suite.action
+        self.query = False
         self.fields: set[str] = set()
         self.reached = False
-        self.unobserved = False
 
     def entity(self, args: Any) -> str:
         role = args.get("target") if isinstance(args, dict) else None
@@ -551,18 +767,21 @@ class _CaseRun:
         return self.case.entities.get("group") == entity_id
 
     async def members(self, entity_id: str) -> list[str]:
-        """A group's member lights, from its `entity_id` attribute; any other entity is its own one member."""
+        """A group's member lights, from its `entity_id` attribute, else the inventory's `members:` (a Z2M group light
+        has no such attribute); any other entity is its own one member."""
         if not self.is_group(entity_id):
             return [entity_id]
         state = await self.ha.get_state(entity_id)
         members = state and state["attributes"].get("entity_id")
-        if not isinstance(members, list) or not members:
-            raise StepFailure(f"{entity_id} lists no members in its entity_id attribute")
-        return members
+        if isinstance(members, list) and members:
+            return members
+        if self.case.members:
+            return list(self.case.members)
+        raise StepFailure(f"{entity_id} lists no members in its entity_id attribute, and the inventory gives none")
 
     async def touch(self, entity_id: str) -> None:
         """Snapshot the entity, and a group's members after it, so a restore puts each member back last."""
-        await self.snapshot.take(entity_id)
+        await self.snapshot.take(entity_id, group=self.is_group(entity_id))
         if self.is_group(entity_id):
             for member in await self.members(entity_id):
                 await self.snapshot.take(member)
@@ -570,27 +789,98 @@ class _CaseRun:
     async def run(self) -> CaseResult:
         case = self.case
         domain = case.entities[case.role].partition(".")[0]
-        result = CaseResult(case.id, case.role, domain, Outcome.PASS, entity_ids=tuple(case.entities.values()))
-        steps = case.test.steps
+        result = CaseResult(
+            case.id, case.role, domain, Outcome.PASS, entity_ids=tuple(case.entities.values()), twin=case.twin
+        )
         try:
+            if case.observed:
+                self.out("")
+                self.out(f"--- {case.suite.action} / {case.test.name} on {case.role} ({self.position}) ---")
+            await self.await_settled()
             await self.check_power()
-            for index, step in enumerate(steps):
-                following = steps[index + 1].kind if index + 1 < len(steps) else None
-                try:
-                    await getattr(self, f"_{step.kind}")(step.args, following)
-                except StepFailure as err:
-                    raise StepFailure(f"{step.label}: {err}") from None
-                except Exception as err:  # noqa: BLE001 - any error ends the case as a fail, not the run
-                    raise StepFailure(f"{step.label}: {type(err).__name__}: {err}") from None
+            await self.steps(case.test.setup)
+            if case.observed:
+                await self.observed()
+            else:
+                await self.steps(case.test.steps)
         except StepFailure as err:
             result.outcome, result.detail = Outcome.FAIL, str(err)
-        else:
-            if self.unobserved:
-                result.outcome = Outcome.NOT_OBSERVED
+        except _NoOneThere:
+            result.outcome = Outcome.NOT_OBSERVED
         finally:
             await self.snapshot.restore()
         result.fields, result.reached = frozenset(self.fields), self.reached
         return result
+
+    async def steps(self, steps: tuple[Step, ...], relaxed: bool = False) -> None:
+        for index, step in enumerate(steps):
+            following = steps[index + 1].kind if index + 1 < len(steps) else None
+            handler = getattr(self, f"_{step.kind}")
+            if relaxed:
+                handler = getattr(self, f"_relaxed_{step.kind}", handler)
+            try:
+                await handler(step.args, following)
+            except StepFailure as err:
+                raise StepFailure(f"{step.label}: {err}") from None
+            except _NoOneThere:
+                raise
+            except Exception as err:  # noqa: BLE001 - any error ends the case as a fail, not the run
+                raise StepFailure(f"{step.label}: {type(err).__name__}: {err}") from None
+
+    async def observed(self) -> None:
+        observe = self.case.test.observe
+        assert observe is not None  # only a test with observe has an observed case
+        await asyncio.sleep(SETUP_SETTLE_S)
+        self.out(f"Lights: {await self.lights_by_name()}")
+        self.out(f"You'll see: {_bold(observe.see)}")
+        self.out(f"Watch for: {observe.watch}")
+        await self.answer("Press Enter to start... ")
+        try:
+            await self.steps(self.case.test.steps, relaxed=True)
+        except StepFailure as err:
+            self.out(f"    nothing to observe: {err}")
+            with contextlib.suppress(EOFError):
+                await asyncio.to_thread(self.ask, "Press Enter to go on... ")
+            raise
+        while (answer := (await self.answer(f"    {observe.ask} [Y/n] ")).lower()) not in ("", "y", "yes", "n", "no"):
+            self.out("    Answer y or n.")
+        if answer in ("n", "no"):
+            try:
+                saw = await self.answer("    What did you see? (Enter to skip) ")
+            except _NoOneThere:
+                saw = ""
+            raise StepFailure(f"not seen: {observe.ask}" + (f"; saw: {saw}" if saw else ""))
+
+    async def lights_by_name(self) -> str:
+        """The case's lights by name, a group's members after it: the brief's step files can't name household lights."""
+
+        async def name(entity_id: str) -> str:
+            state = await self.ha.get_state(entity_id)
+            return (state and state["attributes"].get("friendly_name")) or entity_id
+
+        names = []
+        for entity_id in self.case.entities.values():
+            label = await name(entity_id)
+            if self.is_group(entity_id):
+                label += f" ({', '.join([await name(member) for member in await self.members(entity_id)])})"
+            names.append(label)
+        return "; ".join(names)
+
+    async def answer(self, text: str) -> str:
+        """The person's reply, stripped; EOF there means nobody is at the rig."""
+        try:
+            return (await asyncio.to_thread(self.ask, text)).strip()
+        except EOFError:
+            raise _NoOneThere from None
+
+    async def await_settled(self) -> None:
+        """Wait out the predictions an earlier case's move or stop left on this case's lights."""
+        lights = [member for entity_id in self.case.entities.values() for member in await self.members(entity_id)]
+        wait = max((self.busy.get(light, 0.0) for light in lights), default=0.0) - asyncio.get_running_loop().time()
+        if wait > 0:
+            if self.case.observed:
+                self.out(f"Waiting {wait:.0f} s for the last move's predictions to expire...")
+            await asyncio.sleep(wait)
 
     async def check_power(self) -> None:
         """Fail up front if a target's supply is off: its state in HA is stale, so every step would mislead."""
@@ -620,6 +910,62 @@ class _CaseRun:
             want["brightness"] = {"min": brightness - 2, "max": brightness + 2}
         await self.await_state(entity_id, want, self.names["tol"])
 
+    async def z2m_ieee(self, entity_id: str) -> str:
+        entry = await self.ha.command({"type": "config/entity_registry/get", "entity_id": entity_id})
+        for device in await self.ha.command({"type": "config/device_registry/list"}):
+            if device["id"] == entry.get("device_id"):
+                for domain, ident in device["identifiers"]:
+                    if domain == "mqtt" and ident.startswith("zigbee2mqtt_0x"):
+                        return ident.removeprefix("zigbee2mqtt_")
+        raise StepFailure(f"{entity_id} has no Zigbee2MQTT device")
+
+    async def _z2m_option(self, args: dict, _following: str | None) -> None:
+        if self.integration != "zigbee2mqtt":
+            return
+        options = {name: value for name, value in args.items() if name != "target"}
+        await self.ha.set_z2m_device_options(await self.z2m_ieee(self.entity(args)), options)
+
+    async def _expect_z2m_option(self, args: dict, _following: str | None) -> None:
+        if self.integration != "zigbee2mqtt":
+            return
+        entity_id = self.entity(args)
+        got = await self.ha.z2m_device_options(await self.z2m_ieee(entity_id))
+        for name, want in args.items():
+            if name != "target" and got.get(name) != want:
+                raise StepFailure(f"{entity_id}: Zigbee2MQTT option {name} is {got.get(name)!r}, expected {want!r}")
+
+    async def bridge_resource(self, entity_id: str) -> tuple[str, str]:
+        """The CLIP v2 type and id behind a Hue entity. Core's hue integration keys each entity by its resource id:
+        a light's by its light, a room or zone light's by its grouped_light, a scene's by its scene."""
+        entry = await self.ha.command({"type": "config/entity_registry/get", "entity_id": entity_id})
+        if entry.get("platform") != "hue":
+            raise StepFailure(f"{entity_id} is not a Hue entity (platform {entry.get('platform')!r})")
+        if not entry.get("unique_id"):
+            raise StepFailure(f"{entity_id} has no unique_id to find on the bridge")
+        domain = entity_id.partition(".")[0]
+        if domain == "scene":
+            return "scene", entry["unique_id"]
+        return ("grouped_light" if self.is_group(entity_id) else "light"), entry["unique_id"]
+
+    async def _bridge(self, args: dict, _following: str | None) -> None:
+        if self.integration != "hue":
+            raise StepFailure(f"bridge steps need a Hue suite, not {self.integration}")
+        if self.bridge is None:
+            raise StepFailure("no Hue bridge: set HUE_BRIDGE_HOST and HUE_APP_KEY in .env.rig")
+        entity_id = self.entity(args)
+        is_scene = entity_id.startswith("scene.")
+        if "recall" in args and not is_scene:
+            raise StepFailure(f"recall needs a scene target, not {entity_id}")
+        if "put" in args and is_scene:
+            raise StepFailure(f"put needs a light or group target, not {entity_id}")
+        await self.touch(entity_id)
+        resource_type, resource_id = await self.bridge_resource(entity_id)
+        body = {"recall": {"action": "active"}} if "recall" in args else args["put"]
+        try:
+            await self.bridge.put(resource_type, resource_id, body)
+        except BridgeError as err:
+            raise StepFailure(str(err)) from None
+
     async def _call(self, args: dict, following: str | None) -> None:
         action = args.get("action", self.case.suite.action)
         entity_id = self.entity(args)
@@ -632,6 +978,8 @@ class _CaseRun:
             elif key not in ("action", "target"):
                 data[key] = value
         self.last_action, self.response, self.error = action, None, None
+        # ActionKind is a StrEnum: compared by value so the engine needs no integration import.
+        self.query = getattr(getattr(self.registry, "actions", {}).get(action), "kind", None) == "query"
         try:
             self.response = await self.ha.call_service("device_side", action, data, return_response=True)
         except HAError as err:
@@ -641,11 +989,25 @@ class _CaseRun:
             return
         if following == "expect_error":
             raise StepFailure(f"device_side.{action} succeeded where an error was expected: {self.response}")
+        await self.mark_busy(action, data)
         entries = [entry for entry in (self.response or {}).values() if isinstance(entry, dict)]
-        if any(entry.get("status") in _REACHED for entry in entries):
+        # A query returns only the targets it read, as core does, with no status to check. Only the action under
+        # test counts: a move that sets up a stop proves nothing about the stop adapter.
+        if action != self.case.suite.action:
+            return
+        if entries and (self.query or any(entry.get("status") in _REACHED for entry in entries)):
             self.reached = True
             if (adapter := self.registry.adapter(action, self.integration)) is not None:
                 self.fields |= set(data) & adapter.scope.fields
+
+    async def mark_busy(self, action: str, data: dict) -> None:
+        """After a move or stop, hold its lights until the predictions it left expire (see await_settled)."""
+        if not self.settle or action not in _PREDICTED:
+            return
+        sweep = data.get("sweep_time", MOVE_SWEEP_TIME_S) if action == "move" else 0.0
+        until = asyncio.get_running_loop().time() + sweep + self.settle
+        for member in await self.members(data["entity_id"]):
+            self.busy[member] = max(self.busy.get(member, 0.0), until)
 
     def expected(self, name: str, want: Any) -> Any:
         if name == "status" and want == "expected":
@@ -668,7 +1030,7 @@ class _CaseRun:
                 if name == "target":
                     continue
                 if name == "attributes":
-                    got = entry.get("attributes") or {}
+                    got = entry if self.query else entry.get("attributes") or {}
                     if bad := [attr for attr, value in want.items() if not _matches(got.get(attr), value)]:
                         raise StepFailure(f"{key}: attributes {bad} are {got}, expected {want}")
                 elif not _matches(entry.get(name), expected := self.expected(name, want)):
@@ -719,15 +1081,18 @@ class _CaseRun:
         await asyncio.sleep(max(seconds.eval(self.names), 0))
 
     async def _sample(self, args: dict, _following: str | None) -> None:
-        """Poll an attribute for `for` seconds; an absent attribute (a light that is off) reads as 0."""
+        """Poll an attribute for `for` seconds; an absent attribute (a light that is off) reads as 0.
+
+        `source: device_side` reads device_side.get_attributes instead of HA's state, in its units (brightness in
+        percent): mid-move it predicts where the light is, where HA shows a Hue fade's end value at once.
+        """
         entity_id, attribute = self.entity(args), args["attribute"]
         loop = asyncio.get_running_loop()
         deadline = loop.time() + args["for"].eval(self.names)
         every = max(args["every"].eval(self.names), 0.05)
         readings: list[float] = []
         while True:
-            state = await self.ha.get_state(entity_id)
-            value = state["attributes"].get(attribute) if state else None
+            value = await self.reading(entity_id, attribute, args.get("source", "ha"))
             if value is not None and (isinstance(value, bool) or not isinstance(value, int | float)):
                 raise StepFailure(f"{entity_id}: {attribute} is {value!r}, not a number")
             readings.append(float(value or 0))
@@ -748,19 +1113,36 @@ class _CaseRun:
             case "steady" if len(set(readings)) > 1:
                 raise StepFailure(f"{entity_id}: {attribute} moved: {shown}")
 
-    async def _observe(self, question: str, _following: str | None) -> None:
-        if self.ask is None:
-            self.unobserved = True
-            return
-        try:
-            answer = await asyncio.to_thread(self.ask, f"    {question} [y/N] ")
-        except EOFError:
-            answer = ""
-        if answer.strip().lower() not in ("y", "yes"):
-            raise StepFailure(f"not seen: {question}")
+    async def reading(self, entity_id: str, attribute: str, source: str) -> Any:
+        if source == "ha":
+            state = await self.ha.get_state(entity_id)
+            return state["attributes"].get(attribute) if state else None
+        response = await self.ha.call_service(
+            "device_side", "get_attributes", {"entity_id": entity_id}, return_response=True
+        )
+        return ((response or {}).get(entity_id) or {}).get(attribute)
+
+    async def _do(self, instruction: str, _following: str | None) -> None:
+        await self.answer(f"    {instruction} Press Enter when done... ")
 
     async def _restore(self, _args: None, _following: str | None) -> None:
         await self.snapshot.restore()
+
+    # Observed mode: a check becomes the wait it implies, and never fails.
+
+    async def _relaxed_expect_response(self, _args: dict, _following: str | None) -> None:
+        pass
+
+    _relaxed_expect_error = _relaxed_expect_response
+    _relaxed_expect_z2m_option = _relaxed_expect_response
+
+    async def _relaxed_expect_state(self, args: dict, following: str | None) -> None:
+        if "within" in args:
+            with contextlib.suppress(StepFailure):
+                await self._expect_state(args, following)
+
+    async def _relaxed_sample(self, args: dict, _following: str | None) -> None:
+        await asyncio.sleep(max(args["for"].eval(self.names), 0))
 
 
 async def run(
@@ -773,35 +1155,141 @@ async def run(
     keyword: str | None = None,
     ask: Callable[[str], str] | None = input,
     tolerance: dict[str, float] = TOLERANCE_S,
+    settle: dict[str, float] = SETTLE_S,
     out: Callable[[str], None] = print,
+    bridge: HueBridge | None = None,
 ) -> RunResult:
-    """Run every case in order and print the table; ADMIN_INTEGRATIONS run on `admin`. `ask=None` is --unattended."""
-    results, power = [], inventory.power()
+    """Run every case and print the table; ADMIN_INTEGRATIONS run on `admin`. `ask=None` is --unattended.
+
+    Every automated case runs first, with nobody needed. Then each observed case runs, unless its automated twin
+    failed; unattended, they are reported not observed instead.
+    """
+    planned = []
     for suite in suites:
         adapter = registry.adapter(suite.action, suite.integration)
         if adapter is None:
             out(f"{suite.integration} / {suite.action}: no adapter, skipped")
             continue
+        if unknown := sorted(suite.file.options - adapter.scope.options):
+            raise SchemaError(f"{suite.file.path.name}: {suite.integration} {suite.action} has no option {unknown[0]}")
         client = admin if suite.integration in ADMIN_INTEGRATIONS else ha
-        if client is None:
+        if client is None or (adapter.scope.options and admin is None):
             out(f"{suite.integration} / {suite.action}: needs HA_ADMIN_TOKEN, skipped")
             continue
-        suite_result = SuiteResult(suite, adapter, [], complete=not keyword)
-        out(f"{suite.integration} / {suite.action}")
-        for case in cases(suite, inventory, keyword):
-            if case.skip:
-                result = CaseResult(case.id, case.role, None, Outcome.SKIPPED, case.skip)
-            else:
-                result = await _CaseRun(case, client, registry, tolerance[suite.integration], ask, power).run()
-            out(f"  {case.id}: {result.outcome}" + (f" ({result.detail})" if result.detail else ""))
-            suite_result.cases.append(result)
-        results.append(suite_result)
-    run_result = RunResult(results)
-    for suite_result in results:
+        planned.append((suite, adapter, client, cases(suite, inventory, keyword)))
+    options = {
+        id(suite): {name: name in suite.file.options for name in adapter.scope.options}
+        for suite, adapter, *_ in planned
+    }
+    rig_run = _Run(
+        registry, tolerance, settle, inventory.power(), ask, out, options, EntryOptions(admin) if admin else None,
+        bridge=bridge,
+    )
+    try:
+        waiting = [
+            case
+            for suite, _, client, suite_cases in planned
+            for case in await rig_run.automated(suite, client, suite_cases)
+        ]
+        await rig_run.observed(waiting)
+    finally:
+        if rig_run.entry_options is not None:
+            # A failure here must not hide the one that ended the run.
+            try:
+                await rig_run.entry_options.restore()
+            except Exception as err:  # noqa: BLE001
+                out(f"Could not put device_side's options back; set them in HA: {err}")
+    suite_results = [
+        SuiteResult(suite, adapter, [rig_run.results[id(suite), case.id] for case in suite_cases], complete=not keyword)
+        for suite, adapter, _, suite_cases in planned
+    ]
+    for suite_result in suite_results:
         out("")
-        out(f"{suite_result.suite.integration} / {suite_result.suite.action}")
+        out(f"{suite_result.suite.integration} / {suite_result.suite.name}")
         out("\n".join(table(suite_result, details=True)))
-    return run_result
+    return RunResult(suite_results)
+
+
+@dataclass(slots=True)
+class _Run:
+    """The cases of one rig run, and their results by suite (by identity: a Suite holds dicts) and case id."""
+
+    registry: Any
+    tolerance: dict[str, float]
+    settle: dict[str, float]
+    power: dict[str, str]
+    ask: Callable[[str], str] | None
+    out: Callable[[str], None]
+    # Each suite's options by its id, set before each of its cases.
+    options: dict[int, dict[str, bool]] = field(default_factory=dict)
+    entry_options: EntryOptions | None = None
+    results: dict[tuple[int, str], CaseResult] = field(default_factory=dict)
+    busy: dict[str, float] = field(default_factory=dict)  # _CaseRun.busy
+    bridge: HueBridge | None = None
+
+    def case_run(self, case: Case, client: HAClient, ask: Callable[[str], str] | None, position: str = "") -> _CaseRun:
+        integration = case.suite.integration
+        return _CaseRun(
+            case,
+            client,
+            self.registry,
+            self.tolerance[integration],
+            ask,
+            self.power,
+            self.out,
+            position,
+            self.busy,
+            self.settle.get(integration, 0.0),
+            self.bridge,
+        )
+
+    async def run_case(
+        self, case: Case, client: HAClient, ask: Callable[[str], str] | None, position: str = ""
+    ) -> CaseResult:
+        if wanted := self.options.get(id(case.suite)):
+            await self.entry_options.apply(wanted)
+        return await self.case_run(case, client, ask, position).run()
+
+    def report(self, case: Case, result: CaseResult) -> None:
+        self.results[id(case.suite), case.id] = result
+        self.out(f"  {case.id}: {result.outcome}" + (f" ({result.detail})" if result.detail else ""))
+
+    async def automated(self, suite: Suite, client: HAClient, suite_cases: list[Case]) -> list[tuple[Case, HAClient]]:
+        """Run the suite's automated cases; return the observed ones still to run, with their client."""
+        self.out(f"{suite.integration} / {suite.name}")
+        waiting = []
+        for case in suite_cases:
+            twin = self.results.get((id(suite), case.twin or ""))
+            if case.skip:
+                self.report(case, _not_run(case, Outcome.SKIPPED, case.skip))
+            elif not case.observed:
+                self.report(case, await self.run_case(case, client, None))
+            elif self.ask is None:
+                self.report(case, _not_run(case, Outcome.NOT_OBSERVED))
+            elif twin is not None and twin.outcome is Outcome.FAIL:
+                self.report(case, _not_run(case, Outcome.SKIPPED, "automated case failed"))
+            else:
+                waiting.append((case, client))
+        return waiting
+
+    async def observed(self, waiting: list[tuple[Case, HAClient]]) -> None:
+        """Run each observed case in turn; after an EOF at a prompt, the rest are not observed."""
+        if waiting:
+            self.out("")
+            self.out(f"{len(waiting)} test{'s need' if len(waiting) > 1 else ' needs'} you")
+        for number, (case, client) in enumerate(waiting, 1):
+            if self.ask is None:
+                self.report(case, _not_run(case, Outcome.NOT_OBSERVED))
+                continue
+            result = await self.run_case(case, client, self.ask, f"{number} of {len(waiting)}")
+            self.report(case, result)
+            if result.outcome is Outcome.NOT_OBSERVED:
+                self.ask = None
+
+
+def _not_run(case: Case, outcome: Outcome, detail: str = "") -> CaseResult:
+    domain = case.entities[case.role].partition(".")[0] if case.entities else None
+    return CaseResult(case.id, case.role, domain, outcome, detail, twin=case.twin)
 
 
 # --- Bench records -------------------------------------------------------------------------------------------
@@ -812,7 +1300,7 @@ def table(suite_result: SuiteResult, details: bool = False) -> list[str]:
     lines = ["| Test | Target | Result |", "|---|---|---|"]
     for case in suite_result.cases:
         target = f"`{case.domain}` ({case.role})" if case.domain else f"{case.role}: none in inventory"
-        outcome = str(case.outcome) + (f": {case.detail}" if details and case.outcome is Outcome.FAIL else "")
+        outcome = str(case.outcome) + (f": {case.detail}" if details and case.detail else "")
         lines.append(f"| `{case.id}` | {target} | {outcome} |")
     return lines
 
@@ -865,12 +1353,26 @@ def render_record(
         ("Capabilities", capabilities),
         ("Fields", ", ".join(f"`{name}`" for name in fields) or "none"),
     ]
+    if suite.file.options:
+        rows.append(("Options", ", ".join(f"`{name}`" for name in sorted(suite.file.options))))
     lines = [f"# {title} · {suite.action}", "", "| | |", "|---|---|"]
     lines += [f"| {name} | {value} |" for name, value in rows]
     lines += ["", "## Tests", "", *table(suite_result)]
     if any(case.outcome is Outcome.NOT_OBSERVED for case in suite_result.cases):
-        lines += ["", "Tests marked `not observed` ran unattended; their fields and capabilities are not listed."]
+        lines += ["", "Tests marked `not observed` had nobody watching; their fields and capabilities are not listed."]
     return "\n".join(lines) + "\n"
+
+
+def write_report(result: RunResult, directory: Path, title: str) -> Path:
+    """Every suite's table with each failure's and skip's reason, for any run: failed, partial or unattended."""
+    lines = [f"# {title}"]
+    for suite_result in result.suites:
+        suite = suite_result.suite
+        lines += ["", f"## {suite.integration} / {suite.name}", "", *table(suite_result, details=True)]
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{title.replace(' ', '-').replace(':', '')}.md"
+    path.write_text("\n".join(lines) + "\n")
+    return path
 
 
 async def write_records(
@@ -885,7 +1387,7 @@ async def write_records(
         entity_ids = [entity_id for case in suite_result.cases for entity_id in case.entity_ids]
         ha_version, devices = await rig_facts(ha, entity_ids)
         title = registry.integrations[suite.integration].title
-        path = bench_dir / suite.integration / f"{suite.action}.md"
+        path = bench_dir / suite.integration / f"{suite.name}.md"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(render_record(suite_result, title, ha_version, devices, date, source))
         written.append(path)

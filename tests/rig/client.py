@@ -1,8 +1,10 @@
 """A small Home Assistant client for rig tests: WebSocket for service calls and state events, REST for reads."""
 
 import asyncio
+import contextlib
 import itertools
-from collections.abc import Callable
+import json
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 import aiohttp
@@ -26,9 +28,11 @@ class HAClient:
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._ids = itertools.count(1)
         self._pending: dict[int, asyncio.Future] = {}
+        self._mqtt: dict[int, asyncio.Queue[str]] = {}  # MQTT subscriptions by WebSocket id
         self._states: dict[str, dict] = {}
         self._changed = asyncio.Condition()
         self._reader: asyncio.Task | None = None
+        self._state_events: int | None = None  # the state_changed subscription's WebSocket id
 
     async def connect(self) -> None:
         # The system resolver, not aiohttp's default aiodns: only the system one resolves mDNS (.local) names.
@@ -45,7 +49,8 @@ class HAClient:
         if (reply := await self._ws.receive_json())["type"] != "auth_ok":
             raise RuntimeError(f"WebSocket auth failed: {reply.get('message')}")
         self._reader = asyncio.create_task(self._read())
-        await self.command({"type": "subscribe_events", "event_type": "state_changed"})
+        self._state_events = next(self._ids)
+        await self.command({"type": "subscribe_events", "event_type": "state_changed"}, self._state_events)
 
     async def close(self) -> None:
         if self._reader is not None:
@@ -61,14 +66,19 @@ class HAClient:
             if data["type"] == "result":
                 if (future := self._pending.pop(data["id"], None)) is not None and not future.done():
                     future.set_result(data)
-            elif data["type"] == "event":
+            elif data["type"] != "event":
+                continue
+            elif (queue := self._mqtt.get(data["id"])) is not None:
+                queue.put_nowait(data["event"]["payload"])
+            # Anything else is an MQTT message for a subscription already closed, which HA can still send.
+            elif data["id"] == self._state_events:
                 event = data["event"]["data"]
                 async with self._changed:
                     self._states[event["entity_id"]] = event["new_state"]
                     self._changed.notify_all()
 
-    async def command(self, payload: dict) -> Any:
-        msg_id = next(self._ids)
+    async def command(self, payload: dict, msg_id: int | None = None) -> Any:
+        msg_id = next(self._ids) if msg_id is None else msg_id
         future = asyncio.get_running_loop().create_future()
         self._pending[msg_id] = future
         await self._ws.send_json({"id": msg_id, **payload})
@@ -87,6 +97,12 @@ class HAClient:
             payload["return_response"] = True
         result = await self.command(payload)
         return result.get("response") if return_response else None
+
+    async def rest(self, method: str, path: str, json: dict | None = None) -> Any:
+        """A REST call, for what the WebSocket API lacks (an options flow)."""
+        async with self._session.request(method, f"{self.url}{path}", json=json) as response:
+            response.raise_for_status()
+            return await response.json()
 
     async def get_state(self, entity_id: str) -> dict | None:
         async with self._session.get(f"{self.url}/api/states/{entity_id}") as response:
@@ -110,3 +126,45 @@ class HAClient:
         async with asyncio.timeout(timeout), self._changed:
             await self._changed.wait_for(lambda: predicate(self._states.get(entity_id)))
             return self._states.get(entity_id)
+
+    @contextlib.asynccontextmanager
+    async def _mqtt_messages(self, topic: str) -> AsyncIterator[asyncio.Queue[str]]:
+        """Payloads on an MQTT topic while the block runs, a retained one first. Needs an admin token."""
+        msg_id = next(self._ids)
+        self._mqtt[msg_id] = asyncio.Queue()
+        try:
+            await self.command({"type": "mqtt/subscribe", "topic": topic}, msg_id)
+            yield self._mqtt[msg_id]
+        finally:
+            with contextlib.suppress(HAError):
+                await self.command({"type": "unsubscribe_events", "subscription": msg_id})
+            del self._mqtt[msg_id]
+
+    async def z2m_device_options(self, ieee: str) -> dict:
+        """A Zigbee2MQTT device's options, from Z2M's retained bridge/info."""
+        async with self._mqtt_messages("zigbee2mqtt/bridge/info") as messages:
+            try:
+                info = json.loads(await asyncio.wait_for(messages.get(), timeout=5))
+            except TimeoutError:
+                raise TimeoutError("no retained zigbee2mqtt/bridge/info within 5 s") from None
+        return info["config"]["devices"].get(ieee, {})
+
+    async def set_z2m_device_options(self, ieee: str, options: dict) -> None:
+        """Set Zigbee2MQTT device options, then wait until Z2M's bridge/info shows them; raises TimeoutError if not.
+
+        It reads bridge/info rather than waiting for Z2M's reply: HA answers mqtt/subscribe before the broker has the
+        subscription, so a reply can arrive first and be missed, while a fresh subscription always gets the retained
+        bridge/info.
+        """
+        payload = {"id": ieee, "options": options}
+        await self.call_service(
+            "mqtt", "publish", {"topic": "zigbee2mqtt/bridge/request/device/options", "payload": json.dumps(payload)}
+        )
+        deadline = asyncio.get_running_loop().time() + 10
+        while True:
+            current = await self.z2m_device_options(ieee)
+            if all(current.get(name) == value for name, value in options.items()):
+                return
+            if asyncio.get_running_loop().time() > deadline:
+                raise TimeoutError(f"Zigbee2MQTT still shows {current} for {ieee}, not {options}")
+            await asyncio.sleep(0.5)
