@@ -73,11 +73,15 @@ def git(*args: str, check: bool = True) -> str:
     return subprocess.run(["git", "-C", str(REPO), *args], check=check, capture_output=True, text=True).stdout.strip()
 
 
-def select(step_files: list[StepFile], inventory: Inventory, integrations: list[str] | None) -> list[Suite]:
-    """Every step file on every inventory integration, narrowed to --integration."""
+def select(
+    step_files: list[StepFile], inventory: Inventory, integrations: list[str] | None, actions: list[str] | None = None
+) -> list[Suite]:
+    """Every step file on every inventory integration, narrowed to --integration and --action. An action takes every
+    step file for it (move and move-predicted_state), whole, so each still writes its record."""
     return [
         Suite(step_file, integration)
         for step_file in step_files
+        if not actions or step_file.action in actions
         for integration in inventory.integrations
         if not integrations or integration in integrations
     ]
@@ -231,6 +235,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-deploy", action="store_true", help="test whatever HA already runs")
     parser.add_argument("--no-restart", action="store_true", help="sync the integration but do not restart HA")
     parser.add_argument("--integration", action="append", help="limit to an integration key (repeatable)")
+    parser.add_argument("--action", action="append", help="limit to an action's step files (repeatable)")
     parser.add_argument("-k", dest="keyword", help="run only test cases whose id contains this text")
     parser.add_argument("--unattended", action="store_true", help="skip observed tests, reporting them not observed")
     args = parser.parse_args(argv)
@@ -243,7 +248,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"{INVENTORY} is absent; copy inventory.example.yaml and fill it in")
     inventory = Inventory.load()
     registry = AdapterRegistry.discover()
-    suites = select(load_step_files(), inventory, args.integration)
+    suites = select(load_step_files(), inventory, args.integration, args.action)
     if not args.dry_run:
         check_tokens(env, suites, registry)
     if not any(registry.adapter(suite.action, suite.integration) for suite in suites):

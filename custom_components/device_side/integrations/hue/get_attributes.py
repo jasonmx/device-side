@@ -8,8 +8,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util.color import color_temperature_mired_to_kelvin, color_xy_to_hs, color_xy_to_RGB
 
 from .bridge import bridge_api, resource_id
-from .move import lit
-from .transition_cache import BRIGHTNESS, TransitionCache, transition_cache
+from .move import light_mirek, lit
+from .transition_cache import BRIGHTNESS, COLOR_TEMP, TransitionCache, transition_cache
 from ...core.adapter import Adapter
 from ...core.models import EntityResult, Request, Status, Target
 from ...core.scope import AdapterScope
@@ -19,11 +19,18 @@ if TYPE_CHECKING:
 
 
 def light_row(cache: TransitionCache, light: Light) -> dict:
-    """One light's attributes, its brightness predicted while a move runs (the bridge reports the end value)."""
+    """One light's attributes, its brightness and color temperature predicted while a move runs (the bridge reports
+    the end value)."""
     row = attributes([light])
     if light.dimming:
         row["brightness"] = round(cache.value(light.id, BRIGHTNESS, light.dimming.brightness), 1)
+    if in_color_temp_mode(light):
+        row["color_temp_kelvin"] = color_temperature_mired_to_kelvin(light_mirek(cache, light))
     return row
+
+
+def in_color_temp_mode(light: Light) -> bool:
+    return bool((feature := light.color_temperature) and feature.mirek is not None and feature.mirek_valid)
 
 
 def attributes(lights: Iterable[Light]) -> dict:
@@ -37,9 +44,9 @@ def attributes(lights: Iterable[Light]) -> dict:
     if levels := [light.dimming.brightness for light in lights if light.dimming]:
         row["brightness"] = round(mean(levels), 1)
     kelvins = [
-        color_temperature_mired_to_kelvin(feature.mirek)
+        color_temperature_mired_to_kelvin(light.color_temperature.mirek)
         for light in lights
-        if (feature := light.color_temperature) and feature.mirek is not None and feature.mirek_valid
+        if in_color_temp_mode(light)
     ]
     if kelvins:
         row["color_temp_kelvin"] = round(mean(kelvins))
@@ -57,8 +64,8 @@ class HueGetAttributes(Adapter[Request]):
     A room or zone row follows the bridge and core's hue integration: brightness is the grouped_light's (the
     average of the lights that are on), color temperature and color average the lights that are on. With every
     light off the bridge reports nothing useful, so the row averages all the room's lights. Brightness reads through
-    the transition cache, so a light or room mid-move reports where it is, not the end value the bridge reports; a
-    room then averages its lit lights' predictions.
+    and color temperature read through the transition cache, so a light or room mid-move reports where it is, not the
+    end value the bridge reports; a room then averages its lit lights' predictions.
     """
 
     action: ClassVar[str] = "get_attributes"
@@ -99,5 +106,11 @@ class HueGetAttributes(Adapter[Request]):
                 row["brightness"] = round(mean(predicted), 1)
             elif on and (group := grouped.get(resource_id(target))) is not None and group.dimming is not None:
                 row["brightness"] = round(group.dimming.brightness, 1)
+            tunable = [light for light in lights if in_color_temp_mode(light)]
+            if any(cache.tracks(light.id, COLOR_TEMP) for light in tunable):
+                lights_lit = lit(cache, tunable) or tunable
+                row["color_temp_kelvin"] = round(
+                    mean(color_temperature_mired_to_kelvin(light_mirek(cache, light)) for light in lights_lit)
+                )
             results.append(self.result(target, Status.CONFIRMED, data=row))
         return results

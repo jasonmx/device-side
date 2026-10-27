@@ -1,7 +1,7 @@
 # hue_dimmer tests/RELEASE_CHECKLIST.md §2.5 and §2.6 from the stop side; move.yaml checks the move that follows.
 # Samples after a move read device_side's prediction, in percent: HA shows a Hue fade's end value at once.
 action: stop
-rig_seconds: 160
+rig_seconds: 260
 tests:
   - name: halts_a_move  # §2.5; the hold is watched in move.yaml's raise_stop_raise
     roles: [light_ct, group]
@@ -37,3 +37,32 @@ tests:
       - call: {}
       - expect_response: {status: expected}
       - sample: {attribute: brightness, for: 2, expect: steady}
+
+  - name: halts_a_combined_move  # one write holds both stops
+    roles: [light_ct, group]
+    setup:
+      - set: {state: on, brightness_pct: 10, color_temp_kelvin: 2700}
+    steps:
+      - call: {action: move, brightness: up, color_temp: cooler, sweep_time: 10}
+      - wait: 3
+      - call: {}
+      - expect_response: {status: expected, integration: self}
+      - sample: {attribute: brightness, for: 3, expect: steady, max: 78, source: device_side}
+      - sample: {attribute: color_temp_kelvin, for: 2, expect: steady, min: 2900, max: 4500, source: device_side}
+    observe:
+      see: The light dim and warm, brightening and cooling slowly, stopped after 3 s.
+      watch: 'The stop: both brightness and color hold, with no jump to full or to daylight white.'
+      ask: Did it stop part way in both brightness and color, and hold there?
+
+  - name: halts_a_move_to_off_and_warmer  # the cut carries the color temperature stop
+    roles: [light_ct, group]
+    setup:
+      - set: {state: on, brightness_pct: 100, color_temp_kelvin: 6500}
+    steps:
+      - call: {action: move, brightness: down, color_temp: warmer, sweep_time: 10}
+      - wait: 3
+      - call: {}
+      - expect_response: {status: expected, integration: self}
+      - expect_state: {state: on, within: tol}
+      - sample: {attribute: brightness, for: 3, expect: steady, min: 47, max: 82, source: device_side}
+      - sample: {attribute: color_temp_kelvin, for: 2, expect: steady, min: 3700, max: 4600, source: device_side}

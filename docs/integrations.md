@@ -420,33 +420,43 @@ a scene the bridge no longer has is `rejected` with `scene_not_found`.
 
 ### `move` and `stop`
 
-`move` covers `brightness` for now; `color_temp` and `saturation` are refused with
-`fields_not_tested` until they are tested, and `hue` is refused because a hue rotation isn't a
-straight line the bridge can fade along. A brightness move is one write: the end point
-(`brightness_limit`, or 0 % or 100 %) with a duration of `sweep_time` × the fraction of the range
-left, which the bridge then runs on its own. Moving up turns the light on, from the bottom if it was
-off. Moving down to 0 % is a plain soft off: `on: false` with the duration, so the bridge keeps the
-stored brightness and the next plain on comes back at it. A light already at or past its limit is
-`unchanged` with `at_limit` and nothing is sent.
+`move` covers `brightness` and `color_temp`; `saturation` is refused with `fields_not_tested`
+until it is tested, and `hue` is refused because a hue rotation isn't a straight line the bridge
+can fade along. Each attribute is one write: the end point (the limit, or the end of the range) with
+a duration of `sweep_time` × the fraction of the range left, which the bridge then runs on its own.
+Brightness and color temperature in one call are two writes, each with its own duration; the bridge
+runs them independently (Tested behavior, below).
 
-A room moves with one write to its `grouped_light`, so its lights converge on the end point
-together. `stop` sends the bridge's dimming stop to the light or room. The bridge refuses that stop
-during a soft off, so a soft off Device Side started is cut by writing `on: true` with the predicted
-brightness and no duration, light by light for a room. A light that is off, or fading off from
-elsewhere, has nothing Device Side can stop: it is `unchanged` with `off` and nothing is sent.
+Moving brightness up turns the light on, from the bottom if it was off. Moving down to 0 % is a
+plain soft off: `on: false` with the duration, so the bridge keeps the stored brightness and the
+next plain on comes back at it. `color_temp_limit` is in kelvin and clamped to the light's range.
+Color temperature moves only a light that is on: without `brightness: up`, a light or room that is
+off is `unchanged` with `off` and nothing is sent. A light in color mode is `unsupported` with
+`not_in_color_temp_mode`. An attribute already at or past its limit is left out, and a move with
+nothing left to do is `unchanged` with `at_limit` and nothing is sent.
+
+A room moves with one write per attribute to its `grouped_light`, so its lights converge on the end
+point together. Its color temperature heads for the end of the widest range among its lights; a
+light with a narrower range stops at the end of its own. `stop` sends the bridge's dimming stop to
+the light or room, and its color temperature stop in the same write when a color temperature move
+is remembered. The bridge refuses a dimming stop during a soft off, so a soft off Device Side
+started is cut by writing `on: true` with the predicted brightness and no duration, light by light
+for a room. A light that is off, or fading off from elsewhere, has nothing Device Side can stop: it
+is `unchanged` with `off` and nothing is sent.
 
 While a fade runs the bridge reports its end value, and after a stop it reports where the light
 halted late or not at all (Tested behavior, below). Device Side remembers each move and stop for its
-duration plus 15 seconds and predicts the brightness of each light meanwhile, so a move after a stop
-continues from where the light halted, and `get_attributes` returns the predicted brightness.
+duration plus 15 seconds and predicts the brightness and color temperature of each light meanwhile,
+so a move after a stop continues from where the light halted, and `get_attributes` returns the
+predicted values.
 
 A change made elsewhere ends the prediction, so the next move starts from the brightness the bridge
 reports. A bulb reports late, stale, and off any straight line (Tested behavior, below), so Device
-Side doesn't judge a report by its value. While it remembers a move or stop, it takes every
-brightness and on/off report from that light as its own, with two exceptions, both a change from
-elsewhere (the Hue app, a dimmer switch, a Hue automation): a switch to off while the light is fading
-to, or halted at, a lit level, and a color or color temperature report, which a brightness move never
-makes. A scene recalled on the bridge ends the prediction of its room's or zone's lights, and a light
+Side doesn't judge a report by its value. While it remembers a move or stop, it takes every report
+of what it moved (brightness and on/off, color temperature) from that light as its own, with two
+exceptions, both a change from elsewhere (the Hue app, a dimmer switch, a Hue automation): a switch
+to off while the light is fading to, or halted at, a lit level, and a report of anything the move
+didn't change, such as a color temperature report during a brightness move. A scene recalled on the bridge ends the prediction of its room's or zone's lights, and a light
 or scene call from Home Assistant ends the prediction of every Hue light it targets at once, whatever
 its value, as do `set_attributes` and `set_scene`. Not caught: a brightness change, or a switch to on,
 from outside Home Assistant while a move or stop is remembered, such as a light turned back on in the
@@ -460,7 +470,9 @@ change caught as made elsewhere shows at once; one not caught shows once the bri
 after the move or stop is no longer remembered. Nothing is sent while a fade runs, so a dashboard slider holds
 still and then jumps to the stop or the end. After Home Assistant restarts, or reconnects to the
 bridge, mid-fade, it shows what the bridge reports. To always show what the bridge reports, turn the
-option off: Settings › Devices & services › Device Side › Configure.
+option off: Settings › Devices & services › Device Side › Configure. Color temperature isn't
+predicted in Home Assistant's state: it shows the end of a color temperature fade at once, as the
+bridge reports it.
 
 ### `turn_on_for`, `turn_off_for`
 
@@ -506,6 +518,11 @@ it arrives, so Home Assistant shows what is listed here.
 - **A color temperature write reports only `color_temperature`,** never `dimming`. Color
   temperature transitions and their stop (`color_temperature_delta`) behave as brightness does
   above, on a light and on a zone.
+- **Brightness and color temperature fade independently.** A write of one neither cancels nor
+  reshapes a fade of the other already running, in either order, on a light and on a zone: mid-fade
+  reports of both lay on their own straight lines (2026-10-27). One write holding both reports two
+  events, one per attribute. The bridge takes a dimming stop and a color temperature stop in one
+  write, on a light and on a zone.
 - **A brightness write never reports a color.** Across the full Hue rig suite on 2026-10-27, every
   report of a light during or after Device Side's brightness moves and stops held only `on` and
   `dimming`; `color_temperature` came only from color writes, and `color` never.

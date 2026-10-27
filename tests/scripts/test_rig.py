@@ -130,6 +130,8 @@ def test_select_plan_lines_and_estimate(inventory):
         ("shelly", "turn_off_for"), ("hue", "turn_off_for"), ("shelly", "turn_on_for"), ("hue", "turn_on_for"),
     ]
     assert [suite.integration for suite in rig.select(step_files, inventory, ["hue"])] == ["hue", "hue"]
+    narrowed = rig.select(step_files, inventory, ["hue"], ["turn_on_for"])
+    assert [(suite.integration, suite.action) for suite in narrowed] == [("hue", "turn_on_for")]
 
     registry = AdapterRegistry.discover()
     shelly_on = [suite for suite in suites if suite.integration == "shelly" and suite.action == "turn_on_for"]

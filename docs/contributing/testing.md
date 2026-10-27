@@ -44,7 +44,7 @@ ZHA and Zigbee2MQTT are the exceptions. ZHA's cluster command is an admin-only a
 the caller's context through to it, so a non-admin token is refused. The Zigbee2MQTT suites set and read Z2M
 device options over MQTT, which only an admin may. Put an admin user's token in `HA_ADMIN_TOKEN`: those suites run
 on it and every other suite stays on `HA_TOKEN`. Without it, a run that includes either stops before the gate;
-`--integration` leaves them out. Suites whose adapter has options (Hue `move` and `stop`) need it too, to set them
+`--integration` or `--action` leaves them out. Suites whose adapter has options (Hue `move` and `stop`) need it too, to set them
 (below).
 
 ### Writing a step file

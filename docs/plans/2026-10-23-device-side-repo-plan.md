@@ -557,7 +557,8 @@ duration and whether a restart is needed, then requires interactive y/N (or
    `/api/config` until `RUNNING`, then wait for `device_side.turn_on_for` in `/api/services` (hard
    fail at 180 s).
 4. `tests/rig/engine.py` runs the step files on one `HAClient`. Flags: `--no-deploy`, `--no-restart`,
-   `--integration <key>`, `-k <test name substring>`, `--unattended` (skips `observe` steps).
+   `--integration <key>`, `--action <action>` (its step files, whole, so they still write records),
+   `-k <test name substring>`, `--unattended` (skips `observe` steps).
 
 Step files (`tests/rig/steps/<action>.yaml`, one per action) run against every inventory integration
 that has the adapter; the registry supplies the expected status (`confirmable` -> `confirmed`, else
@@ -667,7 +668,11 @@ the first action of that session is slice 0.
     a color_temperature dynamic sent as separate writes run independently or the second cancels
     the first (decides per-attribute vs shared duration for combined moves); the bulb's gamut
     from `colors.py` for the saturation end point. Answered in 7b (#48): hassfest accepts
-    `sections:` with `collapsed: true` in a custom component's `services.yaml`.
+    `sections:` with `collapsed: true` in a custom component's `services.yaml`. Answered in 7c1
+    (`docs/plans/2026-10-27-hue-move-color.md`, rig probe 2026-10-27): `grouped_light` accepts a
+    `color_temperature` dynamic, and separate brightness and color temperature writes run independently in
+    either order, on a light and a zone, so each attribute gets its own write and duration. Saturation's
+    gamut end point is left to 7c2.
 6. Frontend: does the `integration:` filter match entity registry platform (UI convenience only).
 7. Blocking-import detector vs `pkgutil` discovery in the executor job.
 8. `pytest-homeassistant-custom-component` version paired with the chosen HA 2026.x pin; fixture
