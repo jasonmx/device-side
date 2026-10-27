@@ -106,10 +106,10 @@ async def test_a_real_change_shows_at_once_and_drops_the_end(hass, bridge, clock
     start = wall_clock_now()
     await raise_one(hass)
 
-    report(bridge, light_event("one", brightness=90.0))  # the Hue app
+    report(bridge, light_event("one", brightness=10.0))  # the Hue app, below where the fade started
     await advance(hass, start, FADE_S + 1)
 
-    assert shown(bridge, "one") == (True, 90.0)
+    assert shown(bridge, "one") == (True, 10.0)
 
 
 async def test_a_change_from_ha_drops_the_end(hass, bridge, clock):

@@ -23,6 +23,8 @@ BRIGHTNESS = "brightness"
 API_SETTLE_SECONDS = 15
 # How far a report may be from an armed end value or the path travelled and still be ours (80 % reads 79.84).
 REPORT_TOLERANCE = 0.5
+# How far the bulb's late report of a halt may be from the predicted one and still be ours (the rig saw 0.9).
+HALT_TOLERANCE = 1.5
 # The dimmest step a Hue light makes (1/254), in percent.
 MIN_BRIGHTNESS_STEP = 0.4
 
@@ -84,16 +86,22 @@ class TransitionCache:
         return transition if self.clock() < transition.started_at + transition.duration else None
 
     def path(self, resource_id: str, attribute: str) -> tuple[float, float] | None:
-        """The lowest and highest value travelled so far inside the guard window: start to the current prediction."""
+        """The lowest and highest value the bulb may report inside the guard window: start to target while the move
+        runs (a bulb's fade isn't a straight line, and ran 8 % ahead of one on the rig), then start to where it
+        ended or halted."""
         if (transition := self._live(resource_id, attribute)) is None:
             return None
+        if self.running(resource_id, attribute) is not None:
+            return tuple(sorted((transition.start, transition.target)))
         return tuple(sorted((transition.start, transition.value(self.clock()))))
 
     def on_path(self, resource_id: str, attribute: str, value: float) -> bool:
-        """Whether a report is a point the light has passed through, so the bulb's own report rather than a change."""
+        """Whether a report is a point the light passes through, so the bulb's own report rather than a change."""
         if (path := self.path(resource_id, attribute)) is None:
             return False
-        return path[0] - REPORT_TOLERANCE <= value <= path[1] + REPORT_TOLERANCE
+        stopped = self._live(resource_id, attribute).duration == 0
+        tolerance = HALT_TOLERANCE if stopped else REPORT_TOLERANCE
+        return path[0] - tolerance <= value <= path[1] + tolerance
 
     def arm(self, resource_id: str, values: dict[str, float | bool], duration: float) -> None:
         """Expect the bridge to report these values once each; arm before the write, which it may echo first."""
@@ -178,8 +186,18 @@ class TransitionCache:
             return None
         return transition
 
-    def moving(self, resource_id: str, attribute: str, start: float, target: float, duration: float) -> None:
-        self._transitions[(resource_id, attribute)] = Transition(start, target, duration, self.clock())
+    def moving(
+        self,
+        resource_id: str,
+        attribute: str,
+        start: float,
+        target: float,
+        duration: float,
+        started_at: float | None = None,
+    ) -> None:
+        """started_at: when the write was sent, as the bridge starts the fade once it has it; else now."""
+        started_at = self.clock() if started_at is None else started_at
+        self._transitions[(resource_id, attribute)] = Transition(start, target, duration, started_at)
 
     def stopped(self, resource_id: str, attribute: str, value: float) -> None:
         self.moving(resource_id, attribute, value, value, 0.0)

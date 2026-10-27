@@ -441,11 +441,12 @@ duration plus 15 seconds and predicts the brightness of each light meanwhile, so
 continues from where the light halted, and `get_attributes` returns the predicted brightness.
 
 A change made elsewhere ends the prediction, so the next move starts from the brightness the bridge
-reports. Device Side tells the bridge's reports of its own fades (the end value at the start, and the
-bulb's late reports of points it has passed, within 0.5 %) from any other report. A light or scene
-call from Home Assistant ends the prediction of every Hue light it targets at once, whatever its
-value, as do `set_attributes` and `set_scene`. Not caught: a change from outside Home Assistant
-(the Hue app, a dimmer switch) to a value on the path the light has just travelled, and
+reports. Device Side tells the bridge's reports of its own fades from any other report: the end value
+at the start, the bulb's reports anywhere between a fade's start and end while it runs (a bulb's fade
+isn't a straight line), and a halt within 1.5 % of the predicted one. A light or scene call from Home
+Assistant ends the prediction of every Hue light it targets at once, whatever its value, as do
+`set_attributes` and `set_scene`. Not caught: a change from outside Home Assistant (the Hue app, a
+dimmer switch) to a value between a running fade's start and end, or near where it halted, and
 `hue.activate_scene`.
 
 With **Show predicted brightness during Hue fades** on (the default), Home Assistant shows Device

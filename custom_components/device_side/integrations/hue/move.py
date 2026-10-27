@@ -125,9 +125,11 @@ class HueMove(Adapter[MoveRequest]):
                     rid, on=True if up else None, brightness=limit, transition_time=transition_time
                 )
             echoes = {light_id: end_echo(cache, light, limit, up) for light_id, light in moving.items()}
+            # The fade starts as the bridge gets the write, not when its reply comes back.
+            sent_at = cache.clock()
             await cache.write_armed(echoes, duration, write)
             for light_id in moving:
-                cache.moving(light_id, BRIGHTNESS, starts[light_id], limit, duration)
+                cache.moving(light_id, BRIGHTNESS, starts[light_id], limit, duration, started_at=sent_at)
             reports.fading(dict.fromkeys(moving, limit), duration)
             return self.result(target, Status.SENT)
 

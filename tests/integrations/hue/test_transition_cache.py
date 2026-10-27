@@ -83,9 +83,9 @@ def test_an_echo_expires_with_the_guard_window_and_disarm_drops_it(cache, clock)
 
 @pytest.mark.parametrize(
     ("value", "on_path"),
-    [(19.5, True), (19.4, False), (50.5, True), (50.6, False), (35.18, True)],
+    [(19.5, True), (19.4, False), (35.18, True), (70.0, True), (80.5, True), (80.6, False)],
 )
-def test_on_path_spans_the_start_to_the_current_prediction(cache, clock, value, on_path):
+def test_on_path_spans_the_start_to_the_target_while_the_move_runs(cache, clock, value, on_path):
     cache.moving("light-1", "brightness", 20.0, 80.0, 10.0)
     clock.now += 5.0  # at 50 %
 
@@ -96,7 +96,7 @@ def test_on_path_moving_down_and_after_the_window(cache, clock):
     cache.moving("light-1", "brightness", 80.0, 20.0, 10.0)
     clock.now += 5.0
 
-    assert cache.path("light-1", "brightness") == (50.0, 80.0)
+    assert cache.path("light-1", "brightness") == (20.0, 80.0)
     clock.now += 5.0 + API_SETTLE_SECONDS + 0.1
     assert not cache.on_path("light-1", "brightness", 20.0)
 
