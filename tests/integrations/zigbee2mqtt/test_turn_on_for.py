@@ -6,13 +6,16 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from homeassistant.core import callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import async_mock_service
 
+from custom_components.device_side.integrations.zigbee2mqtt import turn_on_for
 from custom_components.device_side.integrations.zigbee2mqtt.addressing import (
     is_z2m_group,
+    state_topic,
     topic,
     z2m_address,
 )
@@ -231,6 +234,133 @@ async def test_device_and_group_each_get_their_own_topic(hass, setup_production,
 
     assert response == {"light.kitchen": SENT, "light.downstairs": SENT}
     assert {p.data["topic"] for p in publishes} == {TOPIC, "zigbee2mqtt/7/set"}
+
+
+# --- Waiting for Z2M's state before the timer ---
+
+STATE_TOPIC = "zigbee2mqtt/Kitchen"
+
+
+class StateTopic:
+    """Z2M's state topic as the adapter sees it: light.turn_on answered by a state publish, or by nothing."""
+
+    def __init__(self, hass) -> None:
+        self.hass = hass
+        self.subscribers: dict[str, list] = {}
+        self.events: list[str] = []  # "turn_on", "state" and "timer", in the order they happened
+        self.answer: bool = True
+        self.retained: str | None = None  # delivered on subscribe, as a broker resends a retained message
+
+    async def subscribe(self, hass, topic, msg_callback):
+        self.subscribers.setdefault(topic, []).append(msg_callback)
+        if self.retained is not None:
+            msg_callback(SimpleNamespace(topic=topic, payload=self.retained, retain=True))
+        return lambda: self.subscribers[topic].remove(msg_callback)
+
+    @callback
+    def turn_on(self, call) -> None:
+        self.events.append("turn_on")
+        if self.answer:
+            self.hass.loop.call_later(0.05, self.publish_state)
+
+    def publish_state(self) -> None:
+        self.events.append("state")
+        for msg_callback in list(self.subscribers.get(STATE_TOPIC, [])):
+            msg_callback(SimpleNamespace(topic=STATE_TOPIC, payload='{"state":"ON"}', retain=False))
+
+    @callback
+    def publish(self, call) -> None:
+        if json.loads(call.data["payload"]).get("on_time") is not None:
+            self.events.append("timer")
+
+
+@pytest.fixture
+def z2m(hass, monkeypatch):
+    fake = StateTopic(hass)
+    monkeypatch.setattr(turn_on_for.mqtt, "async_subscribe", fake.subscribe)
+    monkeypatch.setattr(turn_on_for, "_STATE_TIMEOUT_S", 0.2)
+    hass.services.async_register("light", "turn_on", fake.turn_on)
+    hass.services.async_register("mqtt", "publish", fake.publish)
+    return fake
+
+
+async def test_timer_waits_for_the_state_z2m_publishes_after_turn_on(hass, setup_production, z2m):
+    add_z2m_entity(hass, z2m_entry(hass), "light.kitchen", name="Kitchen")
+
+    response = await call(hass, "turn_on_for", {"entity_id": "light.kitchen", "duration": 5, "xy_color": [0.15, 0.06]})
+
+    assert response == {"light.kitchen": SENT}
+    assert z2m.events == ["turn_on", "state", "timer"]
+    assert z2m.subscribers[STATE_TOPIC] == []
+
+
+async def test_a_retained_state_is_not_the_answer(hass, setup_production, z2m):
+    add_z2m_entity(hass, z2m_entry(hass), "light.kitchen", name="Kitchen")
+    z2m.retained = '{"state":"OFF"}'
+
+    await call(hass, "turn_on_for", {"entity_id": "light.kitchen", "duration": 5, "brightness": 128})
+
+    assert z2m.events == ["turn_on", "state", "timer"]
+
+
+async def test_no_state_by_the_timeout_still_sends_the_timer(hass, setup_production, z2m, caplog):
+    add_z2m_entity(hass, z2m_entry(hass), "light.kitchen", name="Kitchen")
+    z2m.answer = False
+
+    with caplog.at_level(logging.DEBUG):
+        response = await call(hass, "turn_on_for", {"entity_id": "light.kitchen", "duration": 5, "brightness": 128})
+
+    assert response == {"light.kitchen": SENT}
+    assert z2m.events == ["turn_on", "timer"]
+    assert "No state from Zigbee2MQTT for light.kitchen in 0.2 s; sending the timer" in caplog.text
+    assert z2m.subscribers[STATE_TOPIC] == []
+
+
+async def test_a_failed_turn_on_unsubscribes_and_rejects(hass, setup_production, z2m):
+    add_z2m_entity(hass, z2m_entry(hass), "light.kitchen", name="Kitchen")
+    async_mock_service(hass, "light", "turn_on", raise_exception=Exception("entity unavailable"))
+
+    with pytest.raises(HomeAssistantError) as raised:
+        await call(hass, "turn_on_for", {"entity_id": "light.kitchen", "duration": 5, "brightness": 128})
+
+    assert raised.value.translation_key == "all_targets_failed"
+    assert "timer" not in z2m.events
+    assert z2m.subscribers[STATE_TOPIC] == []
+
+
+async def test_a_group_waits_on_its_own_state_topic(hass, setup_production, z2m):
+    add_z2m_group(hass, z2m_entry(hass), "light.downstairs", group_id=7, name="Kitchen")
+
+    await call(hass, "turn_on_for", {"entity_id": "light.downstairs", "duration": 5, "brightness": 128})
+
+    assert z2m.events == ["turn_on", "state", "timer"]
+
+
+async def test_without_fields_nothing_is_subscribed(hass, setup_production, z2m):
+    add_z2m_entity(hass, z2m_entry(hass), "light.kitchen", name="Kitchen")
+
+    await call(hass, "turn_on_for", {"entity_id": "light.kitchen", "duration": 5})
+
+    assert z2m.events == ["timer"]
+    assert z2m.subscribers == {}
+
+
+def test_state_topic_is_the_device_name():
+    device = MagicMock()
+    device.identifiers = {("mqtt", f"zigbee2mqtt_{IEEE}")}
+    device.name = "Kitchen"
+    assert state_topic(SimpleNamespace(device=device)) == STATE_TOPIC
+
+
+def test_state_topic_is_none_without_a_name_or_an_address():
+    named = MagicMock()
+    named.identifiers = {("mqtt", "other_bridge_0x1234")}
+    named.name = "Kitchen"
+    unnamed = MagicMock()
+    unnamed.identifiers = {("mqtt", f"zigbee2mqtt_{IEEE}")}
+    unnamed.name = None
+    assert state_topic(SimpleNamespace(device=named)) is None
+    assert state_topic(SimpleNamespace(device=unnamed)) is None
 
 
 # --- State read-backs ---

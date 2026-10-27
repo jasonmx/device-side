@@ -125,10 +125,17 @@ device topic. Z2M translates `on_time` (in seconds, rounded to 1 decimal place) 
 `OnWithTimedOff` command.
 
 For **light entities with fields** (`brightness`, `color_temp_kelvin`, `rgb_color`, `hs_color`,
-`xy_color`, `transition`): calls `light.turn_on` first (blocking) so HA's MQTT light entity
-handles the color mode, sets the attributes through its own protocol, then publishes
-`{"state":"ON","on_time":<seconds>}` separately. The two-step approach keeps HA's light state in
-sync and delegates attribute handling to the integration that knows the device's capabilities.
+`xy_color`, `transition`): calls `light.turn_on` first so HA's MQTT light entity handles the color
+mode and sets the attributes through its own protocol, waits for Z2M to publish the light's state on
+`zigbee2mqtt/<friendly name>`, then publishes `{"state":"ON","on_time":<seconds>}` separately. The
+two-step approach keeps HA's light state in sync and delegates attribute handling to the integration
+that knows the device's capabilities.
+
+The wait matters because Z2M handles two messages for one light at once: sent straight after
+`light.turn_on`, the timer's message would publish the light's state from before the fields landed,
+which Home Assistant keeps, and contend with them on the mesh, so the timer could start seconds
+late. The wait is usually a fraction of a second. If Z2M publishes nothing within 5 s, Device Side
+logs it at debug level and sends the timer anyway, so that light stays on up to 5 s longer than asked.
 
 Lights only. Zigbee plugs and switches (`switch`) are unsupported on Zigbee2MQTT and ZHA alike: few
 honor `OnWithTimedOff` (IKEA's are moving to Thread, and Sonoff and Tuya run their own countdowns),
