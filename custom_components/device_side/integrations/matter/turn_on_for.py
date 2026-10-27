@@ -32,12 +32,11 @@ class MatterTurnOnFor(Adapter[TurnOnForRequest]):
     integration: ClassVar[str] = "matter"
     scope: ClassVar[AdapterScope] = AdapterScope(
         experimental=True,
-        domains=frozenset({"light"}),
+        domains=frozenset({"light", "switch"}),
         duration=_TIMER_LIMITS,
         # Light fields stay out of scope until a tester with a Matter bulb reports them.
         fields=frozenset(),
-        # switch domain (plugs) out of scope until the plug question is settled.
-        # capabilities=None covers all light endpoints that pass the LT feature check.
+        # capabilities=None covers every endpoint that passes the LT feature check, plug or light.
         confirmable=True,
     )
 
@@ -100,12 +99,11 @@ class MatterTurnOnFor(Adapter[TurnOnForRequest]):
                 command=command,
             )
 
-            # Optional read-back: confirm the timer is running.
+            # Optional read-back: confirm the timer is running. The client returns {path: value}.
+            path = ontime_attr_path(ep_id)
             try:
-                on_time_value = await client.read_attribute(
-                    node_id=node_id,
-                    attribute_path=ontime_attr_path(ep_id),
-                )
+                read = await client.read_attribute(node_id=node_id, attribute_path=path)
+                on_time_value = read.get(path)
             except Exception as err:  # noqa: BLE001
                 _LOGGER.debug(
                     "turn_on_for matter read-back failed for %s: %s", target.entity_id, err

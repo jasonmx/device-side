@@ -12,7 +12,7 @@ turn_on_for:
         integration: shelly
       - domain: light
         integration: mqtt
-      - domain: light
+      - domain: [light, switch]
         integration: matter
       - domain: light
         integration: zha

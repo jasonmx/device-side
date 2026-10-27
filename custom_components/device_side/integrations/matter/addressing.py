@@ -14,7 +14,7 @@ _MATTER_DOMAIN = "matter"
 # OnOff cluster constants (Matter spec, cluster 0x0006)
 _ONOFF_CLUSTER_ID = 6
 _FEATUREMAP_ATTR_ID = 65532  # 0xFFFC
-_LT_FEATURE_BIT = 0x0002  # Lighting (LT) feature per Matter spec sec. 1.5.4.2
+_LT_FEATURE_BIT = 0x0001  # Lighting (LT) is bit 0; bit 1 (0x2) is DeadFrontBehavior
 _ONTIME_ATTR_ID = 16385  # 0x4001 — counts down to 0 while the timed-on is running
 
 

@@ -321,13 +321,9 @@ An entity belongs to this integration when its entity registry entry comes from 
 node ID and endpoint ID are parsed from the entity's unique ID, which the Matter integration
 writes as `{fabric_hex16}-{node_hex16}-{postfix}-{endpoint_id}-{key}-{cluster_id}-{attr_id}`.
 
-Device Side requires the OnOff cluster's Lighting (LT) feature bit to be set on the endpoint.
-Lighting-category device types (OnOffLight, DimmableLight, ColorTemperatureLight,
-ExtendedColorLight) carry this feature; a plain on/off plug typically does not. An entity whose
-endpoint lacks the LT bit returns `unsupported` with detail `no_lt_feature`.
-
-Switch-domain entities (plugs) are out of scope for now: the LT feature behavior on plugs is not
-yet confirmed on hardware.
+Lights and plugs (`light` and `switch` entities) are in scope. Device Side requires the OnOff
+cluster's Lighting (LT) feature, bit 0 of its FeatureMap, on the endpoint. Lights carry it, and so
+do some plugs. An entity whose endpoint lacks it returns `unsupported` with detail `no_lt_feature`.
 
 ### `turn_on_for`
 
@@ -339,8 +335,8 @@ without needing Home Assistant to remain running.
 the command is accepted whether the light is currently on or off. `offWaitTime=0` places no
 restriction on retriggering.
 
-After the command, Device Side reads back the `OnOff.OnTime` attribute. If it is non-zero (the
-countdown is running), the result is `confirmed`. If it is 0 or the read-back fails, the result
+After the command, Device Side reads back the `OnOff.OnTime` attribute (python-matter-server
+answers `{path: value}`). If it is non-zero (the countdown is running), the result is `confirmed`. If it is 0 or the read-back fails, the result
 is `sent` with detail `timer_not_reported` or `readback_failed`.
 
 Light fields (`brightness`, `color_temp_kelvin`, etc.) are out of scope for now. When a tester
@@ -349,7 +345,7 @@ follow with `OnWithTimedOff`.
 
 ### Cancelling
 
-Send a regular `light.turn_on` or `light.turn_off`: either cancels the timed-off (the Matter
+Send a regular `turn_on` or `turn_off`: either cancels the timed-off (the Matter
 spec says `On` and `Off` commands clear `OnTime`). A second `turn_on_for` during a timer replaces
 it.
 
