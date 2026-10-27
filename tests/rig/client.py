@@ -32,6 +32,7 @@ class HAClient:
         self._states: dict[str, dict] = {}
         self._changed = asyncio.Condition()
         self._reader: asyncio.Task | None = None
+        self._state_events: int | None = None  # the state_changed subscription's WebSocket id
 
     async def connect(self) -> None:
         # The system resolver, not aiohttp's default aiodns: only the system one resolves mDNS (.local) names.
@@ -48,7 +49,8 @@ class HAClient:
         if (reply := await self._ws.receive_json())["type"] != "auth_ok":
             raise RuntimeError(f"WebSocket auth failed: {reply.get('message')}")
         self._reader = asyncio.create_task(self._read())
-        await self.command({"type": "subscribe_events", "event_type": "state_changed"})
+        self._state_events = next(self._ids)
+        await self.command({"type": "subscribe_events", "event_type": "state_changed"}, self._state_events)
 
     async def close(self) -> None:
         if self._reader is not None:
@@ -64,9 +66,12 @@ class HAClient:
             if data["type"] == "result":
                 if (future := self._pending.pop(data["id"], None)) is not None and not future.done():
                     future.set_result(data)
-            elif data["type"] == "event" and (queue := self._mqtt.get(data["id"])) is not None:
+            elif data["type"] != "event":
+                continue
+            elif (queue := self._mqtt.get(data["id"])) is not None:
                 queue.put_nowait(data["event"]["payload"])
-            elif data["type"] == "event":
+            # Anything else is an MQTT message for a subscription already closed, which HA can still send.
+            elif data["id"] == self._state_events:
                 event = data["event"]["data"]
                 async with self._changed:
                     self._states[event["entity_id"]] = event["new_state"]
@@ -131,9 +136,9 @@ class HAClient:
             await self.command({"type": "mqtt/subscribe", "topic": topic}, msg_id)
             yield self._mqtt[msg_id]
         finally:
-            del self._mqtt[msg_id]
             with contextlib.suppress(HAError):
                 await self.command({"type": "unsubscribe_events", "subscription": msg_id})
+            del self._mqtt[msg_id]
 
     async def z2m_device_options(self, ieee: str) -> dict:
         """A Zigbee2MQTT device's options, from Z2M's retained bridge/info."""

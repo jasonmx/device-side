@@ -1,6 +1,7 @@
 """The rig's HAClient against a local stub of HA's WebSocket and REST API, so a live run isn't its first test."""
 
 import asyncio
+import json
 
 import pytest
 from aiohttp import WSMsgType, web
@@ -8,6 +9,7 @@ from aiohttp.test_utils import TestServer
 
 from tests.rig.client import HAClient, HAError
 
+BRIDGE_INFO = json.dumps({"config": {"devices": {"0x01": {"hue_native_control": True}}}})
 STATES = {"switch.plug": {"entity_id": "switch.plug", "state": "off", "attributes": {}}}
 
 
@@ -25,6 +27,15 @@ async def websocket(request: web.Request) -> web.WebSocketResponse:
         if msg["type"] == "subscribe_events":
             subscription = msg["id"]
             await ws.send_json({"id": msg["id"], "type": "result", "success": True, "result": None})
+        elif msg["type"] == "mqtt/subscribe":
+            await ws.send_json({"id": msg["id"], "type": "result", "success": True, "result": None})
+            retained = {"topic": msg["topic"], "payload": BRIDGE_INFO}
+            await ws.send_json({"id": msg["id"], "type": "event", "event": retained})
+        elif msg["type"] == "unsubscribe_events":
+            await ws.send_json({"id": msg["id"], "type": "result", "success": True, "result": None})
+            # HA can still deliver a message that was in flight for the closed subscription.
+            late = {"topic": "zigbee2mqtt/bridge/info", "payload": BRIDGE_INFO}
+            await ws.send_json({"id": msg["subscription"], "type": "event", "event": late})
         elif msg["service"] == "fail":
             error = {"code": "home_assistant_error", "message": "nope", "translation_key": "all_targets_failed"}
             await ws.send_json({"id": msg["id"], "type": "result", "success": False, "error": error})
@@ -75,3 +86,10 @@ async def test_wait_for_times_out_and_get_state_handles_404(client: HAClient):
     with pytest.raises(TimeoutError):
         await client.wait_for("switch.plug", lambda s: s is not None and s["state"] == "on", timeout=0.2)
     assert await client.get_state("switch.missing") is None
+
+
+async def test_mqtt_reads_and_a_late_message_leave_the_connection_working(client: HAClient):
+    assert await client.z2m_device_options("0x01") == {"hue_native_control": True}
+    assert await client.z2m_device_options("0x02") == {}
+    response = await client.call_service("x", "turn_on", {"entity_id": "switch.plug"}, return_response=True)
+    assert response == {"ok": {"entity_id": "switch.plug"}}

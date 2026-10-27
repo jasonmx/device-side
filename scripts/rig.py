@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
 """Run the rig tests against the live HA, behind a human approval gate.
 
 The rig is the household's own Home Assistant and its in-use lights. Nothing changes state before the gate:
