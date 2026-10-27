@@ -470,7 +470,8 @@ def put_back(ha: RigHA) -> bool:
     )
 
 
-async def test_a_sigterm_mid_case_puts_everything_back_and_leaves_no_journal(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("signum", [signal.SIGINT, signal.SIGTERM])
+async def test_a_signal_mid_case_puts_everything_back_and_leaves_no_journal(tmp_path, monkeypatch, capsys, signum):
     ha = rig_ha(monkeypatch, light="on", opt=True, automation="on")
     journal = Journal(tmp_path / rig.JOURNAL_NAME)
     steps = write(tmp_path, "steps.yaml", fakes.WAITING_MIDWAY)
@@ -488,7 +489,7 @@ async def test_a_sigterm_mid_case_puts_everything_back_and_leaves_no_journal(tmp
         await asyncio.sleep(0.005)
     assert set(journal.sections) == {"paused", "options", "taken", "stored", "power"}
 
-    os.kill(os.getpid(), signal.SIGTERM)
+    os.kill(os.getpid(), signum)
     with pytest.raises(asyncio.CancelledError):
         await task
 
@@ -544,3 +545,18 @@ def test_main_recovers_before_the_plan_and_recover_alone_stops_there(tmp_path, m
     assert put_back(ha)
     assert rig.main(["--recover"]) == 0
     assert "No aborted run left anything to put back." in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("error", "line"),
+    [
+        (asyncio.CancelledError, "Aborted."),
+        (KeyboardInterrupt, "Aborted before putting everything back; the next run puts back the rest."),
+    ],
+)
+def test_a_stopped_run_ends_on_one_line_not_a_traceback(capsys, error, line):
+    async def stopped():
+        raise error
+
+    assert rig.run_tests(stopped()) == 1
+    assert capsys.readouterr().out == f"{line}\n"

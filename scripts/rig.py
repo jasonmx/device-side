@@ -8,8 +8,9 @@ DEVICE_SIDE_RIG_APPROVED=1 answers the gate for a non-interactive caller that al
 One run at a time: a lock in the git common dir, shared by every worktree; a second run waits for it. The tests are the
 step files in tests/rig/steps, run by tests/rig/engine.py; a full pass of an adapter rewrites its bench record.
 
-SIGTERM and SIGHUP stop a run as Ctrl-C does, putting the devices back. What a run changes is journaled first (next to
-the lock), so whatever a killed run leaves changed, the next run puts back before its gate, or --recover alone does.
+Ctrl-C, SIGTERM and SIGHUP stop a run, putting the devices back; a second one leaves them. What a run changes is
+journaled first (next to the lock), so whatever a killed run leaves changed, the next run puts back before its gate, or
+--recover alone does.
 
 Usage: scripts/rig.py [--dry-run] [--no-deploy] [--no-restart] [--unattended] [--integration KEY ...] [-k TEXT]
        scripts/rig.py --recover
@@ -62,7 +63,7 @@ RESTART_ESTIMATE_S = 90
 LOCK_NAME = "device_side-rig.lock"
 LOCK_POLL_S = 2.0  # how often a waiting run retries the lock
 JOURNAL_NAME = "device_side-rig.journal.json"
-ABORT_SIGNALS = (signal.SIGTERM, signal.SIGHUP)
+ABORT_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 # Run reports go where the OS clears old files: they are for reviewing a run, not for keeping.
 REPORT_DIR = Path(tempfile.gettempdir()) / "device_side-rig"
 
@@ -301,12 +302,14 @@ def hold_rig(dry_run: bool) -> tuple[TextIO | None, Journal]:
 
 
 def run_tests(rig_run: Coroutine[Any, Any, int]) -> int:
-    """Run run_rig, saying "Aborted." when a signal cancelled it (cancel_on_signals)."""
+    """Run run_rig, ending on one line rather than a traceback when a signal stops it (cancel_on_signals)."""
     try:
         return asyncio.run(rig_run)
     except asyncio.CancelledError:
         print("Aborted.")
-        return 1
+    except KeyboardInterrupt:  # a second Ctrl-C, mid-cleanup
+        print("Aborted before putting everything back; the next run puts back the rest.")
+    return 1
 
 
 def replay(env: dict, journal: Journal, dry_run: bool, asked: bool) -> None:
@@ -418,15 +421,15 @@ async def run_rig(
 
 
 def cancel_on_signals() -> None:
-    """Have SIGTERM and SIGHUP cancel the running task, as asyncio.run does for Ctrl-C, so its finally blocks put the
-    devices back. The first one restores the default handlers: a second kills the process, leaving the journal."""
+    """Have Ctrl-C, SIGTERM and SIGHUP cancel the running task, so its finally blocks put the devices back. The first
+    one restores the default handlers: a second kills the process (Ctrl-C: interrupts it), leaving the journal."""
     loop = asyncio.get_running_loop()
     task = asyncio.current_task()
 
     def abort() -> None:
         for signum in ABORT_SIGNALS:
             loop.remove_signal_handler(signum)
-        print("Aborting: putting devices back (signal again to leave it to the next run).")
+        print("\nAborting: putting devices back (again to leave them to the next run).")
         task.cancel()
 
     for signum in ABORT_SIGNALS:
