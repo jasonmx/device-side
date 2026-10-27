@@ -66,6 +66,19 @@ with `fields_not_tested` (see Sharp edges). Fields sent to a `switch` entity are
 The same `Set` with `on: false`: the device turns off now and turns itself back on after the
 duration. Light fields are not accepted.
 
+### `get_attributes`
+
+One `<Component>.GetStatus` per target. A running flip-back timer is returned as `timer`, the shared row: what the
+timer turns the target to (`turns`), `ends_at` and `remaining_s`. The time left is the device's `timer_started_at`
+plus `timer_duration`, against Home Assistant's clock; both clocks are SNTP-synced, and the result is kept between
+0 and the duration, which bounds any skew. With no timer running there is no `timer` key, so a relay with none
+returns an empty entry.
+
+An `RGBCCT` bulb also returns `brightness` (the device's percent, as Hue's is), and, for the active mode only,
+`color_temp_kelvin` or `rgb_color` with `hs_color` and `xy_color` derived from it. The bulb keeps these while off,
+so they read then too. The same capabilities as `turn_on_for` are in scope; other light components are refused
+with `capability_not_tested`. A device that doesn't answer raises.
+
 ### Cancelling
 
 Send a regular `turn_on` or `turn_off`: either cancels the flip-back timer. A `turn_on_for` or
@@ -192,6 +205,19 @@ A command to a group uses the group's Z2M options, not its members', so for a ti
 Device Side turns `hue_native_control` on as an option of the group itself when any member is a Hue
 bulb (members read from `zigbee2mqtt/bridge/groups`). A group takes a color only when every member
 can show one, as Z2M exposes the features its members share.
+
+### `get_attributes`
+
+One `<Component>.GetStatus` per target. A running flip-back timer is returned as `timer`, the shared row: what the
+timer turns the target to (`turns`), `ends_at` and `remaining_s`. The time left is the device's `timer_started_at`
+plus `timer_duration`, against Home Assistant's clock; both clocks are SNTP-synced, and the result is kept between
+0 and the duration, which bounds any skew. With no timer running there is no `timer` key, so a relay with none
+returns an empty entry.
+
+An `RGBCCT` bulb also returns `brightness` (the device's percent, as Hue's is), and, for the active mode only,
+`color_temp_kelvin` or `rgb_color` with `hs_color` and `xy_color` derived from it. The bulb keeps these while off,
+so they read then too. The same capabilities as `turn_on_for` are in scope; other light components are refused
+with `capability_not_tested`. A device that doesn't answer raises.
 
 ### Cancelling
 
@@ -342,6 +368,19 @@ After the command, Device Side reads back the `OnOff.OnTime` attribute (python-m
 answers `{path: value}`). If it is non-zero (the countdown is running), the result is `confirmed`.
 If it is 0 or the read-back fails, the result is `sent` with detail `timer_not_reported` or
 `readback_failed`.
+
+### `get_attributes`
+
+One `<Component>.GetStatus` per target. A running flip-back timer is returned as `timer`, the shared row: what the
+timer turns the target to (`turns`), `ends_at` and `remaining_s`. The time left is the device's `timer_started_at`
+plus `timer_duration`, against Home Assistant's clock; both clocks are SNTP-synced, and the result is kept between
+0 and the duration, which bounds any skew. With no timer running there is no `timer` key, so a relay with none
+returns an empty entry.
+
+An `RGBCCT` bulb also returns `brightness` (the device's percent, as Hue's is), and, for the active mode only,
+`color_temp_kelvin` or `rgb_color` with `hs_color` and `xy_color` derived from it. The bulb keeps these while off,
+so they read then too. The same capabilities as `turn_on_for` are in scope; other light components are refused
+with `capability_not_tested`. A device that doesn't answer raises.
 
 ### Cancelling
 

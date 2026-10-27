@@ -11,6 +11,7 @@ from homeassistant.util.color import color_RGB_to_hs, color_RGB_to_xy
 from custom_components.device_side.integrations.shelly.get_attributes import status_row
 
 from ...conftest import call, refusal
+from ...fixtures.fake import add_switch_as_x
 from ...fixtures.shelly import TIMER_STARTED_AT, add_shelly_entity, shelly_device
 
 pytestmark = pytest.mark.usefixtures("setup_production")
@@ -40,6 +41,18 @@ async def test_switch_reports_the_running_timer(hass, action, turns):
 
     assert response == {"switch.porch": {"timer": timer(turns, 3.0)}}
     assert call_rpc.await_args_list[-1] == rpc_call("Switch.GetStatus", {"id": 1})
+
+
+async def test_switch_as_x_light_reads_the_switch(hass):
+    entry, call_rpc = shelly_device(hass)
+    add_shelly_entity(hass, entry, "switch.porch", "switch:0")
+    add_switch_as_x(hass, "light.porch", "switch.porch")
+    await call(hass, "turn_on_for", {"entity_id": "light.porch", "duration": 5})
+
+    response = await call(hass, "get_attributes", {"entity_id": "light.porch"})
+
+    assert response == {"light.porch": {"timer": timer("off", 3.0)}}
+    assert call_rpc.await_args_list[-1] == rpc_call("Switch.GetStatus", {"id": 0})
 
 
 async def test_switch_without_a_timer_reports_an_empty_row(hass):
