@@ -494,9 +494,9 @@ class EntryOptions:
     back when the run ends. Saving a change reloads the entry. The original options are journaled before the first
     save."""
 
-    def __init__(self, admin: HAClient, reload_s: float = OPTIONS_RELOAD_S, journal: Journal | None = None):
+    def __init__(self, admin: HAClient, reload_s: float | None = None, journal: Journal | None = None):
         self.admin = admin
-        self.reload_s = reload_s
+        self.reload_s = OPTIONS_RELOAD_S if reload_s is None else reload_s
         self.journal = journal
         self.entry_id: str | None = None
         self.original: dict[str, Any] | None = None
@@ -1193,7 +1193,7 @@ async def run(
             try:
                 await rig_run.entry_options.restore()
             except Exception as err:  # noqa: BLE001
-                out(f"Could not put device_side's options back; set them in HA: {err}")
+                out(f"Could not put device_side's options back; the next run tries again: {err}")
     suite_results = [
         SuiteResult(suite, [rig_run.results[id(suite), case.id] for case in suite_cases], complete=not keyword)
         for suite, _, _, suite_cases in planned

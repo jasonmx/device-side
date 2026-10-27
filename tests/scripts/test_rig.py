@@ -15,7 +15,7 @@ from tests.rig import engine
 from tests.rig.engine import load_step_file, load_step_files
 from tests.rig.inventory import Inventory, load_env, main_checkout
 from tests.rig.journal import Journal
-from tests.scripts import test_rig_engine as fakes
+from tests.scripts import rig_fakes as fakes
 
 REPO = Path(__file__).parents[2]
 _spec = importlib.util.spec_from_file_location("rig", REPO / "scripts" / "rig.py")
