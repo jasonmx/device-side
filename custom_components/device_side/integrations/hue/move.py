@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant
 
 from .bridge import bridge_api, controller, resource_id
 from .report_filter import report_filter
-from .transition_cache import BRIGHTNESS, MIN_BRIGHTNESS_STEP, REPORT_TOLERANCE, TransitionCache, transition_cache
+from .transition_cache import BRIGHTNESS, MIN_BRIGHTNESS_STEP, TransitionCache, transition_cache
 from ...actions.move import UP, MoveRequest
 from ...core.adapter import Adapter
 from ...core.models import EntityResult, Status, Target
@@ -43,23 +43,6 @@ def lit(cache: TransitionCache, lights: list[Light]) -> list[Light]:
 def in_soft_off(cache: TransitionCache, light_id: str) -> bool:
     """Whether a move of ours is still fading the light to off, which the bridge won't take a dimming stop for."""
     return (transition := cache.running(light_id, BRIGHTNESS)) is not None and transition.target == 0
-
-
-def end_echo(cache: TransitionCache, light: Light, limit: float, up: bool) -> dict[str, float | bool]:
-    """What the bridge reports at the start of a move of the light to limit: only what changes is reported.
-
-    A soft off writes no brightness, so it reports on: false alone. A move to the brightness the bridge already
-    holds reports nothing. What it holds is its last report, which predicted_state may have kept from aiohue.
-    """
-    on = cache.bridge_value(light.id, "on", light.on.on)
-    if limit == 0:
-        return {"on": False} if on else {}
-    echo: dict[str, float | bool] = {}
-    if abs(cache.bridge_value(light.id, BRIGHTNESS, light.dimming.brightness) - limit) > REPORT_TOLERANCE:
-        echo[BRIGHTNESS] = limit
-    if up and not on:
-        echo["on"] = True
-    return echo
 
 
 class HueMove(Adapter[MoveRequest]):
@@ -124,13 +107,11 @@ class HueMove(Adapter[MoveRequest]):
                 write = writer.set_state(
                     rid, on=True if up else None, brightness=limit, transition_time=transition_time
                 )
-            echoes = {light_id: end_echo(cache, light, limit, up) for light_id, light in moving.items()}
-            # The fade starts as the bridge gets the write, not when its reply comes back.
-            sent_at = cache.clock()
-            await cache.write_armed(echoes, duration, write)
-            for light_id in moving:
-                cache.moving(light_id, BRIGHTNESS, starts[light_id], limit, duration, started_at=sent_at)
-            reports.fading(dict.fromkeys(moving, limit), duration)
+            async with cache.recording((light_id, BRIGHTNESS) for light_id in moving):
+                for light_id in moving:
+                    cache.moving(light_id, BRIGHTNESS, starts[light_id], limit, duration)
+                await write
+            reports.fading(BRIGHTNESS, dict.fromkeys(moving, limit), duration)
             return self.result(target, Status.SENT)
 
         return await self.gather(hass, targets, send)

@@ -448,20 +448,23 @@ duration plus 15 seconds and predicts the brightness of each light meanwhile, so
 continues from where the light halted, and `get_attributes` returns the predicted brightness.
 
 A change made elsewhere ends the prediction, so the next move starts from the brightness the bridge
-reports. Device Side tells the bridge's reports of its own fades from any other report: the end value
-at the start, the bulb's reports anywhere between a fade's start and end while it runs (a bulb's fade
-isn't a straight line), and anything the bulb reports for 15 seconds after a stop (a late report may
-be its halt, or a value from before the move). A light or scene call from Home Assistant ends the
-prediction of every Hue light it targets at once, whatever its value, as do `set_attributes` and
-`set_scene`. Not caught: a change from outside Home Assistant (the Hue app, a dimmer switch) to a
-value between a running fade's start and end, or within 15 seconds of a stop, and
-`hue.activate_scene`.
+reports. A bulb reports late, stale, and off any straight line (Tested behavior, below), so Device
+Side doesn't judge a report by its value. While it remembers a move or stop, it takes every
+brightness and on/off report from that light as its own, with two exceptions, both a change from
+elsewhere (the Hue app, a dimmer switch, a Hue automation): a switch to off while the light is fading
+to, or halted at, a lit level, and a color or color temperature report, which a brightness move never
+makes. A scene recalled on the bridge ends the prediction of its room's or zone's lights, and a light
+or scene call from Home Assistant ends the prediction of every Hue light it targets at once, whatever
+its value, as do `set_attributes` and `set_scene`. Not caught: a brightness change, or a switch to on,
+from outside Home Assistant while a move or stop is remembered, such as a light turned back on in the
+Hue app within 15 seconds of a fade to off.
 
 With **Show predicted brightness during Hue fades** on (the default), Home Assistant shows Device
 Side's predictions in place of those reports: the brightness at the start while a fade runs, where a
 stop halted the light, and the end once the fade has run. A fade to off shows the light on until it
 ends, a move up from off shows it on at its dimmest, and a room shows the mean of its lit lights. A
-change made elsewhere shows at once. Nothing is sent while a fade runs, so a dashboard slider holds
+change caught as made elsewhere shows at once; one not caught shows once the bridge next reports
+after the move or stop is no longer remembered. Nothing is sent while a fade runs, so a dashboard slider holds
 still and then jumps to the stop or the end. After Home Assistant restarts, or reconnects to the
 bridge, mid-fade, it shows what the bridge reports. To always show what the bridge reports, turn the
 option off: Settings › Devices & services › Device Side › Configure.
@@ -510,6 +513,12 @@ it arrives, so Home Assistant shows what is listed here.
 - **A color temperature write reports only `color_temperature`,** never `dimming`. Color
   temperature transitions and their stop (`color_temperature_delta`) behave as brightness does
   above, on a light and on a zone.
+- **A brightness write never reports a color.** Across the full Hue rig suite on 2026-10-27, every
+  report of a light during or after Device Side's brightness moves and stops held only `on` and
+  `dimming`; `color_temperature` came only from color writes, and `color` never.
+- **A scene recalled on the bridge reports its status:** `status.active` turns `static` within
+  about 1 s of its lights' reports, before or after them. A light whose color the scene leaves alone
+  reports only `on` and `dimming`, so only the scene's report shows the change came from elsewhere.
 
 ### Sharp edges
 

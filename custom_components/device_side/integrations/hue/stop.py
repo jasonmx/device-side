@@ -6,7 +6,7 @@ from typing import ClassVar
 from homeassistant.core import HomeAssistant
 
 from .bridge import bridge_api, controller, resource_id
-from .move import end_echo, in_soft_off, light_brightness, lit, reported_brightness, room_lights
+from .move import in_soft_off, light_brightness, lit, reported_brightness, room_lights
 from .report_filter import report_filter
 from .transition_cache import BRIGHTNESS, transition_cache
 from ...core.adapter import Adapter
@@ -58,11 +58,6 @@ class HueStop(Adapter[Request]):
             if not halts:
                 return self.result(target, Status.UNCHANGED, detail="off")
             if fading_off := {light_id for light_id in halts if in_soft_off(cache, light_id)}:
-                # The cut reports on and its brightness; a dimming stop reports nothing.
-                echoes = {
-                    light_id: end_echo(cache, api.lights.get(light_id), halts[light_id], up=True)
-                    for light_id in fading_off
-                }
                 write = asyncio.gather(
                     *(
                         api.lights.set_state(light_id, on=True, brightness=value)
@@ -71,12 +66,13 @@ class HueStop(Adapter[Request]):
                         for light_id, value in halts.items()
                     )
                 )
-                await cache.write_armed(echoes, 0.0, write)
             else:
-                await writer.set_dimming_delta(rid)
-            for light_id, value in halts.items():
-                cache.stopped(light_id, BRIGHTNESS, value)
-            reports.halted(halts)
+                write = writer.set_dimming_delta(rid)
+            async with cache.recording((light_id, BRIGHTNESS) for light_id in halts):
+                for light_id, value in halts.items():
+                    cache.stopped(light_id, BRIGHTNESS, value)
+                await write
+            reports.halted(BRIGHTNESS, halts)
             return self.result(target, Status.SENT)
 
         return await self.gather(hass, targets, send)

@@ -418,7 +418,7 @@ def test_check_tokens_stops_a_run_of_an_adapter_with_options_without_an_admin_to
     # Its options are pinned through device_side's options flow, which is admin only.
     registry = AdapterRegistry.discover()
     step_file = next(f for f in load_step_files() if f.action == "move")
-    env = {"HA_URL": "http://ha:8123", "HA_TOKEN": "tok"}
+    env = {"HA_URL": "http://ha:8123", "HA_TOKEN": "tok", "HUE_BRIDGE_HOST": "bridge", "HUE_APP_KEY": "key"}
     with pytest.raises(SystemExit, match="hue needs HA_ADMIN_TOKEN"):
         rig.check_tokens(env, [rig.Suite(step_file, "hue")], registry)
     rig.check_tokens({**env, "HA_ADMIN_TOKEN": "admin"}, [rig.Suite(step_file, "hue")], registry)
