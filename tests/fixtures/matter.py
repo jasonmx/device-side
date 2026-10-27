@@ -7,9 +7,9 @@ follows what the adapter reads at runtime:
     hass.config_entries.async_loaded_entries("matter")[0]
         .runtime_data.adapter.matter_client
             .get_node(node_id) -> mock_node
-                .endpoints[endpoint_id].get_attribute_value(None, descriptor) -> int feature_map
+                .node_data.attributes["{endpoint_id}/6/65532"] -> int feature_map
             .send_device_command(node_id, endpoint_id, command) -> None  (AsyncMock)
-            .read_attribute(node_id, attribute_path) -> int | 0          (AsyncMock)
+            .read_attribute(node_id, attribute_path) -> {attribute_path: value}  (AsyncMock)
 """
 
 import sys
@@ -30,32 +30,30 @@ NODE_HEX = "0000000000000002"
 NODE_ID = int(NODE_HEX, 16)
 
 
-def make_endpoint_mock(feature_map: int = 0x0002) -> MagicMock:
-    """Return a mock MatterEndpoint whose get_attribute_value returns feature_map."""
-    endpoint = MagicMock()
-    endpoint.get_attribute_value.return_value = feature_map
-    return endpoint
-
-
-def make_node_mock(endpoint_id: int, feature_map: int = 0x0002) -> MagicMock:
-    """Return a mock MatterNode with a single endpoint."""
+def make_node_mock(endpoint_id: int, feature_map: int = 0x0001) -> MagicMock:
+    """Return a mock MatterNode whose attribute cache holds one endpoint's OnOff FeatureMap."""
     node = MagicMock()
     node.node_id = NODE_ID
-    node.endpoints = {endpoint_id: make_endpoint_mock(feature_map)}
+    node.node_data.attributes = {f"{endpoint_id}/6/65532": feature_map}
     return node
+
+
+def on_time_reads(value: int) -> AsyncMock:
+    """A read_attribute mock that answers like python-matter-server: {attribute_path: value}."""
+    return AsyncMock(side_effect=lambda node_id, attribute_path: {attribute_path: value})
 
 
 def matter_device(
     hass: HomeAssistant,
     endpoint_id: int = 1,
-    feature_map: int = 0x0002,
+    feature_map: int = 0x0001,
 ) -> tuple[MockConfigEntry, AsyncMock, AsyncMock]:
     """A loaded Matter config entry whose matter_client is fully mocked.
 
     Returns (entry, send_device_command mock, read_attribute mock).
     """
     send_cmd = AsyncMock(return_value=None)
-    read_attr = AsyncMock(return_value=1)  # non-zero = timer running
+    read_attr = on_time_reads(1)  # non-zero = timer running
 
     node_mock = make_node_mock(endpoint_id, feature_map)
 
@@ -82,13 +80,14 @@ def add_matter_entity(
     state: str = "off",
     attributes: dict | None = None,
 ) -> str:
-    """Register a Matter light entity with a unique_id that the adapter can parse.
+    """Register a Matter light or plug entity with a unique_id that the adapter can parse.
 
-    Unique_id format: {fab_hex16}-{node_hex16}-MatterNodeDevice-{ep}-MatterLight-6-0
-    (matches what homeassistant/components/matter/entity.py builds for a basic light).
+    Unique_id format: {fab_hex16}-{node_hex16}-MatterNodeDevice-{ep}-{key}-6-0, key MatterLight or
+    MatterPlug (matches what homeassistant/components/matter/entity.py builds for each).
     """
     domain, object_id = entity_id.split(".")
-    unique_id = f"{FABRIC_HEX}-{NODE_HEX}-MatterNodeDevice-{endpoint_id}-MatterLight-6-0"
+    key = "MatterPlug" if domain == "switch" else "MatterLight"
+    unique_id = f"{FABRIC_HEX}-{NODE_HEX}-MatterNodeDevice-{endpoint_id}-{key}-6-0"
     device = dr.async_get(hass).async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(_MATTER_DOMAIN, f"deviceid_{FABRIC_HEX}-{NODE_HEX}-MatterNodeDevice")},

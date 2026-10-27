@@ -14,22 +14,8 @@ _MATTER_DOMAIN = "matter"
 # OnOff cluster constants (Matter spec, cluster 0x0006)
 _ONOFF_CLUSTER_ID = 6
 _FEATUREMAP_ATTR_ID = 65532  # 0xFFFC
-_LT_FEATURE_BIT = 0x0002  # Lighting (LT) feature per Matter spec sec. 1.5.4.2
+_LT_FEATURE_BIT = 0x0001  # Lighting (LT) is bit 0; bit 1 (0x2) is DeadFrontBehavior
 _ONTIME_ATTR_ID = 16385  # 0x4001 — counts down to 0 while the timed-on is running
-
-
-class _OnOffFeatureMapAttr:
-    """Minimal attribute descriptor for OnOff.FeatureMap.
-
-    Duck-types the chip.clusters attribute class interface (cluster_id + attribute_id) so
-    endpoint.get_attribute_value() can look up the cached value without chip being importable.
-    """
-
-    cluster_id = _ONOFF_CLUSTER_ID
-    attribute_id = _FEATUREMAP_ATTR_ID
-
-
-_ONOFF_FEATUREMAP = _OnOffFeatureMapAttr()
 
 
 def node_id_from_unique_id(unique_id: str) -> int | None:
@@ -87,28 +73,24 @@ def matter_client(hass: HomeAssistant, config_entry_id: str | None = None):
     return entries[0].runtime_data.adapter.matter_client
 
 
+def _onoff_attr_path(endpoint_id: int, attr_id: int) -> str:
+    """An OnOff attribute's path as python-matter-server keys it: "{endpoint}/{cluster}/{attribute}"."""
+    return f"{endpoint_id}/{_ONOFF_CLUSTER_ID}/{attr_id}"
+
+
 def lt_feature(node, endpoint_id: int) -> bool:
     """True if the OnOff cluster on the endpoint has the Lighting (LT) feature bit set.
 
-    Reads from the node's cached endpoint attribute data.  Sync and cheap: no I/O.
-    _OnOffFeatureMapAttr duck-types the chip.clusters attribute descriptor interface so the
-    endpoint's attribute lookup works without chip being importable at module level.
+    Reads the node's raw attribute cache. Sync and cheap: no I/O. MatterEndpoint.get_attribute_value
+    would need a real chip.clusters descriptor.
     """
-    endpoint = node.endpoints.get(endpoint_id)
-    if endpoint is None:
-        return False
-    feature_map = endpoint.get_attribute_value(None, _ONOFF_FEATUREMAP)
-    if feature_map is None:
-        return False
-    return bool(feature_map & _LT_FEATURE_BIT)
+    feature_map = node.node_data.attributes.get(_onoff_attr_path(endpoint_id, _FEATUREMAP_ATTR_ID))
+    return isinstance(feature_map, int) and bool(feature_map & _LT_FEATURE_BIT)
 
 
 def ontime_attr_path(endpoint_id: int) -> str:
-    """Attribute path string for OnOff.OnTime on the given endpoint.
-
-    Format used by python-matter-server read_attribute: "{endpoint_id}/{cluster_id}/{attr_id}".
-    """
-    return f"{endpoint_id}/{_ONOFF_CLUSTER_ID}/{_ONTIME_ATTR_ID}"
+    """Attribute path for OnOff.OnTime on the given endpoint, for python-matter-server's read_attribute."""
+    return _onoff_attr_path(endpoint_id, _ONTIME_ATTR_ID)
 
 
 def make_on_with_timed_off(on_off_control: int, on_time: int, off_wait_time: int):
