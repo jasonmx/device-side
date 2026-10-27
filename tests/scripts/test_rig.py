@@ -276,14 +276,55 @@ def test_main_checkout_falls_back_outside_a_repo(tmp_path, monkeypatch):
     assert main_checkout(tmp_path) == tmp_path
 
 
-def test_a_held_rig_lock_refuses_a_second_run_naming_the_holder(tmp_path):
+def test_a_held_rig_lock_makes_a_second_run_wait_naming_the_holder(tmp_path, monkeypatch):
     path = tmp_path / rig.LOCK_NAME
     held = rig.lock_rig(path, "wt/first")
-    with pytest.raises(SystemExit, match=rf"wt/first \(pid {rig.os.getpid()}\)"):
-        rig.lock_rig(path, "wt/second")
-    held.close()
-    rig.lock_rig(path, "wt/second").close()
+    printed: list[str] = []
+    polls: list[float] = []
+
+    def release_on_second_poll(seconds):
+        if len(polls) == 1:
+            held.close()
+        polls.append(seconds)
+
+    monkeypatch.setattr(rig.time, "sleep", release_on_second_poll)
+    rig.lock_rig(path, "wt/second", out=printed.append).close()
+
+    assert len(polls) == 2
+    assert printed == [
+        f"Another rig run holds the lock: wt/first (pid {rig.os.getpid()}). "
+        "Waiting for it to finish (Ctrl-C to give up)...",
+        "Rig lock acquired.",
+    ]
     assert path.read_text().startswith("wt/second ")
+
+
+def test_a_waiting_run_names_each_new_holder_once(tmp_path, monkeypatch):
+    path = tmp_path / rig.LOCK_NAME
+    held = [rig.lock_rig(path, "wt/first")]
+    printed: list[str] = []
+
+    def hand_over(_seconds):
+        if len(printed) == 1:  # the first holder finishes and a third run takes the lock before us
+            held[0].close()
+            held[0] = rig.lock_rig(path, "wt/third")
+        elif len(printed) == 2:
+            held[0].close()
+
+    monkeypatch.setattr(rig.time, "sleep", hand_over)
+    rig.lock_rig(path, "wt/second", out=printed.append).close()
+
+    assert [line.split(" (pid")[0] for line in printed[:2]] == [
+        "Another rig run holds the lock: wt/first",
+        "Another rig run holds the lock: wt/third",
+    ]
+    assert printed[2] == "Rig lock acquired."
+
+
+def test_an_uncontested_lock_says_nothing(tmp_path):
+    printed: list[str] = []
+    rig.lock_rig(tmp_path / rig.LOCK_NAME, "wt/first", out=printed.append).close()
+    assert printed == []
 
 
 def test_check_tokens_stops_a_zha_run_without_an_admin_token():
