@@ -1257,6 +1257,20 @@ async def test_options_already_in_force_are_not_saved(tmp_path, monkeypatch):
     assert admin.aborted == 1
 
 
+async def test_a_save_the_flow_refuses_closes_the_flow_and_raises():
+    admin = FakeAdmin({})
+
+    async def refused(method: str, path: str, json: dict | None = None):
+        if method == "post" and not path.endswith("/options/flow"):
+            return {"type": "form", "errors": {"base": "unknown"}}
+        return await FakeAdmin.rest(admin, method, path, json)
+
+    admin.rest = refused
+    with pytest.raises(RuntimeError, match="did not save"):
+        await engine.EntryOptions(admin, reload_s=0).apply({"opt": False})
+    assert admin.aborted == 1
+
+
 async def test_a_suite_whose_adapter_has_options_needs_the_admin_token(tmp_path):
     out: list[str] = []
     result = await run(

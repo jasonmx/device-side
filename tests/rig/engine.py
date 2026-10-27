@@ -498,19 +498,23 @@ class EntryOptions:
             self.current = values
             return
         values |= wanted
-        result = await self.admin.rest("post", flow_path, values)
-        if result.get("type") != "create_entry":
-            raise RuntimeError(f"device_side's options flow did not save: {result}")
+        try:
+            result = await self.admin.rest("post", flow_path, values)
+            if result.get("type") != "create_entry":
+                raise RuntimeError(f"device_side's options flow did not save: {result}")
+        except Exception:
+            with contextlib.suppress(Exception):  # don't leave the flow open in HA; the save's error is the one raised
+                await self.admin.rest("delete", flow_path)
+            raise
         self.current = values
         await self.reloaded()
 
     async def reloaded(self) -> None:
         """Wait for the reload a saved change schedules: it starts after the save returns."""
         await asyncio.sleep(self.reload_s)
+        query = {"type": "config_entries/get", "domain": "device_side"}
         async with asyncio.timeout(30):
-            while (await self.admin.command({"type": "config_entries/get", "domain": "device_side"}))[0][
-                "state"
-            ] != "loaded":
+            while not (entries := await self.admin.command(query)) or entries[0]["state"] != "loaded":
                 await asyncio.sleep(0.5)
 
     async def restore(self) -> None:

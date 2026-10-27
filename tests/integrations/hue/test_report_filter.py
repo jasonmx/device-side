@@ -1,5 +1,7 @@
 """The Hue report filter: the bridge's reports of our fades told from real changes, which forget the prediction."""
 
+from types import SimpleNamespace
+
 import pytest
 from aiohue.v2.controllers.events import EventType
 from homeassistant.exceptions import HomeAssistantError
@@ -9,7 +11,7 @@ from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import async_mock_service
 
 from custom_components.device_side.core.runtime import get_runtime
-from custom_components.device_side.integrations.hue.report_filter import Report, classify
+from custom_components.device_side.integrations.hue.report_filter import Report, applies_later, classify
 from custom_components.device_side.integrations.hue.transition_cache import (
     API_SETTLE_SECONDS,
     BRIGHTNESS,
@@ -138,6 +140,25 @@ async def test_a_refused_move_disarms_its_echo(hass, bridge, cache):
         await call(hass, "move", {"entity_id": "light.one", "brightness": "up"})
 
     assert not cache.follows("one")
+
+
+async def test_a_refused_write_from_set_attributes_keeps_the_prediction(hass, bridge, cache, clock):
+    await setup_room(hass, bridge)
+    await call(hass, "move", {"entity_id": "light.one", "brightness": "up"})
+    clock.now += 1.0
+    bridge.failing.add("one")
+
+    with pytest.raises(HomeAssistantError):
+        await call(hass, "set_attributes", {"entity_id": "light.one", "brightness": 40})
+
+    assert cache.running("one", BRIGHTNESS) is not None
+    assert cache.echoed("one", BRIGHTNESS, 100.0)  # the move's echo, still armed
+
+
+def test_an_aiohue_without_the_private_handler_is_taken_to_apply_events_at_once():
+    api = SimpleNamespace(lights=SimpleNamespace(), groups=SimpleNamespace(grouped_light=SimpleNamespace()))
+
+    assert not applies_later(api)
 
 
 @pytest.mark.parametrize(

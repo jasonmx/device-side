@@ -12,7 +12,7 @@ in a task; what device_side sends goes through the same event stream in-process,
 """
 
 import logging
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Iterable
 from enum import Enum
 from inspect import iscoroutinefunction
 from statistics import mean
@@ -39,6 +39,8 @@ _LOGGER = logging.getLogger(__name__)
 SERVICE_DOMAINS = frozenset({"light", "scene"})
 # Marks an event device_side sends in the bridge's place. aiohue reads only its models' fields, so ignores it.
 MARKER = "device_side"
+# Where each bridge's ReportFilter lives in integration_state, by hue config entry.
+FILTERS = "hue_filters"
 
 
 class Report(Enum):
@@ -205,8 +207,9 @@ class ReportFilter:
             return
         _strip(data)
 
-    def _rooms(self, light_ids) -> set[str]:
+    def _rooms(self, light_ids: Iterable[str]) -> set[str]:
         """The grouped_lights of the rooms and zones holding any of the lights."""
+        light_ids = set(light_ids)
         return {
             group.id
             for group in self.api.groups.grouped_light
@@ -304,15 +307,17 @@ def _forgotten(hass: HomeAssistant, light_id: str, running: bool) -> None:
     stays shown: the bridge's late report of it may never come."""
     get_runtime(hass).schedule(hass, _end_key(light_id), [])
     if running:
-        for reports in get_runtime(hass).integration_state.get("hue_filters", {}).values():
+        for reports in get_runtime(hass).integration_state.get(FILTERS, {}).values():
             if reports.api.lights.get(light_id) is not None:
                 reports.hand_back(light_id)
 
 
 def applies_later(api: HueBridgeV2) -> bool:
     """Whether aiohue's light and grouped_light controllers apply an event in a task, after our subscriber has run:
-    hiding a report depends on it."""
-    return all(iscoroutinefunction(c._handle_event) for c in (api.lights, api.groups.grouped_light))
+    hiding a report depends on it. _handle_event is private to aiohue: one without it is taken to apply at once."""
+    return all(
+        iscoroutinefunction(getattr(c, "_handle_event", None)) for c in (api.lights, api.groups.grouped_light)
+    )
 
 
 @callback
@@ -326,7 +331,7 @@ def report_filter(hass: HomeAssistant, target: Target) -> ReportFilter:
     api = bridge_api(target)
     entry_id = target.config_entry.entry_id
     runtime = get_runtime(hass)
-    filters = runtime.integration_state.setdefault("hue_filters", {})
+    filters = runtime.integration_state.setdefault(FILTERS, {})
 
     def attach() -> CALLBACK_TYPE:
         hiding = runtime.predicted_state
