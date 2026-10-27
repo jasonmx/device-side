@@ -4,12 +4,12 @@
 |---|---|
 | Result | pass |
 | Date | 2026-10-27 |
-| Source | rig run (`scripts/rig.py`), commit `385b8bd` |
-| Fingerprint | `1d5a35f3ca9bac91` (`integrations/hue/move.py`) |
+| Source | rig run (`scripts/rig.py`), commit `bfba654` |
+| Fingerprint | `31adc08629d34287` (`integrations/hue/move.py`) |
 | Home Assistant | 2026.10.2 |
 | Device | Hue ambiance lamp (`LTA009`), firmware `1.163.1`; Zone, firmware `unknown` |
 | Capabilities | every capability the adapter addresses |
-| Fields | `brightness`, `brightness_limit` |
+| Fields | `brightness`, `brightness_limit`, `color_temp`, `color_temp_limit` |
 
 ## Tests
 
@@ -41,5 +41,21 @@
 | `ha_change_mid_move[group]` | `light` (group) | pass |
 | `late_stop_report[light_ct]` | `light` (light_ct) | pass |
 | `late_stop_report[group]` | `light` (group) | pass |
+| `warmer[light_ct]` | `light` (light_ct) | pass |
+| `warmer[group]` | `light` (group) | pass |
+| `cooler_to_a_limit[light_ct]` | `light` (light_ct) | pass |
+| `cooler_to_a_limit[group]` | `light` (group) | pass |
+| `warmer_stop_warmer[light_ct]` | `light` (light_ct) | pass |
+| `warmer_stop_warmer[light_ct] observed` | `light` (light_ct) | not observed |
+| `warmer_stop_warmer[group]` | `light` (group) | pass |
+| `warmer_stop_warmer[group] observed` | `light` (group) | not observed |
+| `color_temp_at_limit[light_ct]` | `light` (light_ct) | pass |
+| `color_temp_at_limit[group]` | `light` (group) | pass |
+| `color_temp_on_off_light[light_ct]` | `light` (light_ct) | pass |
+| `color_temp_on_off_light[group]` | `light` (group) | pass |
+| `brighter_and_cooler[light_ct]` | `light` (light_ct) | pass |
+| `brighter_and_cooler[light_ct] observed` | `light` (light_ct) | not observed |
+| `brighter_and_cooler[group]` | `light` (group) | pass |
+| `brighter_and_cooler[group] observed` | `light` (group) | not observed |
 
 Tests marked `not observed` had nobody watching; their fields and capabilities are not listed.
