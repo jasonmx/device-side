@@ -429,7 +429,7 @@ def cancel_on_signals() -> None:
     def abort() -> None:
         for signum in ABORT_SIGNALS:
             loop.remove_signal_handler(signum)
-        print("\nAborting: putting devices back (again to leave them to the next run).")
+        print("\nAborting: putting devices back.")
         task.cancel()
 
     for signum in ABORT_SIGNALS:
