@@ -2,10 +2,11 @@
 
 The bridge reports a fade's end value at its start, and the bulb reports late, stale values, and off any straight line
 (Tested behavior in docs/integrations.md), so no value tells ours apart. Instead, while a move or stop on a light is
-inside its guard window, every report of the keys its attribute owns (attributes.ATTRIBUTES) is ours, except a switch
-to off while the light's brightness heads somewhere lit: that is the Hue app, a dimmer or a Hue automation, so the
-light's prediction is dropped and the next move starts from what the bridge reports. A change made from Home Assistant
-drops it at once, whatever its value, by watching light and scene service calls.
+inside its guard window, every report of the keys its attribute owns (attributes.ATTRIBUTES) is ours. Two reports are
+another actor's (the Hue app, a dimmer, a Hue automation): a switch to off while the light's brightness heads somewhere
+lit, and a key no live transition owns, which our writes never make the bridge report. Either drops the light's
+prediction, as does a scene recalled on the bridge, and the next move starts from what the bridge reports. A change made
+from Home Assistant drops it at once, whatever its value, by watching light and scene service calls.
 
 With the predicted_state option on, the reports that are ours are hidden from aiohue, and so from HA, which instead
 is sent what device_side predicts: the start value while a fade runs, the halt at a stop, the end once it has run.
@@ -22,6 +23,7 @@ from typing import TYPE_CHECKING
 
 from aiohue.v2.controllers.events import EventType
 from aiohue.v2.models.resource import ResourceTypes
+from aiohue.v2.models.scene import SceneActiveStatus
 from homeassistant.const import ATTR_DOMAIN, ATTR_ENTITY_ID, ATTR_SERVICE_DATA, ENTITY_MATCH_ALL, EVENT_CALL_SERVICE
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
@@ -70,13 +72,16 @@ def classify(cache: TransitionCache, api: HueBridgeV2, event: dict) -> Report | 
     decide.
     """
     values = reported_values(event)
-    if not owned(cache, api, event) & values.keys():
+    keys = owned(cache, api, event)
+    if not keys or not values:
         return None
-    if values.get("on") is False and event.get("type") == ResourceTypes.LIGHT.value:
-        # Our soft off reports off; off while the light heads somewhere lit, or holds a halt, is a switch elsewhere.
-        if (transition := cache.live(event["id"], BRIGHTNESS)) is not None and transition.target > 0:
+    if event.get("type") == ResourceTypes.LIGHT.value:
+        if values.keys() - keys:
             return Report.REAL
-    return Report.OURS
+        # Our soft off reports off; off while the light heads somewhere lit, or holds a halt, is a switch elsewhere.
+        if values.get("on") is False and (transition := cache.live(event["id"], BRIGHTNESS)) and transition.target > 0:
+            return Report.REAL
+    return Report.OURS if keys & values.keys() else None
 
 
 class ReportFilter:
@@ -97,7 +102,7 @@ class ReportFilter:
         unsubscribe = self.api.events.subscribe(
             self._on_event,
             event_filter=EventType.RESOURCE_UPDATED,
-            resource_filter=(ResourceTypes.LIGHT, ResourceTypes.GROUPED_LIGHT),
+            resource_filter=(ResourceTypes.LIGHT, ResourceTypes.GROUPED_LIGHT, ResourceTypes.SCENE),
         )
         unlisten = self.hass.bus.async_listen(EVENT_CALL_SERVICE, self._on_service_call, event_filter=_is_light_call)
 
@@ -156,6 +161,12 @@ class ReportFilter:
         # Runs inside aiohue's event loop: an exception here would stop core hue's events too.
         try:
             if data is None or data.get(MARKER):
+                return
+            if data.get("type") == ResourceTypes.SCENE.value:
+                # Recalled on the bridge (the Hue app, hue.activate_scene); going inactive is a light changing.
+                if data.get("status", {}).get("active") not in (None, SceneActiveStatus.INACTIVE.value):
+                    for light_id in self._scene_lights(data["id"]):
+                        forget(self.hass, light_id)
                 return
             report = classify(self.cache, self.api, data)
             if self.hiding and report is Report.OURS:
@@ -232,15 +243,17 @@ class ReportFilter:
             return []
         resource_id = entry.unique_id
         if entry.domain == "scene":
-            if (scene := self.api.scenes.scene.get(resource_id)) is None:
-                return []
-            group = scene.group.rid
-            lights = self.api.groups.room.get_lights(group) or self.api.groups.zone.get_lights(group)
-        elif self.api.lights.get(resource_id) is not None:
+            return self._scene_lights(resource_id)
+        if self.api.lights.get(resource_id) is not None:
             return [resource_id]
-        else:
-            lights = self.api.groups.grouped_light.get_lights(resource_id)
-        return [light.id for light in lights]
+        return [light.id for light in self.api.groups.grouped_light.get_lights(resource_id)]
+
+    def _scene_lights(self, scene_id: str) -> list[str]:
+        """The lights of the room or zone a scene belongs to."""
+        if (scene := self.api.scenes.scene.get(scene_id)) is None:
+            return []
+        group = scene.group.rid
+        return [light.id for light in self.api.groups.room.get_lights(group) or self.api.groups.zone.get_lights(group)]
 
 
 def _dimmest(light: Light) -> float:

@@ -443,12 +443,13 @@ continues from where the light halted, and `get_attributes` returns the predicte
 A change made elsewhere ends the prediction, so the next move starts from the brightness the bridge
 reports. A bulb reports late, stale, and off any straight line (Tested behavior, below), so Device
 Side doesn't judge a report by its value. While it remembers a move or stop, it takes every
-brightness and on/off report from that light as its own, except a switch to off while the light is
-fading to, or halted at, a lit level: that is the Hue app, a dimmer switch or a Hue automation. A
-light or scene call from Home Assistant ends the prediction of every Hue light it targets at once,
-whatever its value, as do `set_attributes` and `set_scene`. Not caught: any other change from outside
-Home Assistant while a move or stop is remembered, such as a brightness set in the Hue app, and
-`hue.activate_scene`.
+brightness and on/off report from that light as its own, with two exceptions, both a change from
+elsewhere (the Hue app, a dimmer switch, a Hue automation): a switch to off while the light is fading
+to, or halted at, a lit level, and a color or color temperature report, which a brightness move never
+makes. A scene recalled on the bridge ends the prediction of its room's or zone's lights, and a light
+or scene call from Home Assistant ends the prediction of every Hue light it targets at once, whatever
+its value, as do `set_attributes` and `set_scene`. Not caught: a brightness change from outside Home
+Assistant while a move or stop is remembered, such as one set in the Hue app.
 
 With **Show predicted brightness during Hue fades** on (the default), Home Assistant shows Device
 Side's predictions in place of those reports: the brightness at the start while a fade runs, where a
@@ -504,6 +505,9 @@ it arrives, so Home Assistant shows what is listed here.
 - **A color temperature write reports only `color_temperature`,** never `dimming`. Color
   temperature transitions and their stop (`color_temperature_delta`) behave as brightness does
   above, on a light and on a zone.
+- **A brightness write never reports a color.** Across the full Hue rig suite on 2026-10-27, every
+  report of a light during or after Device Side's brightness moves and stops held only `on` and
+  `dimming`; `color_temperature` came only from color writes, and `color` never.
 
 ### Sharp edges
 

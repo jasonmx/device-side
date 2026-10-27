@@ -45,7 +45,13 @@ def moving_up(cache, clock) -> None:
         pytest.param(light_event("one", on=True), Report.OURS, id="on_while_lit"),
         pytest.param(light_event("one", on=False), Report.REAL, id="off_from_elsewhere"),
         pytest.param(light_event("one", brightness=35.0, on=False), Report.REAL, id="off_with_a_brightness"),
-        pytest.param(light_event("one", color={"xy": {"x": 0.3, "y": 0.3}}), None, id="a_key_nothing_owns"),
+        pytest.param(light_event("one", color={"xy": {"x": 0.3, "y": 0.3}}), Report.REAL, id="xy_from_elsewhere"),
+        pytest.param(
+            light_event("one", brightness=35.0, color_temperature={"mirek": 300}),
+            Report.REAL,
+            id="mirek_from_elsewhere",
+        ),
+        pytest.param(light_event("one", color_temperature={"mirek_valid": True}), None, id="no_report_key"),
         pytest.param(light_event("two", brightness=35.0), None, id="untracked_light"),
         pytest.param(light_event("one", dimming={"min_dim_level": 0.2}), None, id="dimming_without_brightness"),
     ],
@@ -271,3 +277,36 @@ async def test_off_after_a_lit_halt_is_real(hass, bridge, cache, clock):
     clock.now += 5.0
 
     assert classify(cache, bridge.api, light_event("one", on=False)) is Report.REAL
+
+
+async def test_a_grouped_lights_unowned_key_is_left_to_its_lights(hass, bridge, cache, clock):
+    await setup_room(hass, bridge)
+    moving_up(cache, clock)
+
+    room_event = {"id": "1", "type": "grouped_light", "color_temperature": {"mirek": 300}}
+
+    assert classify(cache, bridge.api, room_event) is None
+
+
+@pytest.mark.parametrize(
+    ("scene_id", "active", "forgotten"),
+    [
+        pytest.param("scene-1", "static", True, id="recalled"),
+        pytest.param("scene-1", "dynamic_palette", True, id="recalled_dynamic"),
+        pytest.param("scene-1", "inactive", False, id="gone_inactive"),
+        pytest.param("scene-9", "static", False, id="not_on_bridge"),
+    ],
+)
+async def test_a_scene_recalled_on_the_bridge_forgets_its_rooms_lights(
+    hass, bridge, cache, clock, scene_id, active, forgotten
+):
+    await setup_room(hass, bridge)
+    await call(hass, "stop", {"entity_id": "light.room"})  # attaches the filter
+    for light_id in ("one", "two"):
+        cache.stopped(light_id, BRIGHTNESS, 42.0)
+
+    bridge.api.events.emit(EventType.RESOURCE_UPDATED, {"id": scene_id, "type": "scene", "status": {"active": active}})
+    await hass.async_block_till_done()
+
+    assert cache.follows("one") is not forgotten
+    assert cache.follows("two") is not forgotten

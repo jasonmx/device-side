@@ -265,14 +265,15 @@ async def test_off_from_elsewhere_mid_fade_shows_at_once_and_drops_the_end(hass,
     assert shown(bridge, "one") == (False, 100.0)  # the end value the bridge reported, handed back
 
 
-async def test_a_key_no_transition_owns_reaches_ha_mid_fade(hass, bridge, clock):
+async def test_a_color_change_from_elsewhere_mid_fade_shows_at_once(hass, bridge, clock):
+    # Our brightness writes never report a color temperature, so the light was changed elsewhere.
     await setup_room(hass, bridge)
     await raise_one(hass)
 
-    report(bridge, light_event("one", brightness=100.0, color_temperature={"mirek": 300}))
+    report(bridge, light_event("one", brightness=70.0, color_temperature={"mirek": 300}))
     await settle(hass)
 
-    assert shown(bridge, "one") == (True, 20.0)
+    assert shown(bridge, "one") == (True, 70.0)
     assert bridge.api.lights["one"].color_temperature.mirek == 300
 
 

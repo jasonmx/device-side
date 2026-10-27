@@ -10,8 +10,13 @@ from dataclasses import dataclass
 
 from .transition_cache import BRIGHTNESS
 
-# Where each report key sits in an event, as (object, field).
-REPORT_KEYS: dict[str, tuple[str, str]] = {"on": ("on", "on"), BRIGHTNESS: ("dimming", "brightness")}
+# Where each report key sits in an event, as (object, field): every key an attribute owns or could own.
+REPORT_KEYS: dict[str, tuple[str, str]] = {
+    "on": ("on", "on"),
+    BRIGHTNESS: ("dimming", "brightness"),
+    "mirek": ("color_temperature", "mirek"),
+    "xy": ("color", "xy"),
+}
 
 
 @dataclass(frozen=True, slots=True)
