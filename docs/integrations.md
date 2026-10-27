@@ -135,7 +135,7 @@ The wait matters because Z2M handles two messages for one light at once: sent st
 `light.turn_on`, the timer's message would publish the light's state from before the fields landed,
 which Home Assistant keeps, and contend with them on the mesh, so the timer could start seconds
 late. The wait is usually a fraction of a second. If Z2M publishes nothing within 5 s, Device Side
-logs it at debug level and sends the timer anyway, so that light stays on up to 5 s longer than asked.
+logs a warning and sends the timer anyway, so that light stays on up to 5 s longer than asked.
 
 Lights only. Zigbee plugs and switches (`switch`) are unsupported on Zigbee2MQTT and ZHA alike: few
 honor `OnWithTimedOff` (IKEA's are moving to Thread, and Sonoff and Tuya run their own countdowns),
