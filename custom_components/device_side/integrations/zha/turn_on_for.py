@@ -163,7 +163,8 @@ class ZHATurnOnFor(Adapter[TurnOnForRequest]):
     async def _read_back(self, hass: HomeAssistant, target: Target, addr: Address, on_time: int) -> EntityResult:
         # The comparison sits in the try too: a value it can't compare is a failed read, not a failed command.
         # OnTime is optional: a light without it (the rig's Sengled E11-G13) can't run the timer, which a groupcast
-        # doesn't report, so it reads as no timer: not_on, or timer_not_reported when fields turned it on.
+        # doesn't report, so it reads as no timer: not_on, or timer_not_reported once fields have turned it on. The
+        # Sengled, a Zigbee end device, takes the group's light.turn_on late, so it reads not_on, then comes on.
         try:
             read = await zcl.read_attributes(hass, addr, zcl.ON_OFF_CLUSTER, (zcl.ON_OFF,), optional=(zcl.ON_TIME,))
             on_off, remaining = read[zcl.ON_OFF], read.get(zcl.ON_TIME, 0)

@@ -263,8 +263,9 @@ one `light.turn_on` on the group entity, then one `OnWithTimedOff` to the group 
 `zha.issue_zigbee_group_command`. One command per member would start them a slot apart, about
 0.7 s across 8 lights. A group command gets no reply, and a member that can't run the timer
 ignores it without a word, so each member is still read back as above. A light without the OnTime
-attribute reads as no timer: `not_on`, or `timer_not_reported` when a field turned it on (it then
-stays on). The measurements are in `docs/plans/2026-10-27-zha-groups-probe.md`.
+attribute reads as no timer: `not_on`, or `timer_not_reported` once a field has turned it on. A
+light slow to take the group's `light.turn_on` (the rig's Sengled, a Zigbee end device) still reads
+off and reports `not_on`, then comes on and stays on. The measurements are in `docs/plans/2026-10-27-zha-groups-probe.md`.
 
 Lights only, with `brightness` and `color_temp_kelvin` as the fields, until more are tested on
 hardware. Zigbee plugs and switches are unsupported, as on Zigbee2MQTT: the one tested, a Tuya
