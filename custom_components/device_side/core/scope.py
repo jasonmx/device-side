@@ -28,6 +28,8 @@ class AdapterScope:
     # A record proves only the capability the call reaches, so a sibling's untested capability is left out here.
     capabilities: frozenset[str] | None = None
     confirmable: bool = False
+    # device_side options that change what the adapter does; a record proves each on and off (check_tiers).
+    options: frozenset[str] = frozenset()
     native_groups: bool = False
     max_concurrency: int = 4
     notes: tuple[str, ...] = ()

@@ -12,24 +12,25 @@ When an action should raise, skip a target, or what its response holds: match co
 ## Tiers
 
 A tier belongs to an **adapter** (action × integration) and covers its whole scope
-(`AdapterScope.domains`, `.capabilities` and `.fields`).
+(`AdapterScope.domains`, `.capabilities`, `.fields` and `.options`).
 
 | Tier | Meaning | Bar |
 |---|---|---|
 | experimental | design in flux | `experimental=True` on the adapter; no coverage bar |
 | untested | design settled | ≥95% line coverage of the adapter module; some of its scope not yet covered by a bench record |
-| beta | tested on hardware | at least one bench record (rig run or tester report) with the current fingerprint, and every capability and field in scope covered (below) |
+| beta | tested on hardware | at least one bench record (rig run or tester report) with the current fingerprint, and every capability, field and option in scope covered (below) |
 | stable | released | on `main`; everything on `main` is stable |
 
 Only `experimental` is declared; `scripts/check_tiers.py` computes the rest from every
 `docs/bench/<integration>/<action>*.md` record of the adapter. CI prints the tiers; only `cut-release`
-requires every adapter beta. Fingerprint = AST hash of the adapter module, excluding docstrings and
-the `AdapterScope` declaration; any other change resets the adapter to `untested` until a record
-carries the new fingerprint. Regressions block promotion; they never demote.
+requires every adapter beta. Fingerprint = AST hash of the adapter module and, in turn, the modules it imports
+from its own integration package (`from .x import`), excluding docstrings and the `AdapterScope` declaration; any
+other change resets the adapter to `untested` until a record carries the new fingerprint. Regressions block promotion; they never demote.
 
 **Capabilities carry forward, fields don't.** A capability listed by any passing record (any
 fingerprint) stays covered while the adapter has a current-fingerprint record that reached the device; a field needs a
-current-fingerprint record listing it.
+current-fingerprint record listing it. An option needs current-fingerprint records with it on and with it
+off (a record's `Options` row; absent means all off).
 
 **Proof follows the call.** A bench record proves the call an adapter sends and the capability it
 reaches (Shelly: the RPC component), whatever entity domain the target shows: a relay exposed as a
