@@ -82,7 +82,7 @@ Section 6 is a table ranked by severity, then impact per unit of effort: `# | Se
 
 For a diff target, keep the same sections but say "nothing found" in a single line rather than padding a section.
 
-Close by proposing how to land the fixes, grouped into batches that don't touch the same files, and following the repo's own commit rules if it has them (e.g. review → simplify → tests green). Tag simplification-only items (reuse, dead code, small duplication) `simplify`: they belong in the `/simplify` step of whichever batch touches those files, not in batches of their own. Then stop. Fixing is a separate request.
+Close by proposing how to land the fixes, grouped into batches that don't touch the same files, and following the repo's own commit rules if it has them (e.g. review → simplify → tests green). Tag simplification-only items (reuse, dead code, small duplication) `simplify`: they belong in the `/simplify` step of whichever batch touches those files, not in batches of their own.
 
 ## 6. Housekeeping
 
