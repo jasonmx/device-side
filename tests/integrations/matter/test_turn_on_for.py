@@ -102,6 +102,20 @@ async def test_dead_front_bit_alone_is_not_lt(setup_matter, hass):
     assert response["switch.plug"] == CONFIRMED
 
 
+async def test_featuremap_missing_from_cache_is_not_lt(setup_matter, hass):
+    """An endpoint whose OnOff FeatureMap the node never reported is refused."""
+    entry, _, _ = matter_device(hass, endpoint_id=EP)
+    entry.runtime_data.adapter.matter_client.get_node.return_value.node_data.attributes = {}
+    add_matter_entity(hass, entry, "switch.unreported", endpoint_id=EP)
+    second_entry, _, _ = matter_device(hass, endpoint_id=2)
+    add_matter_entity(hass, second_entry, "switch.plug", endpoint_id=2)
+
+    response = await call(hass, "turn_on_for", {"entity_id": ["switch.unreported", "switch.plug"], "duration": 5})
+
+    assert response["switch.unreported"]["detail"] == "no_lt_feature"
+    assert response["switch.plug"] == CONFIRMED
+
+
 async def test_readback_without_the_path_reports_timer_not_running(setup_matter, hass):
     """A read that leaves out the OnTime path does not confirm."""
     entry, _, read_attr = matter_device(hass, endpoint_id=EP, feature_map=0x0001)

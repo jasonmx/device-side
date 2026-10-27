@@ -73,23 +73,24 @@ def matter_client(hass: HomeAssistant, config_entry_id: str | None = None):
     return entries[0].runtime_data.adapter.matter_client
 
 
+def _onoff_attr_path(endpoint_id: int, attr_id: int) -> str:
+    """An OnOff attribute's path as python-matter-server keys it: "{endpoint}/{cluster}/{attribute}"."""
+    return f"{endpoint_id}/{_ONOFF_CLUSTER_ID}/{attr_id}"
+
+
 def lt_feature(node, endpoint_id: int) -> bool:
     """True if the OnOff cluster on the endpoint has the Lighting (LT) feature bit set.
 
-    Reads the node's raw attribute cache, keyed "{endpoint}/{cluster}/{attribute}". Sync and cheap:
-    no I/O. MatterEndpoint.get_attribute_value would need a real chip.clusters descriptor.
+    Reads the node's raw attribute cache. Sync and cheap: no I/O. MatterEndpoint.get_attribute_value
+    would need a real chip.clusters descriptor.
     """
-    path = f"{endpoint_id}/{_ONOFF_CLUSTER_ID}/{_FEATUREMAP_ATTR_ID}"
-    feature_map = node.node_data.attributes.get(path)
+    feature_map = node.node_data.attributes.get(_onoff_attr_path(endpoint_id, _FEATUREMAP_ATTR_ID))
     return isinstance(feature_map, int) and bool(feature_map & _LT_FEATURE_BIT)
 
 
 def ontime_attr_path(endpoint_id: int) -> str:
-    """Attribute path string for OnOff.OnTime on the given endpoint.
-
-    Format used by python-matter-server read_attribute: "{endpoint_id}/{cluster_id}/{attr_id}".
-    """
-    return f"{endpoint_id}/{_ONOFF_CLUSTER_ID}/{_ONTIME_ATTR_ID}"
+    """Attribute path for OnOff.OnTime on the given endpoint, for python-matter-server's read_attribute."""
+    return _onoff_attr_path(endpoint_id, _ONTIME_ATTR_ID)
 
 
 def make_on_with_timed_off(on_off_control: int, on_time: int, off_wait_time: int):
