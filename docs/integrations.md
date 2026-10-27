@@ -516,6 +516,9 @@ it arrives, so Home Assistant shows what is listed here.
 - **A brightness write never reports a color.** Across the full Hue rig suite on 2026-10-27, every
   report of a light during or after Device Side's brightness moves and stops held only `on` and
   `dimming`; `color_temperature` came only from color writes, and `color` never.
+- **A scene recalled on the bridge reports first.** The scene's `status.active` turns `static`
+  about 1 s before its lights report. A light whose color the scene leaves alone reports only `on`
+  and `dimming`, so only the scene's report shows the change came from elsewhere.
 
 ### Sharp edges
 
