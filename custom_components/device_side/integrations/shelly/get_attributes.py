@@ -28,7 +28,7 @@ def status_row(component: str, status: dict, now: datetime) -> dict:
         row["brightness"] = status["brightness"]
         if status["mode"] == "cct":
             row["color_temp_kelvin"] = status["ct"]
-        else:
+        elif status["mode"] == "rgb":
             rgb = status["rgb"]
             row["rgb_color"] = list(rgb)
             row["hs_color"] = list(color_RGB_to_hs(*rgb))

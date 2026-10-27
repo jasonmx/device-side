@@ -98,6 +98,11 @@ async def test_bulb_off_still_reads_and_carries_its_timer(hass):
     assert response == {"light.bulb": {"brightness": 40, "color_temp_kelvin": 4000, "timer": timer("on", 28.0)}}
 
 
+def test_unknown_mode_reports_brightness_only():
+    # Both ct and rgb are always in the status; neither is current in a mode this adapter doesn't know.
+    assert status_row("RGBCCT", {**BULB, "output": True, "mode": "white"}, NOW) == {"brightness": 40}
+
+
 @pytest.mark.parametrize(
     ("started_at", "remaining_s"),
     [
