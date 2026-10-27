@@ -59,7 +59,7 @@
   "services": {
     "get_attributes": {
       "name": "Get attributes",
-      "description": "Get brightness, color temp, and color (RGB, HS, XY), even if lights are off. Returns one record per target."
+      "description": "Get brightness, color temp, and color (RGB, HS, XY), even if lights are off, and any running on/off timer. Returns one record per target."
     },
     "move": {
       "name": "Move: dim, brighten, warm or cool",
