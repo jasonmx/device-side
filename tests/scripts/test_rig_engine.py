@@ -939,7 +939,7 @@ async def test_a_full_pass_writes_a_record_and_a_failure_writes_none(tmp_path):
     assert record.startswith("# Shelly · turn_on_for\n")
     assert "| Fingerprint | `" in record and "(`integrations/shelly/turn_on_for.py`) |" in record
     assert "| Device | Mini (`S3`), firmware `2.0` |" in record
-    assert "| Capabilities | `RGBCCT`, `Switch` |" in record  # the scope's, whatever the cases reached
+    assert "| Capabilities | `Switch` |" in record  # what the cases reached, though RGBCCT is in scope too
     assert "| Fields | none |" in record
     assert "| `on_then_off[switch_plug]` | `switch` (switch_plug) | pass |" in record
     assert "switch.plug" not in record
