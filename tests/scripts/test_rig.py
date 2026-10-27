@@ -280,7 +280,17 @@ def test_main_checkout_falls_back_outside_a_repo(tmp_path, monkeypatch):
     assert main_checkout(tmp_path) == tmp_path
 
 
+def claude_session(tmp_path, monkeypatch, name):
+    """Run as if under a Claude Code session called `name`, with its registry file under a fake config dir."""
+    (tmp_path / "sessions").mkdir()
+    (tmp_path / "sessions" / "4242.json").write_text(f'{{"pid": 4242, "name": "{name}"}}')
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAUDE_PID", "4242")
+    return tmp_path / "sessions" / "4242.json"
+
+
 def test_a_held_rig_lock_makes_a_second_run_wait_naming_the_holder(tmp_path, monkeypatch):
+    claude_session(tmp_path, monkeypatch, "rig-agent-1a")
     path = tmp_path / rig.LOCK_NAME
     held = rig.lock_rig(path, "wt/first")
     printed: list[str] = []
@@ -296,11 +306,43 @@ def test_a_held_rig_lock_makes_a_second_run_wait_naming_the_holder(tmp_path, mon
 
     assert len(polls) == 2
     assert printed == [
-        f"Another rig run holds the lock: wt/first (pid {rig.os.getpid()}). "
-        "Waiting for it to finish (Ctrl-C to give up)...",
+        f'Another rig run holds the lock: wt/first (pid {rig.os.getpid()}), Claude Code session "rig-agent-1a" '
+        "(SendMessage reaches it). Waiting for it to finish (Ctrl-C to give up)...",
         "Rig lock acquired.",
     ]
     assert path.read_text().startswith("wt/second ")
+
+
+def test_the_holder_is_named_as_its_session_is_called_now(tmp_path, monkeypatch):
+    session_file = claude_session(tmp_path, monkeypatch, "rig-agent-1a")
+    entry = rig.lock_entry("wt/first")
+    session_file.write_text('{"name": "renamed"}')
+    assert rig.lock_holder(entry).endswith('Claude Code session "renamed" (SendMessage reaches it)')
+
+
+def test_a_holder_whose_session_file_is_gone_or_unreadable_is_named_by_its_line_alone(tmp_path, monkeypatch):
+    session_file = claude_session(tmp_path, monkeypatch, "rig-agent-1a")
+    entry = rig.lock_entry("wt/first")
+    line = f"wt/first (pid {rig.os.getpid()})"
+    for contents in ("not json", '{"pid": 4242}', "[]"):
+        session_file.write_text(contents)
+        assert rig.lock_holder(entry) == line
+    session_file.unlink()
+    assert rig.lock_holder(entry) == line
+    assert rig.lock_holder("") == "an unnamed process"
+
+
+def test_a_terminal_run_is_named_by_user_and_tty(monkeypatch):
+    monkeypatch.delenv("CLAUDE_PID", raising=False)
+    monkeypatch.setattr(rig.getpass, "getuser", lambda: "tester")
+    monkeypatch.setattr(rig.os, "ttyname", lambda _fd: "/dev/ttys003")
+    assert rig.lock_holder(rig.lock_entry("wt/first")) == f"wt/first (pid {rig.os.getpid()}, user tester on ttys003)"
+
+    def no_tty(_fd):
+        raise OSError
+
+    monkeypatch.setattr(rig.os, "ttyname", no_tty)
+    assert rig.lock_entry("wt/first") == f"wt/first (pid {rig.os.getpid()}, user tester)\n"
 
 
 def test_a_waiting_run_names_each_new_holder_once(tmp_path, monkeypatch):

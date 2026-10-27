@@ -242,7 +242,9 @@ address and endpoint are parsed from the unique ID, which ZHA writes as `{ieee}-
 a light. An entity with a longer unique ID on the same endpoint (a quirk's extra entity, such as a
 child lock) is refused with `not_addressable`, so a timer never lands on the wrong entity.
 
-ZHA group entities return `group_not_supported` for now; target the member lights instead.
+A ZHA group entity (unique ID `{platform}_zha_group_0x{group_id:04x}`) expands to its members in
+the group entity's domain: a light group to its lights. Each member gets its own result; the group
+entity gets none. A group ZHA no longer knows is skipped, like an empty group.
 
 ### `turn_on_for`
 
@@ -257,6 +259,15 @@ so the result is `confirmed` when the device reads on and OnTime is above 0, at 
 tenths, and no more than 3 s under them. Otherwise it is `sent`, with detail `not_on` (the device
 reads off), `timer_not_reported` (OnTime holds some other value) or `readback_failed` (the read
 itself failed).
+
+Members of a ZHA group share one command, so they start and stop together: with a light field,
+one `light.turn_on` on the group entity, then one `OnWithTimedOff` to the group through
+`zha.issue_zigbee_group_command`. One command per member would start them a slot apart, about
+0.7 s across 8 lights. A group command gets no reply, and a member that can't run the timer
+ignores it without a word, so each member is still read back as above. A light without the OnTime
+attribute reads as no timer: `not_on`, or `timer_not_reported` once a field has turned it on. A
+light slow to take the group's `light.turn_on` (the rig's Sengled, a Zigbee end device) still reads
+off and reports `not_on`, then comes on and stays on. The measurements are in `docs/plans/2026-10-27-zha-groups-probe.md`.
 
 Lights only, with `brightness` and `color_temp_kelvin` as the fields, until more are tested on
 hardware. Zigbee plugs and switches are unsupported, as on Zigbee2MQTT: the one tested, a Tuya
@@ -295,8 +306,8 @@ devices may differ.
 
 ### Sharp edges
 
-- **Admin only.** `zha.issue_zigbee_cluster_command` is an admin-only action, and Device Side
-  passes the caller's identity through to it. A call made as a non-admin user is `rejected` with
+- **Admin only.** `zha.issue_zigbee_cluster_command` and `zha.issue_zigbee_group_command` are
+  admin-only actions, and Device Side passes the caller's identity through to them. A call made as a non-admin user is `rejected` with
   detail `admin_required`. Automations run without a user, so they pass.
 - **Duration limits.** `on_time` is a uint16 in tenths of a second, so the maximum is 6553.4 s
   (about 1.8 hours). A longer duration is clamped and the result carries `clamped_to`.

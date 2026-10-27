@@ -11,26 +11,34 @@ ON_OFF = 0x0000
 ON_TIME = 0x4001
 
 
+def gateway(hass: HomeAssistant) -> Any:
+    """The zha library's gateway. The zha library is installed only where ZHA runs, hence the import here."""
+    from homeassistant.components.zha.helpers import get_zha_gateway
+
+    return get_zha_gateway(hass)
+
+
 async def read_attributes(
-    hass: HomeAssistant, addr: Address, cluster_id: int, attributes: tuple[int, ...]
+    hass: HomeAssistant, addr: Address, cluster_id: int, attributes: tuple[int, ...], optional: tuple[int, ...] = ()
 ) -> dict[int, Any]:
     """Read attributes off the device in one request, bypassing zigpy's cache, as
     websocket_read_zigbee_cluster_attributes does.
 
     That websocket command is the only public route, and it is admin-only; this reaches the same gateway through
     zha's internals. Callers read only after an admin-checked command succeeded, so the read grants no extra rights.
-    Raises when the device is unknown or any attribute comes back in the failure dict, so callers handle one
-    failure path. The zha library is installed only where ZHA runs, hence the imports here.
+    Raises when the device is unknown or any of `attributes` comes back in the failure dict, so callers handle one
+    failure path. `optional` ones ride the same request and are left out of the result when the device lacks them.
+    The zha library is installed only where ZHA runs, hence the imports here.
     """
-    from homeassistant.components.zha.helpers import get_zha_gateway
     from zigpy.types import EUI64
 
-    device = get_zha_gateway(hass).get_device(EUI64.convert(addr.ieee))
+    device = gateway(hass).get_device(EUI64.convert(addr.ieee))
     if device is None:
         raise LookupError(f"ZHA device {addr.ieee} not found")
     cluster = device.async_get_cluster(addr.endpoint_id, cluster_id, cluster_type="in")
-    success, failure = await cluster.read_attributes(list(attributes), allow_cache=False, only_cache=False)
+    wanted = [*attributes, *optional]
+    success, failure = await cluster.read_attributes(wanted, allow_cache=False, only_cache=False)
     for attribute in attributes:
         if attribute not in success:
             raise LookupError(f"Attribute 0x{attribute:04x} not read: {failure.get(attribute)}")
-    return {attribute: success[attribute] for attribute in attributes}
+    return {attribute: success[attribute] for attribute in wanted if attribute in success}

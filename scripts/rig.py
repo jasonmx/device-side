@@ -12,7 +12,8 @@ Ctrl-C, SIGTERM and SIGHUP stop a run, putting the devices back; a second one le
 journaled first (next to the lock), so whatever a killed run leaves changed, the next run puts back before its gate, or
 --recover alone does.
 
-Usage: scripts/rig.py [--dry-run] [--no-deploy] [--no-restart] [--unattended] [--integration KEY ...] [-k TEXT]
+Usage: scripts/rig.py [--dry-run] [--no-deploy] [--no-restart] [--unattended] [--integration KEY ...]
+                      [--action NAME ...] [-k TEXT]
        scripts/rig.py --recover
 """
 
@@ -20,6 +21,7 @@ import argparse
 import asyncio
 import datetime
 import fcntl
+import getpass
 import json
 import os
 import signal
@@ -171,12 +173,47 @@ def check_deploy(env: dict, no_restart: bool, deploy: Deploy) -> None:
         raise SystemExit(f"Cannot deploy: {deploy.blocker}.")
 
 
+def lock_entry(holder: str) -> str:
+    """What a run writes into the lock: `holder` and its pid, then how to reach whoever started it.
+
+    Under Claude Code that is the path of the session's registry file, which the reader resolves to the session's
+    current name (sessions can be renamed mid-run). Run from a terminal, it is the user and tty instead.
+    """
+    claude_pid = os.environ.get("CLAUDE_PID")
+    if claude_pid:
+        config = Path(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude").expanduser()
+        return f"{holder} (pid {os.getpid()})\n{config / 'sessions' / f'{claude_pid}.json'}\n"
+    who = f"user {getpass.getuser()}"
+    try:
+        who += f" on {os.ttyname(0).removeprefix('/dev/')}"
+    except OSError:  # stdin is not a tty
+        pass
+    return f"{holder} (pid {os.getpid()}, {who})\n"
+
+
+def lock_holder(entry: str) -> str:
+    """Describe the lock's holder from its `lock_entry`, naming the Claude Code session that holds it, if any.
+
+    The registry file is Claude Code's own, undocumented: when it is gone or unreadable, the holder line stands alone.
+    """
+    line, _, session_file = entry.strip().partition("\n")
+    held_by = line or "an unnamed process"
+    if not session_file:
+        return held_by
+    try:
+        name = json.loads(Path(session_file).read_text())["name"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return held_by
+    return f'{held_by}, Claude Code session "{name}" (SendMessage reaches it)'
+
+
 def lock_rig(path: Path, holder: str, out: Callable[[str], None] = print) -> TextIO:
     """Hold an exclusive lock on `path` for the process's life, waiting while another run has it.
 
     One lock in the git common dir covers every worktree. flock drops when the process dies, so nothing goes stale.
-    A waiting run says who holds the lock, and again whenever that changes. Waiting runs poll rather than queue, so
-    when several wait, whichever polls first after a release goes next.
+    A waiting run says who holds the lock (with its Claude Code session, so a waiting agent can message it), and again
+    whenever that changes. Waiting runs poll rather than queue, so when several wait, whichever polls first after a
+    release goes next.
     """
     handle = path.open("a+")
     waiting_on = None
@@ -186,7 +223,7 @@ def lock_rig(path: Path, holder: str, out: Callable[[str], None] = print) -> Tex
             break
         except BlockingIOError:
             handle.seek(0)
-            held_by = handle.read().strip() or "an unnamed process"
+            held_by = lock_holder(handle.read())
             if held_by != waiting_on:
                 out(f"Another rig run holds the lock: {held_by}. Waiting for it to finish (Ctrl-C to give up)...")
                 waiting_on = held_by
@@ -194,7 +231,7 @@ def lock_rig(path: Path, holder: str, out: Callable[[str], None] = print) -> Tex
     if waiting_on is not None:
         out("Rig lock acquired.")
     handle.truncate(0)
-    handle.write(f"{holder} (pid {os.getpid()})\n")
+    handle.write(lock_entry(holder))
     handle.flush()
     return handle
 
