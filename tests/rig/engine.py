@@ -21,6 +21,7 @@ import yaml
 
 from scripts.fingerprint import adapter_path, fingerprint
 
+from .bridge import BridgeError, HueBridge
 from .client import HAClient, HAError
 from .inventory import RIG_DIR, ROLES, SETTLE_S, TOLERANCE_S, Inventory
 
@@ -181,6 +182,10 @@ class StepFile:
     def roles(self) -> tuple[str, ...]:
         return tuple(dict.fromkeys(role for test in self.tests for role in test.roles))
 
+    @property
+    def uses_bridge(self) -> bool:
+        return any(step.kind == "bridge" for test in self.tests for step in (*test.setup, *test.steps))
+
 
 def _state(value: Any) -> Any:
     # YAML 1.1 reads a bare on/off as a boolean.
@@ -279,6 +284,26 @@ def _parse_z2m_option(args: Any) -> dict:
     return args
 
 
+def _body_keys(value: Any) -> Any:
+    """A body with YAML 1.1's boolean keys put back: a bare `on:` key reads as True, and Hue's is `on`."""
+    if isinstance(value, dict):
+        return {_state(key): _body_keys(inner) for key, inner in value.items()}
+    return value
+
+
+def _parse_bridge(args: Any) -> dict:
+    args = _mapping(args, allowed=["target", "put", "recall"])
+    if ("put" in args) == ("recall" in args):
+        raise ValueError("give put or recall, one of them")
+    if "put" in args and (not isinstance(args["put"], dict) or not args["put"]):
+        raise ValueError("put takes the body to write, as a mapping")
+    if "put" in args:
+        args["put"] = _body_keys(args["put"])
+    if "recall" in args and args["recall"] is not True:
+        raise ValueError("recall takes true")
+    return args
+
+
 def _parse_restore(args: Any) -> None:
     if args not in (None, {}):
         raise ValueError("restore takes no arguments")
@@ -294,6 +319,8 @@ PARSERS: dict[str, Callable[[Any], Any]] = {
     "sample": _parse_sample,
     "do": _parse_do,
     "restore": _parse_restore,
+    # A write to the Hue bridge that bypasses HA; fails in any other integration's suite.
+    "bridge": _parse_bridge,
     # Zigbee2MQTT device options; both steps do nothing in another integration's suite.
     "z2m_option": _parse_z2m_option,
     "expect_z2m_option": _parse_z2m_option,
@@ -707,7 +734,9 @@ class _CaseRun:
         position: str = "",
         busy: dict[str, float] | None = None,
         settle: float = 0.0,
+        bridge: HueBridge | None = None,
     ):
+        self.bridge = bridge
         self.case, self.ha, self.registry, self.ask, self.out, self.position = case, ha, registry, ask, out, position
         self.integration = case.suite.integration
         # Each light's loop time once the predictions an earlier move or stop left on it have expired; shared
@@ -905,6 +934,38 @@ class _CaseRun:
             if name != "target" and got.get(name) != want:
                 raise StepFailure(f"{entity_id}: Zigbee2MQTT option {name} is {got.get(name)!r}, expected {want!r}")
 
+    async def bridge_resource(self, entity_id: str) -> tuple[str, str]:
+        """The CLIP v2 type and id behind a Hue entity. Core's hue integration keys each entity by its resource id:
+        a light's by its light, a room or zone light's by its grouped_light, a scene's by its scene."""
+        entry = await self.ha.command({"type": "config/entity_registry/get", "entity_id": entity_id})
+        if entry.get("platform") != "hue":
+            raise StepFailure(f"{entity_id} is not a Hue entity (platform {entry.get('platform')!r})")
+        if not entry.get("unique_id"):
+            raise StepFailure(f"{entity_id} has no unique_id to find on the bridge")
+        domain = entity_id.partition(".")[0]
+        if domain == "scene":
+            return "scene", entry["unique_id"]
+        return ("grouped_light" if self.is_group(entity_id) else "light"), entry["unique_id"]
+
+    async def _bridge(self, args: dict, _following: str | None) -> None:
+        if self.integration != "hue":
+            raise StepFailure(f"bridge steps need a Hue suite, not {self.integration}")
+        if self.bridge is None:
+            raise StepFailure("no Hue bridge: set HUE_BRIDGE_HOST and HUE_APP_KEY in .env.rig")
+        entity_id = self.entity(args)
+        is_scene = entity_id.startswith("scene.")
+        if "recall" in args and not is_scene:
+            raise StepFailure(f"recall needs a scene target, not {entity_id}")
+        if "put" in args and is_scene:
+            raise StepFailure(f"put needs a light or group target, not {entity_id}")
+        await self.touch(entity_id)
+        resource_type, resource_id = await self.bridge_resource(entity_id)
+        body = {"recall": {"action": "active"}} if "recall" in args else args["put"]
+        try:
+            await self.bridge.put(resource_type, resource_id, body)
+        except BridgeError as err:
+            raise StepFailure(str(err)) from None
+
     async def _call(self, args: dict, following: str | None) -> None:
         action = args.get("action", self.case.suite.action)
         entity_id = self.entity(args)
@@ -1096,6 +1157,7 @@ async def run(
     tolerance: dict[str, float] = TOLERANCE_S,
     settle: dict[str, float] = SETTLE_S,
     out: Callable[[str], None] = print,
+    bridge: HueBridge | None = None,
 ) -> RunResult:
     """Run every case and print the table; ADMIN_INTEGRATIONS run on `admin`. `ask=None` is --unattended.
 
@@ -1120,7 +1182,8 @@ async def run(
         for suite, adapter, *_ in planned
     }
     rig_run = _Run(
-        registry, tolerance, settle, inventory.power(), ask, out, options, EntryOptions(admin) if admin else None
+        registry, tolerance, settle, inventory.power(), ask, out, options, EntryOptions(admin) if admin else None,
+        bridge=bridge,
     )
     try:
         waiting = [
@@ -1162,6 +1225,7 @@ class _Run:
     entry_options: EntryOptions | None = None
     results: dict[tuple[int, str], CaseResult] = field(default_factory=dict)
     busy: dict[str, float] = field(default_factory=dict)  # _CaseRun.busy
+    bridge: HueBridge | None = None
 
     def case_run(self, case: Case, client: HAClient, ask: Callable[[str], str] | None, position: str = "") -> _CaseRun:
         integration = case.suite.integration
@@ -1176,6 +1240,7 @@ class _Run:
             position,
             self.busy,
             self.settle.get(integration, 0.0),
+            self.bridge,
         )
 
     async def run_case(

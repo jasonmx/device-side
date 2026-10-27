@@ -108,6 +108,8 @@ def load_env(path: Path = ENV_FILE) -> dict[str, str]:
         "RIG_STATUS_CMD",
         "RIG_RESTART_CMD",
         "RIG_PAUSE",
+        "HUE_BRIDGE_HOST",
+        "HUE_APP_KEY",
     ):
         if key in os.environ:
             env[key] = os.environ[key]
