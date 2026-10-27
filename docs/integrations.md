@@ -69,8 +69,8 @@ duration. Light fields are not accepted.
 Send a regular `turn_on` or `turn_off`: either cancels the flip-back timer. A `turn_on_for` or
 `turn_off_for` during a timer replaces it, so the countdown restarts at the new duration.
 
-Tested on Gen3 and Gen4 relays (firmware 2.0.1) by direct RPC. A wall switch wired to the device's
-input was not tested, and what it does may depend on the input mode.
+Tested on Gen3 and Gen4 relays (firmware 2.0.1) and a Multicolor Bulb Gen3 (firmware 2.0.3) by rig run. A wall
+switch wired to the device's input was not tested, and what it does may depend on the input mode.
 
 ### Sharp edges
 

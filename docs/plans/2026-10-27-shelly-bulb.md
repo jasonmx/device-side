@@ -3,7 +3,7 @@
 ## Context
 
 Both Shelly adapters cover only the `Switch` capability with no light fields. The plan's slice 3 left `Light`/`CCT`/`RGB*`
-out of scope until hardware covered one. The rig now has a Shelly Duo Bulb Gen3, so this
+out of scope until hardware covered one. The rig now has a Shelly Multicolor Bulb Gen3, so this
 work brings its component and light fields into scope for `turn_on_for` and `turn_off_for`, proved by rig records.
 It's the Shelly part of slice 9d.
 
