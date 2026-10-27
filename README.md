@@ -18,7 +18,7 @@ If you're OK with that, let's dive in.
 
 |                        |                   Shelly                   | Zigbee2MQTT | ZHA | Matter | Hue |
 |:---------------------- |:------------------------------------------:|:-----------:|:---:|:------:|:---:|
-| On With Timed Off      | ✅ switches, color bulbs<br>🙋 other lights |          |   |      | ❌ |
+| On With Timed Off      | ✅ switches, color bulbs<br>🙋 other lights |          |   | ✅ switches<br>🙋 lights | ❌ |
 | Off With Timed On      | ✅ switches, color bulbs<br>🙋 other lights |     ❌      | ❌  |   ❌   | ❌ |
 | Smooth Dimming         |                                            |           |   |      | ✅¹ |
 | Set Without Turning On |                                            |           |   |      | ✅¹ |

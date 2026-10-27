@@ -321,9 +321,10 @@ An entity belongs to this integration when its entity registry entry comes from 
 node ID and endpoint ID are parsed from the entity's unique ID, which the Matter integration
 writes as `{fabric_hex16}-{node_hex16}-{postfix}-{endpoint_id}-{key}-{cluster_id}-{attr_id}`.
 
-Lights and plugs (`light` and `switch` entities) are in scope. Device Side requires the OnOff
-cluster's Lighting (LT) feature, bit 0 of its FeatureMap, on the endpoint. Lights carry it, and so
-do some plugs. An entity whose endpoint lacks it returns `unsupported` with detail `no_lt_feature`.
+Plugs (`switch` entities) are in scope. Matter lights take the same command but are refused with
+`domain_not_tested` until a tester reports one. Device Side requires the OnOff cluster's Lighting
+(LT) feature, bit 0 of its FeatureMap, on the endpoint. Lights carry it, and so do some plugs. An
+entity whose endpoint lacks it returns `unsupported` with detail `no_lt_feature`.
 
 ### `turn_on_for`
 
@@ -332,16 +333,13 @@ device via python-matter-server. The device turns on and turns itself off after 
 without needing Home Assistant to remain running.
 
 `onTime` is the duration in 1/10-second units (`round(duration_s * 10)`). `onOffControl=0` means
-the command is accepted whether the light is currently on or off. `offWaitTime=0` places no
+the command is accepted whether the device is currently on or off. `offWaitTime=0` places no
 restriction on retriggering.
 
 After the command, Device Side reads back the `OnOff.OnTime` attribute (python-matter-server
-answers `{path: value}`). If it is non-zero (the countdown is running), the result is `confirmed`. If it is 0 or the read-back fails, the result
-is `sent` with detail `timer_not_reported` or `readback_failed`.
-
-Light fields (`brightness`, `color_temp_kelvin`, etc.) are out of scope for now. When a tester
-reports them, the adapter will send a `light.turn_on` first to set color and brightness, then
-follow with `OnWithTimedOff`.
+answers `{path: value}`). If it is non-zero (the countdown is running), the result is `confirmed`.
+If it is 0 or the read-back fails, the result is `sent` with detail `timer_not_reported` or
+`readback_failed`.
 
 ### Cancelling
 

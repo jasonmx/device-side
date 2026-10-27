@@ -26,17 +26,16 @@ _TIMER_LIMITS = DurationLimits(min_s=0.1, max_s=6553.4)
 
 
 class MatterTurnOnFor(Adapter[TurnOnForRequest]):
-    """Send OnWithTimedOff on the OnOff cluster; optional light.turn_on first when fields are present."""
+    """Send OnWithTimedOff on the OnOff cluster."""
 
     action: ClassVar[str] = "turn_on_for"
     integration: ClassVar[str] = "matter"
     scope: ClassVar[AdapterScope] = AdapterScope(
-        experimental=True,
-        domains=frozenset({"light", "switch"}),
+        # Plugs only: Matter lights take the same command but wait for a tester's report.
+        domains=frozenset({"switch"}),
         duration=_TIMER_LIMITS,
-        # Light fields stay out of scope until a tester with a Matter bulb reports them.
         fields=frozenset(),
-        # capabilities=None covers every endpoint that passes the LT feature check, plug or light.
+        # capabilities=None covers every plug endpoint that passes the LT feature check.
         confirmable=True,
     )
 
@@ -79,17 +78,6 @@ class MatterTurnOnFor(Adapter[TurnOnForRequest]):
             # called without a prior supports() pass this prevents a silent AttributeError.
             if node_id is None or ep_id is None or client is None:
                 return self.result(target, Status.UNSUPPORTED, detail="not_addressable")
-
-            # When light fields are present, set color and brightness first so they apply before
-            # the timed-on starts.  The scope currently has fields=frozenset(), so this path is
-            # not reached until a tester report expands the scope.
-            if target.domain == "light" and request.fields_present():
-                await hass.services.async_call(
-                    "light",
-                    "turn_on",
-                    {"entity_id": target.entity_id, **request.light.as_turn_on_data()},
-                    blocking=True,
-                )
 
             on_time = round(request.duration_s * 10)
             command = make_on_with_timed_off(on_off_control=0, on_time=on_time, off_wait_time=0)
