@@ -337,3 +337,19 @@ async def test_non_admin_caller_is_refused_for_every_member(
     assert raised.value.translation_placeholders["summary"] == "light.a: admin_required, light.b: admin_required"
     assert not calls
     readback.assert_not_awaited()
+
+
+async def test_a_failed_groupcast_rejects_only_that_groups_members(
+    hass, setup_production, two_light_group, commands, readback
+):
+    add_zha_entity(hass, two_light_group, "light.bulb")
+
+    async def handler(service: ServiceCall) -> None:
+        raise ValueError("broadcast table full")
+
+    hass.services.async_register("zha", "issue_zigbee_group_command", handler)
+
+    response = await call(hass, "turn_on_for", {"entity_id": ["light.bulb", "light.zha_group"], "duration": 5})
+
+    rejected = {"status": "rejected", "integration": "zha", "detail": "error"}
+    assert response == {"light.bulb": CONFIRMED, "light.a": rejected, "light.b": rejected}

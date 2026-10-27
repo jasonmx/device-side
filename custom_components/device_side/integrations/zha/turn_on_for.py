@@ -126,24 +126,30 @@ class ZHATurnOnFor(Adapter[TurnOnForRequest]):
         members: list[Target],
         on_time: int,
     ) -> list[EntityResult]:
-        if request.light.present():
-            await self._turn_on(hass, request, group_entity)
+        # Under the same limits as a unicast, held for the commands only: the read-backs take them again.
+        integration_limit, adapter_limit = self.limits(hass)
         try:
-            await hass.services.async_call(
-                "zha",
-                "issue_zigbee_group_command",
-                {
-                    "group": gid,
-                    "cluster_id": zcl.ON_OFF_CLUSTER,
-                    "command": _ON_WITH_TIMED_OFF,
-                    # Positional only: on/off control, on time, off wait time.
-                    "args": [0, on_time, 0],
-                },
-                blocking=True,
-                context=request.context,
-            )
+            async with integration_limit, adapter_limit:
+                if request.light.present():
+                    await self._turn_on(hass, request, group_entity)
+                await hass.services.async_call(
+                    "zha",
+                    "issue_zigbee_group_command",
+                    {
+                        "group": gid,
+                        "cluster_id": zcl.ON_OFF_CLUSTER,
+                        "command": _ON_WITH_TIMED_OFF,
+                        # Positional only: on/off control, on time, off wait time.
+                        "args": [0, on_time, 0],
+                    },
+                    blocking=True,
+                    context=request.context,
+                )
         except Unauthorized:
             return [self.result(target, Status.REJECTED, detail="admin_required") for target in members]
+        except Exception as err:  # noqa: BLE001 - as in gather(): one group's failure must not abort the room
+            _LOGGER.warning("%s on %s failed for %s: %s", self.action, self.integration, group_entity, err)
+            return [self.result(target, Status.REJECTED, detail="error") for target in members]
 
         async def read_back(target: Target) -> EntityResult:
             # supports() refused any member without an address, so address() can't be None here.

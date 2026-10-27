@@ -40,6 +40,15 @@ class Adapter[RequestT: Request](ABC):
         """Build every result here: it keys on target.reported_id, which the dispatcher matches results by."""
         return EntityResult(target.reported_id, status, integration=self.integration, **kwargs)
 
+    def limits(self, hass: HomeAssistant) -> tuple[asyncio.Semaphore, asyncio.Semaphore]:
+        """The integration's and this adapter's concurrency limits, which every command to a device runs under."""
+        runtime = get_runtime(hass)
+        integration_info = runtime.registry.integrations[self.integration]
+        return (
+            runtime.semaphore(f"integration:{self.integration}", integration_info.max_concurrency),
+            runtime.semaphore(f"adapter:{self.action}:{self.integration}", self.scope.max_concurrency),
+        )
+
     async def gather(
         self, hass: HomeAssistant, targets: list[Target], send: Callable[[Target], Awaitable[EntityResult]]
     ) -> list[EntityResult]:
@@ -47,10 +56,7 @@ class Adapter[RequestT: Request](ABC):
 
         An exception from one target becomes that target's REJECTED result and does not affect the others.
         """
-        runtime = get_runtime(hass)
-        integration_info = runtime.registry.integrations[self.integration]
-        integration_limit = runtime.semaphore(f"integration:{self.integration}", integration_info.max_concurrency)
-        adapter_limit = runtime.semaphore(f"adapter:{self.action}:{self.integration}", self.scope.max_concurrency)
+        integration_limit, adapter_limit = self.limits(hass)
 
         async def _one(target: Target) -> EntityResult:
             async with integration_limit, adapter_limit:
