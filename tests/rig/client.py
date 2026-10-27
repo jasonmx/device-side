@@ -4,7 +4,6 @@ import asyncio
 import contextlib
 import itertools
 import json
-import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
@@ -133,21 +132,28 @@ class HAClient:
     async def z2m_device_options(self, ieee: str) -> dict:
         """A Zigbee2MQTT device's options, from Z2M's retained bridge/info."""
         async with self._mqtt_messages("zigbee2mqtt/bridge/info") as messages:
-            info = json.loads(await asyncio.wait_for(messages.get(), timeout=5))
+            try:
+                info = json.loads(await asyncio.wait_for(messages.get(), timeout=5))
+            except TimeoutError:
+                raise TimeoutError("no retained zigbee2mqtt/bridge/info within 5 s") from None
         return info["config"]["devices"].get(ieee, {})
 
     async def set_z2m_device_options(self, ieee: str, options: dict) -> None:
-        """Set Zigbee2MQTT device options and wait for Z2M's ok; raises RuntimeError on anything else."""
-        transaction = uuid.uuid4().hex
-        async with self._mqtt_messages("zigbee2mqtt/bridge/response/device/options") as replies:
-            payload = {"id": ieee, "options": options, "transaction": transaction}
-            await self.call_service(
-                "mqtt",
-                "publish",
-                {"topic": "zigbee2mqtt/bridge/request/device/options", "payload": json.dumps(payload)},
-            )
-            async with asyncio.timeout(10):
-                while (reply := json.loads(await replies.get())).get("transaction") != transaction:
-                    pass
-        if reply.get("status") != "ok":
-            raise RuntimeError(f"Zigbee2MQTT refused {options} for {ieee}: {reply.get('error')}")
+        """Set Zigbee2MQTT device options, then wait until Z2M's bridge/info shows them; raises TimeoutError if not.
+
+        It reads bridge/info rather than waiting for Z2M's reply: HA answers mqtt/subscribe before the broker has the
+        subscription, so a reply can arrive first and be missed, while a fresh subscription always gets the retained
+        bridge/info.
+        """
+        payload = {"id": ieee, "options": options}
+        await self.call_service(
+            "mqtt", "publish", {"topic": "zigbee2mqtt/bridge/request/device/options", "payload": json.dumps(payload)}
+        )
+        deadline = asyncio.get_running_loop().time() + 10
+        while True:
+            current = await self.z2m_device_options(ieee)
+            if all(current.get(name) == value for name, value in options.items()):
+                return
+            if asyncio.get_running_loop().time() > deadline:
+                raise TimeoutError(f"Zigbee2MQTT still shows {current} for {ieee}, not {options}")
+            await asyncio.sleep(0.5)
