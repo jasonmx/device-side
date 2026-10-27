@@ -18,8 +18,8 @@ class ShellyTurnOffFor(Adapter[TimedRequest]):
         domains=frozenset({"light", "switch"}),
         duration=TIMER_LIMITS,
         confirmable=True,
-        # A relay shown as a light sends the same Switch.Set; Light, CCT and RGB* wait for a tester's report.
-        capabilities=frozenset({"Switch"}),
+        # A relay shown as a light sends the same Switch.Set; Light, CCT, RGB and RGBW wait for a tester's report.
+        capabilities=frozenset({"Switch", "RGBCCT"}),
     )
 
     def supports(self, hass: HomeAssistant, request: TimedRequest, target: Target) -> str | None:

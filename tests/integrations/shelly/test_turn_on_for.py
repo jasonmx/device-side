@@ -17,9 +17,8 @@ CONFIRMED = {"status": "confirmed", "integration": "shelly"}
 
 @pytest.fixture
 def every_light_in_scope(monkeypatch):
-    """Light fields and capabilities as testers' reports would add them; until then they are refused first."""
-    fields = frozenset({"brightness", "transition", "color_temp_kelvin", "rgb_color"})
-    scope = dataclasses.replace(ShellyTurnOnFor.scope, fields=fields, capabilities=None)
+    """Light, CCT, RGB and RGBW as testers' reports would add them; until then they are refused first."""
+    scope = dataclasses.replace(ShellyTurnOnFor.scope, capabilities=None)
     monkeypatch.setattr(ShellyTurnOnFor, "scope", scope)
 
 
@@ -59,15 +58,14 @@ async def test_light_fields_ride_in_the_same_set(hass, setup_production, every_l
         ({"rgb_color": [255, 0, 10]}, {"rgb": [255, 0, 10], "mode": "rgb"}),
     ],
 )
-async def test_rgbcct_sets_mode_and_clamps_kelvin_to_the_entity_range(
-    hass, setup_production, every_light_in_scope, data, expected
-):
+async def test_rgbcct_sets_mode_and_clamps_kelvin_to_the_entity_range(hass, setup_production, data, expected):
     entry, call_rpc = shelly_device(hass)
     kelvin_range = {"min_color_temp_kelvin": 2700, "max_color_temp_kelvin": 6500}
-    add_shelly_entity(hass, entry, "light.strip", "rgbcct:0", attributes=kelvin_range)
+    add_shelly_entity(hass, entry, "light.bulb", "rgbcct:0", attributes=kelvin_range)
 
-    await call(hass, "turn_on_for", {"entity_id": "light.strip", "duration": 5, **data})
+    response = await call(hass, "turn_on_for", {"entity_id": "light.bulb", "duration": 5, **data})
 
+    assert response == {"light.bulb": CONFIRMED}
     assert call_rpc.await_args_list[0] == rpc_call("RGBCCT.Set", {"id": 0, "on": True, "toggle_after": 5.0, **expected})
 
 
@@ -118,12 +116,12 @@ async def test_fields_outside_the_component_or_scope_are_refused(
     assert [args.args[0] for args in call_rpc.await_args_list] == ["Switch.Set", "Switch.GetStatus"]
 
 
-async def test_relay_lights_run_but_fields_and_capabilities_out_of_scope_are_refused(hass, setup_production):
+async def test_relay_lights_run_but_fields_they_lack_and_capabilities_out_of_scope_are_refused(hass, setup_production):
     entry, call_rpc = shelly_device(hass)
     add_shelly_entity(hass, entry, "light.dimmer", "light:0")
     add_shelly_entity(hass, entry, "light.relay", "switch:0")
 
-    with pytest.raises(HomeAssistantError, match="light.relay: fields_not_tested"):
+    with pytest.raises(HomeAssistantError, match="light.relay: fields_not_supported"):
         await call(hass, "turn_on_for", {"entity_id": "light.relay", "duration": 5, "brightness": 10})
     response = await call(hass, "turn_on_for", {"entity_id": ["light.dimmer", "light.relay"], "duration": 5})
 

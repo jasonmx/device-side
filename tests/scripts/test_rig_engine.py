@@ -10,6 +10,7 @@ import pytest
 
 from custom_components.device_side.core.registry import AdapterRegistry
 from tests.rig import engine
+from tests.rig.bridge import BridgeError
 from tests.rig.client import HAError
 from tests.rig.engine import (
     CaseResult,
@@ -938,7 +939,7 @@ async def test_a_full_pass_writes_a_record_and_a_failure_writes_none(tmp_path):
     assert record.startswith("# Shelly · turn_on_for\n")
     assert "| Fingerprint | `" in record and "(`integrations/shelly/turn_on_for.py`) |" in record
     assert "| Device | Mini (`S3`), firmware `2.0` |" in record
-    assert "| Capabilities | `Switch` |" in record
+    assert "| Capabilities | `RGBCCT`, `Switch` |" in record  # the scope's, whatever the cases reached
     assert "| Fields | none |" in record
     assert "| `on_then_off[switch_plug]` | `switch` (switch_plug) | pass |" in record
     assert "switch.plug" not in record
@@ -1362,3 +1363,173 @@ async def test_a_record_with_options_on_is_named_and_marked_for_them(tmp_path):
         SuiteResult(suite(tmp_path, option_file(), "hue"), adapter, [case], True), "Hue", "", [], "", ""
     )
     assert "Options" not in plain
+
+
+# --- bridge ---------------------------------------------------------------------------------------------------
+
+BRIDGE_STEPS = """
+action: set_scene
+rig_seconds: 5
+tests:
+  - name: other_actor
+    roles: [light_dimmable]
+    setup:
+      - bridge: {put: {on: {on: true}}}
+    steps:
+      - bridge: {target: group, put: {dimming: {brightness: 40}}}
+      - bridge: {target: scene, recall: true}
+"""
+
+UNIQUE_IDS = {"light.bulb": "light-id", "light.room": "grouped-id", "scene.dusk": "scene-id"}
+
+
+class FakeBridge:
+    def __init__(self, error: str | None = None):
+        self.error = error
+        self.puts: list[tuple[str, str, dict]] = []
+
+    async def put(self, resource_type: str, resource_id: str, body: dict) -> None:
+        self.puts.append((resource_type, resource_id, body))
+        if self.error:
+            raise BridgeError(self.error)
+
+
+class BridgeHA(FakeHA):
+    """FakeHA whose entity registry holds each entity's platform and unique_id."""
+
+    def __init__(self, platform: str = "hue", unique_id: str | None = None):
+        super().__init__({entity_id: {} for entity_id in UNIQUE_IDS}, lambda ha, action, data: {})
+        self.states["light.room"]["attributes"]["entity_id"] = ["light.bulb"]
+        self.platform, self.unique_id = platform, unique_id
+
+    async def command(self, payload: dict):
+        if payload["type"] != "config/entity_registry/get":
+            return await super().command(payload)
+        entity_id = payload["entity_id"]
+        return {"platform": self.platform, "unique_id": self.unique_id or UNIQUE_IDS[entity_id]}
+
+
+def bridge_inventory() -> Inventory:
+    return inventory("hue", light_dimmable="light.bulb", group="light.room", scene="scene.dusk")
+
+
+async def run_bridge(tmp_path, bridge, ha=None, text=BRIDGE_STEPS, integration="hue") -> dict:
+    ha = ha or BridgeHA()
+    steps = suite(tmp_path, text.replace("set_scene", "turn_on_for") if integration == "shelly" else text, integration)
+    result = await run_one(ha, steps, bridge_inventory() if integration == "hue" else inventory(
+        integration, light_dimmable="light.bulb", group="light.room", scene="scene.dusk"
+    ), bridge=bridge)
+    return outcomes(result)
+
+
+async def test_a_bridge_step_writes_each_resource_type_to_its_unique_id(tmp_path):
+    bridge = FakeBridge()
+    assert await run_bridge(tmp_path, bridge) == {"other_actor[light_dimmable]": (Outcome.PASS, "")}
+    assert bridge.puts == [
+        ("light", "light-id", {"on": {"on": True}}),
+        ("grouped_light", "grouped-id", {"dimming": {"brightness": 40}}),
+        ("scene", "scene-id", {"recall": {"action": "active"}}),
+    ]
+
+
+async def test_a_failing_bridge_write_fails_the_case(tmp_path):
+    results = await run_bridge(tmp_path, FakeBridge("PUT light/light-id got 403: unauthorized user"))
+    outcome, detail = results["other_actor[light_dimmable]"]
+    assert outcome is Outcome.FAIL
+    assert "setup step 1 (bridge): PUT light/light-id got 403: unauthorized user" in detail
+
+
+async def test_a_bridge_step_without_a_bridge_says_what_to_set(tmp_path):
+    outcome, detail = (await run_bridge(tmp_path, None))["other_actor[light_dimmable]"]
+    assert outcome is Outcome.FAIL
+    assert "HUE_BRIDGE_HOST and HUE_APP_KEY" in detail
+
+
+async def test_a_bridge_step_outside_a_hue_suite_fails(tmp_path):
+    bridge = FakeBridge()
+    outcome, detail = (await run_bridge(tmp_path, bridge, integration="shelly"))["other_actor[light_dimmable]"]
+    assert outcome is Outcome.FAIL
+    assert "bridge steps need a Hue suite, not shelly" in detail
+    assert bridge.puts == []
+
+
+async def test_a_bridge_step_on_another_platforms_entity_fails(tmp_path):
+    bridge = FakeBridge()
+    outcome, detail = (await run_bridge(tmp_path, bridge, BridgeHA(platform="mqtt")))["other_actor[light_dimmable]"]
+    assert outcome is Outcome.FAIL
+    assert "light.bulb is not a Hue entity" in detail
+    assert bridge.puts == []
+
+
+async def test_a_bridge_step_on_an_entity_without_a_unique_id_fails(tmp_path):
+    class NoId(BridgeHA):
+        async def command(self, payload: dict):
+            return {"platform": "hue", "unique_id": None}
+
+    outcome, detail = (await run_bridge(tmp_path, FakeBridge(), NoId()))["other_actor[light_dimmable]"]
+    assert outcome is Outcome.FAIL
+    assert "light.bulb has no unique_id" in detail
+
+
+@pytest.mark.parametrize(
+    ("step", "message"),
+    [
+        ("{target: scene, put: {on: {on: true}}}", "put needs a light or group target, not scene.dusk"),
+        ("{recall: true}", "recall needs a scene target, not light.bulb"),
+    ],
+)
+async def test_a_bridge_step_on_the_wrong_kind_of_target_fails(tmp_path, step, message):
+    text = BRIDGE_STEPS.replace("{put: {on: {on: true}}}", step, 1)
+    bridge = FakeBridge()
+    outcome, detail = (await run_bridge(tmp_path, bridge, text=text))["other_actor[light_dimmable]"]
+    assert outcome is Outcome.FAIL
+    assert message in detail
+    assert bridge.puts == []
+
+
+async def test_an_observed_case_runs_a_bridge_step_as_it_is(tmp_path):
+    text = """
+action: set_scene
+rig_seconds: 5
+tests:
+  - name: other_actor
+    roles: [light_dimmable]
+    setup:
+      - set: {state: off}
+    steps:
+      - bridge: {put: {on: {on: true}}}
+    observe: {see: s, watch: w, ask: a}
+"""
+    bridge = FakeBridge()
+    ha = BridgeHA()
+    _, ask = answers("", "y")
+    steps = suite(tmp_path, text, "hue")
+    result = await run_one(ha, steps, bridge_inventory(), bridge=bridge, ask=ask)
+    assert outcomes(result)["other_actor[light_dimmable] observed"][0] is Outcome.PASS
+    assert bridge.puts == [("light", "light-id", {"on": {"on": True}})]
+
+
+def test_a_bridge_step_makes_its_target_role_needed(tmp_path):
+    test = suite(tmp_path, BRIDGE_STEPS).file.tests[0]
+    assert test.roles_needed("light_dimmable") == ["light_dimmable", "group", "scene"]
+    assert suite(tmp_path, BRIDGE_STEPS).file.uses_bridge
+    assert not suite(tmp_path, ON_THEN_OFF).file.uses_bridge
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        ("null", "give put or recall"),
+        ("{}", "give put or recall"),
+        ("{put: {on: {on: true}}, recall: true}", "give put or recall"),
+        ("{put: {}}", "put takes the body"),
+        ("{put: on}", "put takes the body"),
+        ("{recall: false}", "recall takes true"),
+        ("{recall: true, state: on}", "unknown key"),
+        ("{target: nowhere, recall: true}", "not an inventory role"),
+    ],
+)
+def test_a_bad_bridge_step_does_not_parse(tmp_path, args, message):
+    text = BRIDGE_STEPS.replace("bridge: {put: {on: {on: true}}}", f"bridge: {args}", 1)
+    with pytest.raises(ValueError, match=message):
+        suite(tmp_path, text)

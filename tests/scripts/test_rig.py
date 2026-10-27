@@ -9,7 +9,7 @@ import pytest
 
 from custom_components.device_side.core.registry import AdapterRegistry
 from scripts.fingerprint import adapter_path, fingerprint
-from tests.rig.engine import load_step_files
+from tests.rig.engine import load_step_file, load_step_files
 from tests.rig.inventory import Inventory, load_env, main_checkout
 
 REPO = Path(__file__).parents[2]
@@ -140,7 +140,8 @@ def test_select_plan_lines_and_estimate(inventory, tmp_path):
     write(
         bench / "shelly",
         "turn_on_for.md",
-        f"| Result | pass |\n| Fingerprint | `{current}` |\n| Capabilities | `Switch` |\n| Fields | none |\n",
+        f"| Result | pass |\n| Fingerprint | `{current}` |\n| Capabilities | `RGBCCT`, `Switch` |\n"
+        "| Fields | `brightness`, `color_temp_kelvin`, `rgb_color`, `transition` |\n",
     )
     assert rig.plan_lines(shelly_on + suites[1:2], inventory, registry, bench_dir=bench) == [
         "shelly / turn_on_for -> switch.plug (beta)",
@@ -148,8 +149,13 @@ def test_select_plan_lines_and_estimate(inventory, tmp_path):
         "    on_then_off[light_onoff]: no light_onoff entity in inventory",
         "    on_then_off[light_wrapped]: no light_wrapped entity in inventory",
         "    refuses_brightness_on_a_wrapper[light_wrapped]: no light_wrapped entity in inventory",
-        "    refuses_brightness_out_of_scope[light_onoff]: no light_onoff entity in inventory",
+        "    refuses_brightness_on_a_relay_light[light_onoff]: no light_onoff entity in inventory",
         "    bulb_on_then_off[light_dimmable]: no light_dimmable entity in inventory",
+        "    bulb_brightness_then_off[light_dimmable]: no light_dimmable entity in inventory",
+        "    bulb_color_temp_then_off[light_ct]: no light_ct entity in inventory",
+        "    bulb_transition_then_off[light_dimmable]: no light_dimmable entity in inventory",
+        "    rgbcct_bulb_rgb_then_off[light_color]: no light_color entity in inventory",
+        "    rgbcct_bulb_rgb_then_off[light_color] observed: no light_color entity in inventory",
         "hue / turn_off_for (no adapter, will skip)",
     ]
     # The tier is check_tiers': with no records, nothing is proven.
@@ -159,6 +165,7 @@ def test_select_plan_lines_and_estimate(inventory, tmp_path):
         "    on_then_off[light_onoff]: no light_onoff entity in inventory",
         "    on_then_off[light_wrapped]: no light_wrapped entity in inventory",
         "    bulb_on_then_off[light_dimmable]: no light_dimmable entity in inventory",
+        "    bulb_transition_then_off[light_dimmable]: no light_dimmable entity in inventory",
     ]
 
     shelly_seconds = sum(step_file.rig_seconds for step_file in step_files)
@@ -387,6 +394,24 @@ async def test_pause_stops_on_an_unknown_entity():
 def test_pause_list_refuses_other_domains():
     with pytest.raises(SystemExit, match="automations and switches only, got light.hall"):
         rig.pause_list({"RIG_PAUSE": "switch.al_office, light.hall"})
+
+
+def test_check_tokens_stops_a_hue_bridge_step_without_the_bridge_settings(tmp_path):
+    registry = AdapterRegistry.discover()
+    path = tmp_path / "steps.yaml"
+    path.write_text(
+        "action: set_scene\nrig_seconds: 5\ntests:\n  - name: t\n    roles: [light_onoff]\n"
+        "    steps:\n      - bridge: {put: {on: {on: true}}}\n"
+    )
+    step_file = load_step_file(path)
+    env = {"HA_URL": "http://ha:8123", "HA_TOKEN": "tok", "HA_ADMIN_TOKEN": "admin"}
+    with pytest.raises(SystemExit, match="HUE_BRIDGE_HOST and HUE_APP_KEY"):
+        rig.check_tokens(env, [rig.Suite(step_file, "hue")], registry)
+    with pytest.raises(SystemExit, match="HUE_BRIDGE_HOST and HUE_APP_KEY"):
+        rig.check_tokens({**env, "HUE_BRIDGE_HOST": "bridge"}, [rig.Suite(step_file, "hue")], registry)
+    ready = {**env, "HUE_BRIDGE_HOST": "bridge", "HUE_APP_KEY": "key"}
+    rig.check_tokens(ready, [rig.Suite(step_file, "hue")], registry)
+    rig.check_tokens(env, [rig.Suite(step_file, "shelly")], registry)
 
 
 def test_check_tokens_stops_a_run_of_an_adapter_with_options_without_an_admin_token():
