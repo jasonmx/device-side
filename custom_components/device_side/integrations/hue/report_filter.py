@@ -78,6 +78,9 @@ def reported_values(event: dict) -> dict[str, float | bool]:
 def _value(cache: TransitionCache, light_id: str, key: str, value: float | bool) -> Report:
     if cache.echoed(light_id, key, value):
         return Report.ECHO
+    # After a stop the bulb may report its halt, or a value it held before the move, so anything it reports is ours.
+    if cache.halted(light_id, BRIGHTNESS):
+        return Report.PATH
     if key == BRIGHTNESS:
         return Report.PATH if cache.on_path(light_id, BRIGHTNESS, value) else Report.REAL
     # on: true while the path is lit (the 17 % report mid soft off), on: false once it has reached 0.

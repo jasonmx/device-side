@@ -23,8 +23,6 @@ BRIGHTNESS = "brightness"
 API_SETTLE_SECONDS = 15
 # How far a report may be from an armed end value or the path travelled and still be ours (80 % reads 79.84).
 REPORT_TOLERANCE = 0.5
-# How far the bulb's late report of a halt may be from the predicted one and still be ours (the rig saw 0.9).
-HALT_TOLERANCE = 1.5
 # The dimmest step a Hue light makes (1/254), in percent.
 MIN_BRIGHTNESS_STEP = 0.4
 
@@ -99,9 +97,11 @@ class TransitionCache:
         """Whether a report is a point the light passes through, so the bulb's own report rather than a change."""
         if (path := self.path(resource_id, attribute)) is None:
             return False
-        stopped = self._live(resource_id, attribute).duration == 0
-        tolerance = HALT_TOLERANCE if stopped else REPORT_TOLERANCE
-        return path[0] - tolerance <= value <= path[1] + tolerance
+        return path[0] - REPORT_TOLERANCE <= value <= path[1] + REPORT_TOLERANCE
+
+    def halted(self, resource_id: str, attribute: str) -> bool:
+        """Whether a stop on this resource is still inside its guard window."""
+        return (transition := self._live(resource_id, attribute)) is not None and transition.duration == 0
 
     def arm(self, resource_id: str, values: dict[str, float | bool], duration: float) -> None:
         """Expect the bridge to report these values once each; arm before the write, which it may echo first."""

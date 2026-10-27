@@ -443,10 +443,11 @@ continues from where the light halted, and `get_attributes` returns the predicte
 A change made elsewhere ends the prediction, so the next move starts from the brightness the bridge
 reports. Device Side tells the bridge's reports of its own fades from any other report: the end value
 at the start, the bulb's reports anywhere between a fade's start and end while it runs (a bulb's fade
-isn't a straight line), and a halt within 1.5 % of the predicted one. A light or scene call from Home
-Assistant ends the prediction of every Hue light it targets at once, whatever its value, as do
-`set_attributes` and `set_scene`. Not caught: a change from outside Home Assistant (the Hue app, a
-dimmer switch) to a value between a running fade's start and end, or near where it halted, and
+isn't a straight line), and anything the bulb reports for 15 seconds after a stop (a late report may
+be its halt, or a value from before the move). A light or scene call from Home Assistant ends the
+prediction of every Hue light it targets at once, whatever its value, as do `set_attributes` and
+`set_scene`. Not caught: a change from outside Home Assistant (the Hue app, a dimmer switch) to a
+value between a running fade's start and end, or within 15 seconds of a stop, and
 `hue.activate_scene`.
 
 With **Show predicted brightness during Hue fades** on (the default), Home Assistant shows Device
@@ -480,7 +481,8 @@ it arrives, so Home Assistant shows what is listed here.
   after the stop; its varying timing suggests it comes from the bulb, not a bridge timer. After 4 of
   16 stops followed by 30 s of waiting, none came, and Home Assistant kept showing the end value.
   When a report did come, it matched a straight-line interpolation within 0.3 % for brightness and
-  1 mirek for color temperature.
+  1 mirek for color temperature. On 2026-10-27 a bulb in a zone instead reported, 4 s after a stop,
+  the brightness it held before the write that preceded the move (56 %, against a 40 % halt).
 - **A report can arrive in the middle of a transition**, and may be the last one sent. The one
   measured was the transition's own value about 1 s stale, so on the path the light had travelled.
   Every stop report that came was within 0.4 % of the straight-line value.

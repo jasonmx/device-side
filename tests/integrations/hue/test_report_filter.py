@@ -226,11 +226,13 @@ async def test_a_failing_filter_never_stops_aiohue_applying_the_event(hass, brid
     assert "Hue report filter failed" in caplog.text
 
 
-@pytest.mark.parametrize(("brightness", "report"), [(39.5, Report.PATH), (41.9, Report.PATH), (38.8, Report.REAL)])
-async def test_a_late_halt_report_is_ours_within_the_halt_tolerance(hass, bridge, cache, clock, brightness, report):
-    # The rig saw a halt reported 0.9 from the prediction.
+@pytest.mark.parametrize("values", [{"brightness": 41.3}, {"brightness": 56.13}, {"on": False}])
+async def test_any_report_after_a_stop_is_ours_until_its_window_ends(hass, bridge, cache, clock, values):
+    # The rig saw a halt reported 0.9 from the prediction, and a stale report from before the move 16 above it.
     await setup_room(hass, bridge)
     cache.stopped("one", BRIGHTNESS, 40.4)
     clock.now += 5.0
 
-    assert classify(cache, bridge.api, light_event("one", brightness=brightness)) is report
+    assert classify(cache, bridge.api, light_event("one", **values)) is Report.PATH
+    clock.now += API_SETTLE_SECONDS
+    assert classify(cache, bridge.api, light_event("one", **values)) is None
