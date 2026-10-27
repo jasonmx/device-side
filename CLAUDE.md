@@ -46,7 +46,8 @@ a sibling's proof. Adding one after a tester report is a scope edit plus a recor
 - Base: whichever is newer, `main` or the latest `release/vX.Y.Z` branch.
 - Setup: `uv sync`. Test dependencies live in the `dev` group of `pyproject.toml`; never `uv pip install` into `.venv`, as the next sync removes it.
 - Before each push: `.venv/bin/pytest` and `pre-commit run --all-files` (ruff and the household check).
-- Before opening the PR: `/audit-code` on the diff.
+- Before opening the PR: `/audit-code` on the diff, then fix what you judge worth fixing and carry on to the PR;
+  stop for Jason only on a big judgment call.
 
 ## Layout
 
