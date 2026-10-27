@@ -441,12 +441,23 @@ duration plus 15 seconds and predicts the brightness of each light meanwhile, so
 continues from where the light halted, and `get_attributes` returns the predicted brightness.
 
 A change made elsewhere ends the prediction, so the next move starts from the brightness the bridge
-reports. Device Side tells the bridge's reports of its own fades (the end value at the start, and the
-bulb's late reports of points it has passed, within 0.5 %) from any other report. A light or scene
-call from Home Assistant ends the prediction of every Hue light it targets at once, whatever its
-value, as do `set_attributes` and `set_scene`. Not caught: a change from outside Home Assistant
-(the Hue app, a dimmer switch) to a value on the path the light has just travelled, and
+reports. Device Side tells the bridge's reports of its own fades from any other report: the end value
+at the start, the bulb's reports anywhere between a fade's start and end while it runs (a bulb's fade
+isn't a straight line), and anything the bulb reports for 15 seconds after a stop (a late report may
+be its halt, or a value from before the move). A light or scene call from Home Assistant ends the
+prediction of every Hue light it targets at once, whatever its value, as do `set_attributes` and
+`set_scene`. Not caught: a change from outside Home Assistant (the Hue app, a dimmer switch) to a
+value between a running fade's start and end, or within 15 seconds of a stop, and
 `hue.activate_scene`.
+
+With **Show predicted brightness during Hue fades** on (the default), Home Assistant shows Device
+Side's predictions in place of those reports: the brightness at the start while a fade runs, where a
+stop halted the light, and the end once the fade has run. A fade to off shows the light on until it
+ends, a move up from off shows it on at its dimmest, and a room shows the mean of its lit lights. A
+change made elsewhere shows at once. Nothing is sent while a fade runs, so a dashboard slider holds
+still and then jumps to the stop or the end. After Home Assistant restarts, or reconnects to the
+bridge, mid-fade, it shows what the bridge reports. To always show what the bridge reports, turn the
+option off: Settings › Devices & services › Device Side › Configure.
 
 ### `turn_on_for`, `turn_off_for`
 
@@ -470,7 +481,8 @@ it arrives, so Home Assistant shows what is listed here.
   after the stop; its varying timing suggests it comes from the bulb, not a bridge timer. After 4 of
   16 stops followed by 30 s of waiting, none came, and Home Assistant kept showing the end value.
   When a report did come, it matched a straight-line interpolation within 0.3 % for brightness and
-  1 mirek for color temperature.
+  1 mirek for color temperature. On 2026-10-27 a bulb in a zone instead reported, 4 s after a stop,
+  the brightness it held before the write that preceded the move (56 %, against a 40 % halt).
 - **A report can arrive in the middle of a transition**, and may be the last one sent. The one
   measured was the transition's own value about 1 s stale, so on the path the light had travelled.
   Every stop report that came was within 0.4 % of the straight-line value.

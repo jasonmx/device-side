@@ -12,7 +12,9 @@ tests:
       - call: {brightness: up, sweep_time: 5}
       - expect_response: {status: expected, integration: self}
       - sample: {attribute: brightness, for: 3, expect: rising, source: device_side}
-      - expect_state: {brightness: 255, within: 2 + tol}
+      # HA may end on a bulb's mid-ramp report (Tested behavior), so read the prediction.
+      - wait: 1 + tol
+      - sample: {attribute: brightness, for: 0.5, expect: steady, min: 99, source: device_side}
     observe:
       see: The light at 20 %, climbing to full over 5 s.
       watch: Steps or flashes on the way up.

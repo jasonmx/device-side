@@ -1,5 +1,7 @@
 """The Hue report filter: the bridge's reports of our fades told from real changes, which forget the prediction."""
 
+from types import SimpleNamespace
+
 import pytest
 from aiohue.v2.controllers.events import EventType
 from homeassistant.exceptions import HomeAssistantError
@@ -9,25 +11,17 @@ from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import async_mock_service
 
 from custom_components.device_side.core.runtime import get_runtime
-from custom_components.device_side.integrations.hue.report_filter import Report, classify
+from custom_components.device_side.integrations.hue.report_filter import Report, applies_later, classify
 from custom_components.device_side.integrations.hue.transition_cache import (
     API_SETTLE_SECONDS,
     BRIGHTNESS,
     transition_cache,
 )
 
-from .conftest import Clock
+from .conftest import light_event, setup_room
 from ...conftest import call
-from ...fixtures.hue import add_hue_entity, add_hue_group, hue_entry, light_action
 
 pytestmark = pytest.mark.usefixtures("setup_production")
-
-
-@pytest.fixture
-def clock(hass) -> Clock:
-    clock = Clock()
-    transition_cache(hass).clock = clock
-    return clock
 
 
 @pytest.fixture
@@ -35,34 +29,8 @@ def cache(hass, clock):
     return transition_cache(hass)
 
 
-async def setup_room(hass, bridge):
-    """Two lights on at 20 % in room-1, with a scene; the HA entities core's hue integration would make."""
-    bridge.light("one", on=True, brightness=20.0)
-    bridge.light("two", on=True, brightness=20.0)
-    bridge.room("1", ["one", "two"], brightness=20.0)
-    bridge.scene("scene-1", [light_action("one", on={"on": True})])
-    entry = await hue_entry(hass, bridge)
-    members = [
-        add_hue_entity(hass, entry, f"light.{light_id}", light_id, state="on", attributes={"brightness": 51})
-        for light_id in ("one", "two")
-    ]
-    add_hue_group(hass, entry, "light.room", "1", members)
-    hass.states.async_set("light.room", "on", {"is_hue_group": True, "entity_id": members, "brightness": 51})
-    add_hue_entity(hass, entry, "scene.relax", "scene-1")
-    return entry
-
-
-def light_event(light_id: str, *, brightness: float | None = None, on: bool | None = None, **extra) -> dict:
-    event: dict = {"id": light_id, "type": "light", **extra}
-    if brightness is not None:
-        event["dimming"] = {"brightness": brightness}
-    if on is not None:
-        event["on"] = {"on": on}
-    return event
-
-
 def moving_up(cache, clock, *, armed: dict | None = None) -> None:
-    """light "one" moving 20 % to 80 % over 10 s, 5 s in: the path so far is 20 to 50 %."""
+    """light "one" moving 20 % to 80 % over 10 s, 5 s in: the bulb may report anything from 20 to 80 %."""
     cache.arm("one", armed if armed is not None else {BRIGHTNESS: 80.0}, 10.0)
     cache.moving("one", BRIGHTNESS, 20.0, 80.0, 10.0)
     clock.now += 5.0
@@ -73,9 +41,9 @@ def moving_up(cache, clock, *, armed: dict | None = None) -> None:
     [
         pytest.param(light_event("one", brightness=79.84), Report.ECHO, id="armed_end_value"),
         pytest.param(light_event("one", brightness=35.18), Report.PATH, id="stale_mid_ramp_report"),
-        pytest.param(light_event("one", brightness=50.5), Report.PATH, id="path_upper_edge"),
+        pytest.param(light_event("one", brightness=70.0), Report.PATH, id="ahead_of_the_prediction"),
         pytest.param(light_event("one", brightness=19.5), Report.PATH, id="path_lower_edge"),
-        pytest.param(light_event("one", brightness=50.6), Report.REAL, id="past_the_prediction"),
+        pytest.param(light_event("one", brightness=80.6), Report.REAL, id="past_the_target"),
         pytest.param(light_event("one", brightness=19.4), Report.REAL, id="below_the_start"),
         pytest.param(light_event("one", on=True), Report.PATH, id="on_while_lit"),
         pytest.param(light_event("one", on=False), Report.REAL, id="off_from_elsewhere"),
@@ -97,7 +65,7 @@ async def test_an_end_value_is_echoed_once(hass, bridge, cache, clock):
     moving_up(cache, clock)
 
     assert classify(cache, bridge.api, light_event("one", brightness=80.0)) is Report.ECHO
-    assert classify(cache, bridge.api, light_event("one", brightness=80.0)) is Report.REAL
+    assert not cache.echoed("one", BRIGHTNESS, 80.0)
 
 
 async def test_the_echo_counts_before_the_move_is_recorded(hass, bridge, cache):
@@ -158,10 +126,10 @@ async def test_a_real_change_from_the_bridge_forgets_the_light(hass, bridge, cac
     await hass.async_block_till_done()
     assert cache.follows("one")
 
-    api.events.emit(EventType.RESOURCE_UPDATED, light_event("one", brightness=90.0))  # the Hue app
+    api.events.emit(EventType.RESOURCE_UPDATED, light_event("one", brightness=10.0))  # the Hue app
     await hass.async_block_till_done()
     assert not cache.follows("one")
-    assert api.lights["one"].dimming.brightness == 90.0  # aiohue applies every event: observe only
+    assert api.lights["one"].dimming.brightness == 10.0  # aiohue applies every event: observe only
 
 
 async def test_a_refused_move_disarms_its_echo(hass, bridge, cache):
@@ -172,6 +140,25 @@ async def test_a_refused_move_disarms_its_echo(hass, bridge, cache):
         await call(hass, "move", {"entity_id": "light.one", "brightness": "up"})
 
     assert not cache.follows("one")
+
+
+async def test_a_refused_write_from_set_attributes_keeps_the_prediction(hass, bridge, cache, clock):
+    await setup_room(hass, bridge)
+    await call(hass, "move", {"entity_id": "light.one", "brightness": "up"})
+    clock.now += 1.0
+    bridge.failing.add("one")
+
+    with pytest.raises(HomeAssistantError):
+        await call(hass, "set_attributes", {"entity_id": "light.one", "brightness": 40})
+
+    assert cache.running("one", BRIGHTNESS) is not None
+    assert cache.echoed("one", BRIGHTNESS, 100.0)  # the move's echo, still armed
+
+
+def test_an_aiohue_without_the_private_handler_is_taken_to_apply_events_at_once():
+    api = SimpleNamespace(lights=SimpleNamespace(), groups=SimpleNamespace(grouped_light=SimpleNamespace()))
+
+    assert not applies_later(api)
 
 
 @pytest.mark.parametrize(
@@ -258,3 +245,15 @@ async def test_a_failing_filter_never_stops_aiohue_applying_the_event(hass, brid
 
     assert bridge.api.lights["one"].dimming.brightness == 90.0
     assert "Hue report filter failed" in caplog.text
+
+
+@pytest.mark.parametrize("values", [{"brightness": 41.3}, {"brightness": 56.13}, {"on": False}])
+async def test_any_report_after_a_stop_is_ours_until_its_window_ends(hass, bridge, cache, clock, values):
+    # The rig saw a halt reported 0.9 from the prediction, and a stale report from before the move 16 above it.
+    await setup_room(hass, bridge)
+    cache.stopped("one", BRIGHTNESS, 40.4)
+    clock.now += 5.0
+
+    assert classify(cache, bridge.api, light_event("one", **values)) is Report.PATH
+    clock.now += API_SETTLE_SECONDS
+    assert classify(cache, bridge.api, light_event("one", **values)) is None

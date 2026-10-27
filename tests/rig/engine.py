@@ -1,7 +1,8 @@
 """Runs the rig's YAML step files against the live HA and renders bench records from the results.
 
-One file per action (`steps/<action>.yaml`) runs on every inventory integration that has that action's adapter.
-The registry supplies what differs per integration: the expected status, the tolerance and the fields in scope.
+One file per action (`steps/<action>.yaml`) runs on every inventory integration that has that action's adapter; a
+file with `options` (`steps/<action>-<option>.yaml`) runs it again with those device_side options on. The registry
+supplies what differs per integration: the expected status, the tolerance, and the fields and options in scope.
 No pytest here: scripts/rig.py calls run(), and a tester's one-file runner can import this module unchanged.
 """
 
@@ -48,6 +49,9 @@ POWER_RETRY_S = 3.0
 # A light reports off as its fade starts: an observed case waits this long after setup, so the brief comes once the
 # lights have reached the start state it describes.
 SETUP_SETTLE_S = 2.0
+
+# How long after saving options the engine waits before checking the entry has reloaded.
+OPTIONS_RELOAD_S = 1.0
 
 # Actions whose calls leave a prediction behind (SETTLE_S), and move's default sweep_time (actions/move.py
 # DEFAULT_SWEEP_TIME), the longest a move without one can run.
@@ -170,6 +174,8 @@ class StepFile:
     action: str
     rig_seconds: int
     tests: tuple[RigTest, ...]
+    # The device_side options its suites run with on; every other option in the adapter's scope runs off.
+    options: frozenset[str] = frozenset()
 
     @property
     def roles(self) -> tuple[str, ...]:
@@ -367,10 +373,13 @@ def load_step_file(path: Path) -> StepFile:
         raw = yaml.safe_load(path.read_text())
         if not isinstance(raw, dict):
             raise ValueError("expected a mapping with action, rig_seconds and tests")
-        if unknown := sorted(set(raw) - {"action", "rig_seconds", "tests"}):
+        if unknown := sorted(set(raw) - {"action", "rig_seconds", "options", "tests"}):
             raise ValueError(f"unknown key(s) {', '.join(unknown)}")
         if not isinstance(action := raw.get("action"), str):
             raise ValueError("action must name the device_side action under test")
+        options = raw.get("options", [])
+        if not isinstance(options, list) or not all(isinstance(name, str) and name for name in options):
+            raise ValueError("options must be a list of device_side option names")
         if isinstance(seconds := raw.get("rig_seconds"), bool) or not isinstance(seconds, int) or seconds <= 0:
             raise ValueError("rig_seconds must be a positive whole number")
         if not isinstance(raw_tests := raw.get("tests"), list) or not raw_tests:
@@ -380,7 +389,7 @@ def load_step_file(path: Path) -> StepFile:
             raise ValueError(f"duplicate test name(s) {', '.join(duplicates)}")
     except (ValueError, yaml.YAMLError) as err:
         raise SchemaError(f"{path.name}: {err}") from None
-    return StepFile(path, action, seconds, tests)
+    return StepFile(path, action, seconds, tests, frozenset(options))
 
 
 def load_step_files(steps_dir: Path = STEPS_DIR) -> list[StepFile]:
@@ -401,6 +410,11 @@ class Suite:
     @property
     def action(self) -> str:
         return self.file.action
+
+    @property
+    def name(self) -> str:
+        """The name its record takes: the action, then any options it runs with on (`move-predicted_state`)."""
+        return "-".join([self.action, *sorted(self.file.options)])
 
 
 @dataclass(frozen=True, slots=True)
@@ -451,6 +465,61 @@ def cases(suite: Suite, inventory: Inventory, keyword: str | None = None) -> lis
 
 
 # --- Running -------------------------------------------------------------------------------------------------
+
+
+class EntryOptions:
+    """device_side's options on the rig, set for each case through the entry's options flow (admin only) and put
+    back when the run ends. Saving a change reloads the entry."""
+
+    def __init__(self, admin: HAClient, reload_s: float = OPTIONS_RELOAD_S):
+        self.admin = admin
+        self.reload_s = reload_s
+        self.entry_id: str | None = None
+        self.original: dict[str, Any] | None = None
+        self.current: dict[str, Any] = {}
+
+    async def apply(self, wanted: dict[str, bool]) -> None:
+        if self.original is not None and all(self.current.get(name) == on for name, on in wanted.items()):
+            return
+        if self.entry_id is None:
+            entries = await self.admin.command({"type": "config_entries/get", "domain": "device_side"})
+            if not entries:
+                raise RuntimeError("no device_side config entry to set options on")
+            self.entry_id = entries[0]["entry_id"]
+        flow = await self.admin.rest("post", "/api/config/config_entries/options/flow", {"handler": self.entry_id})
+        # The form's defaults are the options in force.
+        values = {field["name"]: field.get("default") for field in flow.get("data_schema", [])}
+        if self.original is None:
+            self.original = dict(values)
+        flow_path = f"/api/config/config_entries/options/flow/{flow['flow_id']}"
+        if all(values.get(name) == on for name, on in wanted.items()):
+            # Saving would still reload an entry whose options were never saved: they go from none to these.
+            await self.admin.rest("delete", flow_path)
+            self.current = values
+            return
+        values |= wanted
+        try:
+            result = await self.admin.rest("post", flow_path, values)
+            if result.get("type") != "create_entry":
+                raise RuntimeError(f"device_side's options flow did not save: {result}")
+        except Exception:
+            with contextlib.suppress(Exception):  # don't leave the flow open in HA; the save's error is the one raised
+                await self.admin.rest("delete", flow_path)
+            raise
+        self.current = values
+        await self.reloaded()
+
+    async def reloaded(self) -> None:
+        """Wait for the reload a saved change schedules: it starts after the save returns."""
+        await asyncio.sleep(self.reload_s)
+        query = {"type": "config_entries/get", "domain": "device_side"}
+        async with asyncio.timeout(30):
+            while not (entries := await self.admin.command(query)) or entries[0]["state"] != "loaded":
+                await asyncio.sleep(0.5)
+
+    async def restore(self) -> None:
+        if self.original is not None and self.current != self.original:
+            await self.apply(self.original)
 
 
 class Outcome(StrEnum):
@@ -1039,25 +1108,41 @@ async def run(
         if adapter is None:
             out(f"{suite.integration} / {suite.action}: no adapter, skipped")
             continue
+        if unknown := sorted(suite.file.options - adapter.scope.options):
+            raise SchemaError(f"{suite.file.path.name}: {suite.integration} {suite.action} has no option {unknown[0]}")
         client = admin if suite.integration in ADMIN_INTEGRATIONS else ha
-        if client is None:
+        if client is None or (adapter.scope.options and admin is None):
             out(f"{suite.integration} / {suite.action}: needs HA_ADMIN_TOKEN, skipped")
             continue
         planned.append((suite, adapter, client, cases(suite, inventory, keyword)))
-    rig_run = _Run(registry, tolerance, settle, inventory.power(), ask, out)
-    waiting = [
-        case
-        for suite, _, client, suite_cases in planned
-        for case in await rig_run.automated(suite, client, suite_cases)
-    ]
-    await rig_run.observed(waiting)
+    options = {
+        id(suite): {name: name in suite.file.options for name in adapter.scope.options}
+        for suite, adapter, *_ in planned
+    }
+    rig_run = _Run(
+        registry, tolerance, settle, inventory.power(), ask, out, options, EntryOptions(admin) if admin else None
+    )
+    try:
+        waiting = [
+            case
+            for suite, _, client, suite_cases in planned
+            for case in await rig_run.automated(suite, client, suite_cases)
+        ]
+        await rig_run.observed(waiting)
+    finally:
+        if rig_run.entry_options is not None:
+            # A failure here must not hide the one that ended the run.
+            try:
+                await rig_run.entry_options.restore()
+            except Exception as err:  # noqa: BLE001
+                out(f"Could not put device_side's options back; set them in HA: {err}")
     suite_results = [
         SuiteResult(suite, adapter, [rig_run.results[id(suite), case.id] for case in suite_cases], complete=not keyword)
         for suite, adapter, _, suite_cases in planned
     ]
     for suite_result in suite_results:
         out("")
-        out(f"{suite_result.suite.integration} / {suite_result.suite.action}")
+        out(f"{suite_result.suite.integration} / {suite_result.suite.name}")
         out("\n".join(table(suite_result, details=True)))
     return RunResult(suite_results)
 
@@ -1072,15 +1157,33 @@ class _Run:
     power: dict[str, str]
     ask: Callable[[str], str] | None
     out: Callable[[str], None]
+    # Each suite's options by its id, set before each of its cases.
+    options: dict[int, dict[str, bool]] = field(default_factory=dict)
+    entry_options: EntryOptions | None = None
     results: dict[tuple[int, str], CaseResult] = field(default_factory=dict)
     busy: dict[str, float] = field(default_factory=dict)  # _CaseRun.busy
 
     def case_run(self, case: Case, client: HAClient, ask: Callable[[str], str] | None, position: str = "") -> _CaseRun:
         integration = case.suite.integration
         return _CaseRun(
-            case, client, self.registry, self.tolerance[integration], ask, self.power, self.out, position,
-            self.busy, self.settle.get(integration, 0.0),
+            case,
+            client,
+            self.registry,
+            self.tolerance[integration],
+            ask,
+            self.power,
+            self.out,
+            position,
+            self.busy,
+            self.settle.get(integration, 0.0),
         )
+
+    async def run_case(
+        self, case: Case, client: HAClient, ask: Callable[[str], str] | None, position: str = ""
+    ) -> CaseResult:
+        if wanted := self.options.get(id(case.suite)):
+            await self.entry_options.apply(wanted)
+        return await self.case_run(case, client, ask, position).run()
 
     def report(self, case: Case, result: CaseResult) -> None:
         self.results[id(case.suite), case.id] = result
@@ -1088,14 +1191,14 @@ class _Run:
 
     async def automated(self, suite: Suite, client: HAClient, suite_cases: list[Case]) -> list[tuple[Case, HAClient]]:
         """Run the suite's automated cases; return the observed ones still to run, with their client."""
-        self.out(f"{suite.integration} / {suite.action}")
+        self.out(f"{suite.integration} / {suite.name}")
         waiting = []
         for case in suite_cases:
             twin = self.results.get((id(suite), case.twin or ""))
             if case.skip:
                 self.report(case, _not_run(case, Outcome.SKIPPED, case.skip))
             elif not case.observed:
-                self.report(case, await self.case_run(case, client, None).run())
+                self.report(case, await self.run_case(case, client, None))
             elif self.ask is None:
                 self.report(case, _not_run(case, Outcome.NOT_OBSERVED))
             elif twin is not None and twin.outcome is Outcome.FAIL:
@@ -1113,7 +1216,7 @@ class _Run:
             if self.ask is None:
                 self.report(case, _not_run(case, Outcome.NOT_OBSERVED))
                 continue
-            result = await self.case_run(case, client, self.ask, f"{number} of {len(waiting)}").run()
+            result = await self.run_case(case, client, self.ask, f"{number} of {len(waiting)}")
             self.report(case, result)
             if result.outcome is Outcome.NOT_OBSERVED:
                 self.ask = None
@@ -1185,6 +1288,8 @@ def render_record(
         ("Capabilities", capabilities),
         ("Fields", ", ".join(f"`{name}`" for name in fields) or "none"),
     ]
+    if suite.file.options:
+        rows.append(("Options", ", ".join(f"`{name}`" for name in sorted(suite.file.options))))
     lines = [f"# {title} · {suite.action}", "", "| | |", "|---|---|"]
     lines += [f"| {name} | {value} |" for name, value in rows]
     lines += ["", "## Tests", "", *table(suite_result)]
@@ -1198,7 +1303,7 @@ def write_report(result: RunResult, directory: Path, title: str) -> Path:
     lines = [f"# {title}"]
     for suite_result in result.suites:
         suite = suite_result.suite
-        lines += ["", f"## {suite.integration} / {suite.action}", "", *table(suite_result, details=True)]
+        lines += ["", f"## {suite.integration} / {suite.name}", "", *table(suite_result, details=True)]
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{title.replace(' ', '-').replace(':', '')}.md"
     path.write_text("\n".join(lines) + "\n")
@@ -1217,7 +1322,7 @@ async def write_records(
         entity_ids = [entity_id for case in suite_result.cases for entity_id in case.entity_ids]
         ha_version, devices = await rig_facts(ha, entity_ids)
         title = registry.integrations[suite.integration].title
-        path = bench_dir / suite.integration / f"{suite.action}.md"
+        path = bench_dir / suite.integration / f"{suite.name}.md"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(render_record(suite_result, title, ha_version, devices, date, source))
         written.append(path)
