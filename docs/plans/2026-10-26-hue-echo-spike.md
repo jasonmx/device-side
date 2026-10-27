@@ -119,4 +119,9 @@ Late reports look like the bulb's own, not a bridge timer: their timing varies w
 arrive mid-ramp. "Any non-end-value event is real" therefore fails, so per step 5 `observe()` is not built into 7b
 as designed.
 
+A second look at run c1.2's log: the Q4 mid-ramp report (35.18) was not a late report of the first stop (predicted
+38.36) but the current ramp's own value about 1 s stale (it was at 32.52). All six stop reports that came landed within
+0.37 of the prediction. So a report on the path travelled so far, ±0.5, is the bulb's; that rule is what
+`docs/plans/2026-10-27-hue-predicted-state.md` builds on.
+
 Decided with Jason: recorded in the Hue port plan's 7b section.

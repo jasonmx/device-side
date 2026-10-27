@@ -411,6 +411,14 @@ halted late or not at all (Tested behavior, below). Device Side remembers each m
 duration plus 15 seconds and predicts the brightness of each light meanwhile, so a move after a stop
 continues from where the light halted, and `get_attributes` returns the predicted brightness.
 
+A change made elsewhere ends the prediction, so the next move starts from the brightness the bridge
+reports. Device Side tells the bridge's reports of its own fades (the end value at the start, and the
+bulb's late reports of points it has passed, within 0.5 %) from any other report. A light or scene
+call from Home Assistant ends the prediction of every Hue light it targets at once, whatever its
+value, as do `set_attributes` and `set_scene`. Not caught: a change from outside Home Assistant
+(the Hue app, a dimmer switch) to a value on the path the light has just travelled, and
+`hue.activate_scene`.
+
 ### `turn_on_for`, `turn_off_for`
 
 `unsupported` with `no_adapter`. The bridge's own timers can do the flip, but nothing cancels
@@ -434,8 +442,9 @@ it arrives, so Home Assistant shows what is listed here.
   16 stops followed by 30 s of waiting, none came, and Home Assistant kept showing the end value.
   When a report did come, it matched a straight-line interpolation within 0.3 % for brightness and
   1 mirek for color temperature.
-- **A report can arrive in the middle of a transition**, for a stop that came before it or partway
-  through the transition itself, and may be the last one sent.
+- **A report can arrive in the middle of a transition**, and may be the last one sent. The one
+  measured was the transition's own value about 1 s stale, so on the path the light had travelled.
+  Every stop report that came was within 0.4 % of the straight-line value.
 - **Rooms and zones:** each light reports its end value at once, then the `grouped_light` reports
   the average about 1 s later. After a stop the lights report separately, up to 16 s apart.
 - **A change from elsewhere is reported promptly:** a `light.turn_on` from Home Assistant within

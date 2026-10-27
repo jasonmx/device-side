@@ -6,7 +6,8 @@ from typing import TYPE_CHECKING, ClassVar
 from homeassistant.core import HomeAssistant
 
 from .bridge import bridge_api, controller, resource_id
-from .transition_cache import TransitionCache, transition_cache
+from .report_filter import attach_report_filter
+from .transition_cache import BRIGHTNESS, REPORT_TOLERANCE, TransitionCache, transition_cache
 from ...actions.move import UP, MoveRequest
 from ...core.adapter import Adapter
 from ...core.models import EntityResult, Status, Target
@@ -18,7 +19,6 @@ if TYPE_CHECKING:
 
 # The dimmest step a Hue light makes (1/254), in percent: a move shorter than this sends nothing.
 MIN_BRIGHTNESS_STEP = 0.4
-BRIGHTNESS = "brightness"
 
 
 def reported_brightness(target: Target) -> float:
@@ -46,6 +46,22 @@ def lit(cache: TransitionCache, lights: list[Light]) -> list[Light]:
 def in_soft_off(cache: TransitionCache, light_id: str) -> bool:
     """Whether a move of ours is still fading the light to off, which the bridge won't take a dimming stop for."""
     return (transition := cache.running(light_id, BRIGHTNESS)) is not None and transition.target == 0
+
+
+def end_echo(light: Light, limit: float, up: bool) -> dict[str, float | bool]:
+    """What the bridge reports at the start of a move of the light to limit: only what changes is reported.
+
+    A soft off writes no brightness, so it reports on: false alone. A move to the brightness the bridge already
+    holds reports nothing.
+    """
+    if limit == 0:
+        return {"on": False} if light.on.on else {}
+    echo: dict[str, float | bool] = {}
+    if abs(light.dimming.brightness - limit) > REPORT_TOLERANCE:
+        echo[BRIGHTNESS] = limit
+    if up and not light.on.on:
+        echo["on"] = True
+    return echo
 
 
 class HueMove(Adapter[MoveRequest]):
@@ -85,24 +101,29 @@ class HueMove(Adapter[MoveRequest]):
                 return self.result(target, Status.REJECTED, detail="not_on_bridge")
             if resource.dimming is None:
                 return self.result(target, Status.UNSUPPORTED, detail="fields_not_supported")
+            attach_report_filter(hass, target)
             if target.is_group:
                 lights = room_lights(api, target)
                 starts = {light.id: light_brightness(cache, light) for light in lights}
                 # Up turns every light on, so the off ones fade in from the bottom; other moves pass them by.
                 lit_lights = lit(cache, lights)
-                moving = [light.id for light in (lights if up else lit_lights)]
+                moving = {light.id: light for light in (lights if up else lit_lights)}
                 current = mean(starts[light.id] for light in lit_lights or lights) if lights else 0.0
             else:
                 starts = {rid: cache.value(rid, BRIGHTNESS, reported_brightness(target))}
-                moving, current = [rid], starts[rid]
+                moving, current = {rid: resource}, starts[rid]
             if (limit - current if up else current - limit) < MIN_BRIGHTNESS_STEP:
                 return self.result(target, Status.UNCHANGED, detail="at_limit")
             duration = abs(limit - current) / 100 * request.sweep_time
             transition_time = round(duration * 1000)
             if limit == 0:
-                await writer.set_state(rid, on=False, transition_time=transition_time)
+                write = writer.set_state(rid, on=False, transition_time=transition_time)
             else:
-                await writer.set_state(rid, on=True if up else None, brightness=limit, transition_time=transition_time)
+                write = writer.set_state(
+                    rid, on=True if up else None, brightness=limit, transition_time=transition_time
+                )
+            echoes = {light_id: end_echo(light, limit, up) for light_id, light in moving.items()}
+            await cache.write_armed(echoes, duration, write)
             for light_id in moving:
                 cache.moving(light_id, BRIGHTNESS, starts[light_id], limit, duration)
             return self.result(target, Status.SENT)

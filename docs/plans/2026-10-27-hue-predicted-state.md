@@ -29,8 +29,8 @@ Outcome, designed with Jason 2026-10-26/27:
 **Classifier (both modes).** For each light with a live cache entry (the existing window: duration + 15 s), a brightness
 or `on` event from the bridge is one of:
 1. **Our end value**: the first event within ±0.5 of an end value we armed for that light. Arm *before* the PUT,
-   disarm if the bridge rejects it. A soft off's echo is `on: false` + brightness 0. A move up from off also gets an
-   `on: true`.
+   disarm if the bridge rejects it. Only what changes is reported: a soft off's echo is `on: false` alone (it writes
+   no brightness), and a move up from off also gets an `on: true`.
 2. **A bulb report**: value within ±0.5 of the path travelled so far (between the transition's start and its current
    prediction). This covers late stop reports, the 1-s-stale mid-ramp report, and the 17% `on: true` during a soft off.
 3. **A real change**: anything else. Drop the cache entry (`forget`), cancel its pending end event, stop hiding events
@@ -105,7 +105,8 @@ one constant in `const.py`, so flipping it before v0.1.0 is a one-line change.
    - `TransitionCache`: `arm`/`disarm`, `on_path`, `forget`, and the `on` echo for soft off and up-from-off.
    - A new `integrations/hue/report_filter.py`: the per-bridge subscriber in observe-only mode, plus the HA
      `call_service` listener.
-   - `move.py`/`stop.py` arm, attach and schedule. `set_attributes.py`/`set_scene.py` forget.
+   - `move.py`/`stop.py` arm and attach; end events are scheduled in PR 3, which sends them. `set_attributes.py`/
+     `set_scene.py` forget.
    - Tests: `tests/integrations/hue/test_transition_cache.py`, a new `test_report_filter.py` driving a real aiohue
      `EventStream`, and the `move`/`stop` tests.
    - Docs: add the c1.2 finding to the spike plan's Result and to `docs/integrations.md` Tested behavior; update the

@@ -61,3 +61,27 @@ async def test_cancel_pending_cancels_every_key(hass):
 
     assert ran == []
     assert runtime.pending == {}
+
+
+def test_listen_attaches_once_per_owner_and_replaces_a_new_owners():
+    runtime = _runtime()
+    detached: list[str] = []
+    attached: list[str] = []
+
+    def attach(name: str):
+        def start():
+            attached.append(name)
+            return lambda: detached.append(name)
+
+        return start
+
+    first, second = object(), object()
+    runtime.listen("k", first, attach("first"))
+    runtime.listen("k", first, attach("again"))
+    runtime.listen("k", second, attach("second"))
+    runtime.listen("other", first, attach("other"))
+    runtime.detach_all()
+
+    assert attached == ["first", "second", "other"]
+    assert detached == ["first", "second", "other"]
+    assert runtime.listeners == {}

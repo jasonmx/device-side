@@ -8,6 +8,7 @@ from aiohue.v2.models.scene import Scene
 from homeassistant.core import HomeAssistant
 
 from .bridge import bridge_api, resource_id, write_light
+from .transition_cache import transition_cache
 from ...core.adapter import Adapter
 from ...core.models import EntityResult, Request, Status, Target
 from ...core.scope import AdapterScope
@@ -45,7 +46,8 @@ class HueSetScene(Adapter[Request]):
     """Read the scene from aiohue's live cache on every call, so edits made in the Hue app apply, then write it.
 
     One failing light does not stop the others: the result is sent with detail some_lights_failed, or rejected if
-    every light failed. All-Day (smart) scenes have no fixed settings to write and are unsupported.
+    every light failed. All-Day (smart) scenes have no fixed settings to write and are unsupported. A light written
+    ends any move's prediction for it.
     """
 
     action: ClassVar[str] = "set_scene"
@@ -70,10 +72,12 @@ class HueSetScene(Adapter[Request]):
             if not (writes := scene_light_writes(scene)):
                 return self.result(target, Status.UNCHANGED, detail="nothing_to_set")
 
+            cache = transition_cache(hass)
             failed = 0
             for light_id, write in writes:
                 try:
                     await write_light(api, light_id, **write)
+                    cache.forget(light_id)
                 except Exception as err:  # noqa: BLE001 - one light's failure must not stop the rest of the scene
                     failed += 1
                     _LOGGER.warning("set_scene %s: write to light %s failed: %s", target.entity_id, light_id, err)
