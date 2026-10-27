@@ -44,4 +44,10 @@ class FakeTurnOffFor(ScriptedAdapter):
     scope = AdapterScope(domains=frozenset({"switch"}), duration=LIMITS, native_groups=True)
 
 
-ADAPTERS = [FakeTurnOnFor, FakeTurnOffFor]
+class FakeSetAttributes(ScriptedAdapter):
+    action = "set_attributes"
+    integration = "fake"
+    scope = AdapterScope(fields=frozenset({"brightness"}))
+
+
+ADAPTERS = [FakeTurnOnFor, FakeTurnOffFor, FakeSetAttributes]

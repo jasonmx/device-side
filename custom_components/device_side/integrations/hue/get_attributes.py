@@ -75,8 +75,10 @@ class HueGetAttributes(Adapter[Request]):
     def supports(self, hass: HomeAssistant, request: Request, target: Target) -> str | None:
         if (reason := super().supports(hass, request, target)) is not None:
             return reason
-        if bridge_api(target) is None:
+        if (api := bridge_api(target)) is None:
             return "bridge_v1"
+        if target.is_group and not api.groups.grouped_light.get_lights(resource_id(target)):
+            return "empty_group"
         return None
 
     async def execute(self, hass: HomeAssistant, request: Request, targets: list[Target]) -> list[EntityResult]:
@@ -92,9 +94,7 @@ class HueGetAttributes(Adapter[Request]):
                 continue
 
             grouped = api.groups.grouped_light
-            if not (lights := grouped.get_lights(resource_id(target))):
-                results.append(self.result(target, Status.UNSUPPORTED, detail="empty_group"))
-                continue
+            lights = grouped.get_lights(resource_id(target))
             on = [light for light in lights if light.on.on]
             row = attributes(on or lights)
             dimmable = [light for light in lights if light.dimming]

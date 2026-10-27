@@ -72,12 +72,7 @@ class MatterTurnOnFor(Adapter[TurnOnForRequest]):
         async def send(target: Target) -> EntityResult:
             node_id = node_id_from_unique_id(target.entry.unique_id)
             ep_id = endpoint_id_from_unique_id(target.entry.unique_id)
-            client = matter_client(hass, target.entry.config_entry_id)
-
-            # Defensive guard: supports() filters these out, but if execute() is ever
-            # called without a prior supports() pass this prevents a silent AttributeError.
-            if node_id is None or ep_id is None or client is None:
-                return self.result(target, Status.UNSUPPORTED, detail="not_addressable")
+            client = matter_client(hass, target.entry.config_entry_id)  # supports() refused the targets without one
 
             on_time = round(request.duration_s * 10)
             command = make_on_with_timed_off(on_off_control=0, on_time=on_time, off_wait_time=0)

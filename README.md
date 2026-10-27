@@ -76,7 +76,7 @@ Timer runs on the device. Use it to:
 | `transition`        | turn_on_for | Fade time (0–300 s). 🔒                                                                                               |
 | `response_variable` | all         | Name of a variable that receives a result for each entity (optional). In the visual editor it's **Response variable** |
 
-A field marked 🔒 is `unsupported` in the release, as it's awaiting testing on real hardware. You can test it for us: see [CONTRIBUTING.md](CONTRIBUTING.md).
+A field marked 🔒 is refused in the release, as it's awaiting testing on real hardware. You can test it for us: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 **Cancel:** to cancel a timer, send a new action (e.g. `turn_on`, `turn_off`, `toggle` or a new timed on/off).
 On ZHA, only `turn_off` or a new `turn_on_for` cancels; to keep the light on, turn it off, then on.
@@ -85,16 +85,15 @@ On ZHA, only `turn_off` or a new `turn_on_for` cancels; to keep the light on, tu
 
 Each targeted entity gets a `status` in the response variable:
 
-| Status        | Meaning                                            |
-| ------------- | -------------------------------------------------- |
-| `confirmed`   | Command accepted; device reported a running timer  |
-| `sent`        | Command accepted; timer not confirmed in read-back |
-| `unsupported` | Entity or field not supported; `detail` says why   |
-| `rejected`    | Command failed; `detail` says why                  |
+| Status      | Meaning                                            |
+| ----------- | -------------------------------------------------- |
+| `confirmed` | Command accepted; device reported a running timer  |
+| `sent`      | Command accepted; timer not confirmed in read-back |
+| `unchanged` | Nothing to send; `detail` says why                 |
 
-If a requested duration is out of range, `clamped_to` reports the duration the device actually used, in seconds.
+If a requested duration is out of range, `clamped_to` reports the duration the device actually used, in seconds. A field the entity can't take, like brightness on a plug, is dropped and the rest of the call goes ahead, with `detail: fields_dropped`.
 
-The action succeeds if at least one entity returns `confirmed` or `sent`. If every entity returns `unsupported` or `rejected`, the action fails instead: no response is returned, and the automation stops there, like any failed action. The error message lists each entity with its reason.
+Failures follow Home Assistant's own actions. The action fails, stopping the automation, if an entity you listed by name can't take it (the error says why) or if a device fails (every entity is still sent the command first, and the error lists the ones that failed). An entity reached through an area, device, label or group that can't take the action is skipped and logged, and unavailable entities are skipped. Skipped entities are left out of the response.
 
 #### YAML Example: Heater off after 4 hours, with a warning
 

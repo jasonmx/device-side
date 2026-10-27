@@ -59,7 +59,7 @@ class HueSetAttributes(Adapter[SetAttributesRequest]):
 
     A grouped_light write does not reach the lights that are off, so a room is written light by light. A field the
     light cannot take (color on a white bulb) is dropped and the result says so; a light that can take none of the
-    fields is unsupported. min/max_brightness clamp the brightness the bridge last stored, so they work while off.
+    fields is unchanged. min/max_brightness clamp the brightness the bridge last stored, so they work while off.
     A write ends any move's prediction for the light.
     """
 
@@ -88,9 +88,7 @@ class HueSetAttributes(Adapter[SetAttributesRequest]):
                 return self.result(target, Status.REJECTED, detail="not_on_bridge")
             write, dropped = _write_for(light, request)
             if not write:
-                if dropped:
-                    return self.result(target, Status.UNSUPPORTED, detail="fields_not_supported")
-                return self.result(target, Status.UNCHANGED, detail="within_limits")
+                return self.result(target, Status.UNCHANGED, detail="fields_dropped" if dropped else "within_limits")
             await write_forgetting(hass, light.id, write_light(api, light.id, **write))
             return self.result(target, Status.SENT, detail="fields_dropped" if dropped else None)
 

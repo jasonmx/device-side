@@ -37,7 +37,7 @@ async def websocket(request: web.Request) -> web.WebSocketResponse:
             late = {"topic": "zigbee2mqtt/bridge/info", "payload": BRIDGE_INFO}
             await ws.send_json({"id": msg["subscription"], "type": "event", "event": late})
         elif msg["service"] == "fail":
-            error = {"code": "home_assistant_error", "message": "nope", "translation_key": "all_targets_failed"}
+            error = {"code": "home_assistant_error", "message": "nope", "translation_key": "targets_failed"}
             await ws.send_json({"id": msg["id"], "type": "result", "success": False, "error": error})
         else:
             result = {"response": {"ok": msg["service_data"]}}
@@ -79,7 +79,7 @@ async def test_call_service_returns_response_and_wait_for_sees_the_event(client:
 async def test_failed_call_raises_with_translation_key(client: HAClient):
     with pytest.raises(HAError) as err:
         await client.call_service("x", "fail", {})
-    assert err.value.translation_key == "all_targets_failed"
+    assert err.value.translation_key == "targets_failed"
 
 
 async def test_wait_for_times_out_and_get_state_handles_404(client: HAClient):

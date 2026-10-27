@@ -8,7 +8,7 @@ from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.device_side.integrations.shelly.turn_on_for import ShellyTurnOnFor
 
-from ...conftest import call
+from ...conftest import call, refusal
 from ...fixtures.fake import add_switch_as_x
 from ...fixtures.shelly import add_shelly_entity, shelly_device
 
@@ -69,13 +69,14 @@ async def test_rgbcct_sets_mode_and_clamps_kelvin_to_the_entity_range(hass, setu
     assert call_rpc.await_args_list[0] == rpc_call("RGBCCT.Set", {"id": 0, "on": True, "toggle_after": 5.0, **expected})
 
 
-async def test_switch_ignores_light_fields(hass, setup_production):
+async def test_switch_drops_light_fields(hass, setup_production):
     entry, call_rpc = shelly_device(hass)
     add_shelly_entity(hass, entry, "switch.porch", "switch:0")
 
     response = await call(hass, "turn_on_for", {"entity_id": "switch.porch", "duration": 5, "brightness": 10})
 
-    assert response == {"switch.porch": {**CONFIRMED, "detail": "light_fields_ignored"}}
+    # The dispatcher drops brightness for a switch domain; the timer still runs.
+    assert response == {"switch.porch": {**CONFIRMED, "detail": "fields_dropped"}}
     assert call_rpc.await_args_list[0] == rpc_call("Switch.Set", {"id": 0, "on": True, "toggle_after": 5.0})
 
 
@@ -91,59 +92,59 @@ async def test_switch_as_x_light_sends_the_switch_call(hass, setup_production):
 
 
 @pytest.mark.parametrize(
-    ("entity_id", "key", "data", "detail"),
+    ("entity_id", "key", "data"),
     [
-        ("light.relay", "switch:0", {"brightness": 10}, "fields_not_supported"),  # a relay shown as a light is on/off
-        ("light.dimmer", "light:0", {"color_temp_kelvin": 3000}, "fields_not_supported"),
-        ("light.cct", "cct:0", {"rgb_color": [1, 2, 3]}, "fields_not_supported"),
-        ("light.rgb", "rgb:0", {"hs_color": [30, 50]}, "fields_not_tested"),  # in no component's scope
+        ("light.relay", "switch:0", {"brightness": 10}),   # relay shown as a light is on/off
+        ("light.dimmer", "light:0", {"color_temp_kelvin": 3000}),
+        ("light.cct", "cct:0", {"rgb_color": [1, 2, 3]}),
     ],
 )
-async def test_fields_outside_the_component_or_scope_are_refused(
-    hass, setup_production, every_light_in_scope, entity_id, key, data, detail
+async def test_component_fields_not_in_component_are_dropped(
+    hass, setup_production, every_light_in_scope, entity_id, key, data
 ):
+    # A field the component can't take is dropped by the adapter; the timer still runs.
     entry, call_rpc = shelly_device(hass)
     add_shelly_entity(hass, entry, entity_id, key)
-    add_shelly_entity(hass, entry, "switch.porch", "switch:1")
 
-    response = await call(hass, "turn_on_for", {"entity_id": [entity_id, "switch.porch"], "duration": 5, **data})
+    response = await call(hass, "turn_on_for", {"entity_id": entity_id, "duration": 5, **data})
 
-    assert response[entity_id] == {
-        "status": "unsupported",
-        "integration": "shelly",
-        "detail": detail,
-    }
-    assert [args.args[0] for args in call_rpc.await_args_list] == ["Switch.Set", "Switch.GetStatus"]
+    assert response[entity_id] == {**CONFIRMED, "detail": "fields_dropped"}
 
 
-async def test_relay_lights_run_but_fields_they_lack_and_capabilities_out_of_scope_are_refused(hass, setup_production):
+async def test_field_not_in_scope_is_refused(hass, setup_production, every_light_in_scope):
+    # A field not in scope is refused before anything is sent.
     entry, call_rpc = shelly_device(hass)
-    add_shelly_entity(hass, entry, "light.dimmer", "light:0")
+    add_shelly_entity(hass, entry, "light.rgb", "rgb:0")
+
+    data = {"entity_id": "light.rgb", "duration": 5, "hs_color": [30, 50]}
+    assert await refusal(hass, "turn_on_for", data) == "fields_not_tested"
+    assert not call_rpc.await_args_list
+
+
+async def test_relay_drops_brightness_and_dimmer_is_refused_by_capability(hass, setup_production):
+    entry, call_rpc = shelly_device(hass)
     add_shelly_entity(hass, entry, "light.relay", "switch:0")
+    add_shelly_entity(hass, entry, "light.dimmer", "light:0")
 
-    with pytest.raises(HomeAssistantError, match="light.relay: fields_not_supported"):
-        await call(hass, "turn_on_for", {"entity_id": "light.relay", "duration": 5, "brightness": 10})
-    response = await call(hass, "turn_on_for", {"entity_id": ["light.dimmer", "light.relay"], "duration": 5})
+    # A relay-as-light drops brightness it can't take and still runs the timer.
+    response = await call(hass, "turn_on_for", {"entity_id": "light.relay", "duration": 5, "brightness": 10})
+    assert response["light.relay"] == {**CONFIRMED, "detail": "fields_dropped"}
 
-    assert response["light.relay"] == CONFIRMED
-    assert response["light.dimmer"] == {**CONFIRMED, "status": "unsupported", "detail": "capability_not_tested"}
+    # An untested capability (Light:0) raises before any new sends.
+    assert await refusal(hass, "turn_on_for", {"entity_id": "light.dimmer", "duration": 5}) == "capability_not_tested"
     assert [args.args[0] for args in call_rpc.await_args_list] == ["Switch.Set", "Switch.GetStatus"]
 
 
-async def test_gen1_and_non_timer_entities_are_unsupported(hass, setup_production):
+async def test_gen1_and_non_timer_entities_are_refused(hass, setup_production):
     gen1, _ = shelly_device(hass, gen1=True, mac="112233445566")
     add_shelly_entity(hass, gen1, "switch.old_relay", "relay_0")
     entry, call_rpc = shelly_device(hass)
     add_shelly_entity(hass, entry, "switch.child_lock", "boolean:200-boolean_child_lock")
     add_shelly_entity(hass, entry, "switch.porch", "switch:0")
 
-    response = await call(
-        hass, "turn_on_for", {"entity_id": ["switch.child_lock", "switch.old_relay", "switch.porch"], "duration": 5}
-    )
-
-    assert response["switch.old_relay"]["detail"] == "gen1_unsupported"
-    assert response["switch.child_lock"]["detail"] == "not_addressable"
-    assert response["switch.porch"] == CONFIRMED
+    assert await refusal(hass, "turn_on_for", {"entity_id": "switch.old_relay", "duration": 5}) == "gen1_unsupported"
+    assert await refusal(hass, "turn_on_for", {"entity_id": "switch.child_lock", "duration": 5}) == "not_addressable"
+    assert await call(hass, "turn_on_for", {"entity_id": "switch.porch", "duration": 5}) == {"switch.porch": CONFIRMED}
 
 
 async def test_set_error_rejects_only_that_target(hass, setup_production):
@@ -154,7 +155,7 @@ async def test_set_error_rejects_only_that_target(hass, setup_production):
     with pytest.raises(HomeAssistantError) as raised:
         await call(hass, "turn_on_for", {"entity_id": "switch.porch", "duration": 5})
 
-    assert raised.value.translation_key == "all_targets_failed"
+    assert raised.value.translation_key == "targets_failed"
     assert raised.value.translation_placeholders == {"summary": "switch.porch: error"}
 
 

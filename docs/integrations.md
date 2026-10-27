@@ -3,6 +3,9 @@
 One section per integration, each on the same template: what Device Side talks to, how a target
 entity becomes a device address, notes per action, and sharp edges.
 
+A target "refused with" a reason can never take the action: the call raises if you named it, and skips
+it otherwise ([action-behavior.md](action-behavior.md)).
+
 ## Shelly
 
 ### What it talks to
@@ -10,7 +13,7 @@ entity becomes a device address, notes per action, and sharp edges.
 Shelly Gen2 and later devices (Plus, Pro, Gen3, Gen4), through the RPC connection the core
 `shelly` integration already holds open. Device Side adds no connection of its own and needs no
 credentials beyond the ones the Shelly integration was set up with. Gen1 devices (CoIoT) have no
-flip-back timer in the API Device Side uses, and are reported `unsupported` with detail
+flip-back timer in the API Device Side uses, and are refused with
 `gen1_unsupported`.
 
 ### How targets resolve
@@ -29,13 +32,13 @@ instance come from the entity's unique ID, which the Shelly integration writes a
 | `rgbcct:N` | `RGBCCT` | `light` | yes | `brightness`, `transition`, `color_temp_kelvin`, `rgb_color` |
 
 Any other Shelly entity (virtual booleans, scripts, circuit breakers) has no flip-back timer and
-returns `unsupported` with detail `not_addressable`. Shelly has no device-side groups, so a light
+is refused with `not_addressable`. Shelly has no device-side groups, so a light
 group helper over Shelly lights is expanded and each member gets its own command.
 
 A `switch_as_x` light over a Shelly switch is served as that switch: the helper forwards on/off
 unchanged, so the device receives the switch's own `Switch.Set`, and the result is keyed on the
-light's entity ID. Light fields sent to such a light return `unsupported` with detail
-`fields_not_supported`. An inverted helper returns `inverted_wrapper`, and a helper wrapping
+light's entity ID. Light fields sent to such a light are dropped, as a switch can't take them, and the
+timer still runs, with detail `fields_dropped`. An inverted helper returns `inverted_wrapper`, and a helper wrapping
 another helper returns `not_addressable`. This holds on every integration, not only Shelly.
 
 ### `turn_on_for`
@@ -53,11 +56,10 @@ detail `timer_not_reported` (the device answered without a timer) or `readback_f
 read-back call itself failed). Either way the `Set` was accepted.
 
 Relays (whether HA shows them as a switch or a light) and `RGBCCT` color bulbs are in scope so far.
-A `Light`, `CCT`, `RGB` or `RGBW` light returns `unsupported` with detail `capability_not_tested`
-until someone tests one. A light field the component can't take, such as brightness on a relay,
-returns `unsupported` with detail `fields_not_supported` rather than being dropped silently;
-`hs_color` and `xy_color` return `fields_not_tested` (see Sharp edges). Fields sent to a `switch`
-entity are ignored and the result says so with detail `light_fields_ignored`.
+A `Light`, `CCT`, `RGB` or `RGBW` light is refused with `capability_not_tested`
+until someone tests one. A light field the component can't take, such as brightness on a relay, is
+dropped and the timer still runs, with detail `fields_dropped`; `hs_color` and `xy_color` are refused
+with `fields_not_tested` (see Sharp edges). Fields sent to a `switch` entity are dropped the same way.
 
 ### `turn_off_for`
 
@@ -324,7 +326,7 @@ writes as `{fabric_hex16}-{node_hex16}-{postfix}-{endpoint_id}-{key}-{cluster_id
 Plugs (`switch` entities) are in scope. Matter lights take the same command but are refused with
 `domain_not_tested` until a tester reports one. Device Side requires the OnOff cluster's Lighting
 (LT) feature, bit 0 of its FeatureMap, on the endpoint. Lights carry it, and so do some plugs. An
-entity whose endpoint lacks it returns `unsupported` with detail `no_lt_feature`.
+entity whose endpoint lacks it is refused with `no_lt_feature`.
 
 ### `turn_on_for`
 
@@ -391,7 +393,7 @@ into that range, so they work while off; a light already inside it is `unchanged
 `min_brightness`, `max_brightness` or `color_temp_kelvin` unset.
 
 A field a light can't take (color on a white bulb) is dropped and the result is `sent` with
-`fields_dropped`. A light that can take none of them is `unsupported` with `fields_not_supported`.
+`fields_dropped`. A light that can take none of them is `unchanged` with `fields_dropped`.
 
 ### `get_attributes`
 
@@ -415,7 +417,7 @@ is sent, as a recall would. Gradients, effects and dynamics are not written, so 
 sets its first frame.
 
 One failing light doesn't stop the rest: the result is `sent` with `some_lights_failed`, or
-`rejected` if every light failed. All-Day (smart) scenes are `unsupported` with `smart_scene`;
+`rejected` if every light failed. All-Day (smart) scenes are refused with `smart_scene`;
 a scene the bridge no longer has is `rejected` with `scene_not_found`.
 
 ### `move` and `stop`
@@ -431,8 +433,9 @@ Moving brightness up turns the light on, from the bottom if it was off. Moving d
 plain soft off: `on: false` with the duration, so the bridge keeps the stored brightness and the
 next plain on comes back at it. `color_temp_limit` is in kelvin and clamped to the light's range.
 Color temperature moves only a light that is on: without `brightness: up`, a light or room that is
-off is `unchanged` with `off` and nothing is sent. A light in color mode is `unsupported` with
-`not_in_color_temp_mode`. An attribute already at or past its limit is left out, and a move with
+off is `unchanged` with `off` and nothing is sent. A light in color mode is `unchanged` with
+`not_in_color_temp_mode` and its color temperature is left alone. An attribute the light can't move
+(brightness on an on/off light) is dropped, with `fields_dropped`. An attribute already at or past its limit is left out, and a move with
 nothing left to do is `unchanged` with `at_limit` and nothing is sent.
 
 A room moves with one write per attribute to its `grouped_light`, so its lights converge on the end
@@ -476,7 +479,7 @@ bridge reports it.
 
 ### `turn_on_for`, `turn_off_for`
 
-`unsupported` with `no_adapter`. The bridge's own timers can do the flip, but nothing cancels
+Refused with `no_adapter`. The bridge's own timers can do the flip, but nothing cancels
 them except removing them on the bridge: a plain on/off from Home Assistant, the Hue app or a dimmer switch
 leaves the timer running, and the Hue app doesn't show it. A bulb without power when its timer
 fires misses the flip and the bridge doesn't retry. For timed Hue bulbs, pair them through ZHA,

@@ -1,5 +1,5 @@
-from dataclasses import dataclass, field
-from typing import ClassVar
+from dataclasses import dataclass, field, replace
+from typing import ClassVar, Self
 
 import probatio
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -28,6 +28,13 @@ class SetAttributesRequest(Request):
     def fields_present(self) -> frozenset[str]:
         own = {name for name in ("brightness", *LIMITS) if getattr(self, name) is not None}
         return self.light.present() | own
+
+    def without(self, names: frozenset[str]) -> Self:
+        own = {name: None for name in ("brightness", *LIMITS) if name in names}
+        return replace(self, light=self.light.without(names), **own)
+
+    def nothing_to_do(self) -> bool:
+        return not self.fields_present()
 
 
 class SetAttributes(Action[SetAttributesRequest]):
