@@ -6,6 +6,7 @@ from homeassistant.util.color import (
     GamutType,
     XYPoint,
     check_point_in_lamps_reach,
+    check_valid_gamut,
     color_hs_to_xy,
     color_RGB_to_xy,
     color_temperature_kelvin_to_mired,
@@ -30,13 +31,13 @@ def color_xy(fields: LightFields) -> tuple[float, float] | None:
 
 
 def clamp_to_gamut(light: Light, xy: tuple[float, float]) -> tuple[float, float]:
-    """The xy, or the nearest point of the light's gamut if outside it; as is for a light that reports no gamut."""
+    """The xy, or the nearest point of the light's gamut if outside it; as is for a light with no usable gamut."""
     if light.color is None or (gamut := light.color.gamut) is None:
         return xy
     triangle = GamutType(
         XYPoint(gamut.red.x, gamut.red.y), XYPoint(gamut.green.x, gamut.green.y), XYPoint(gamut.blue.x, gamut.blue.y)
     )
-    if check_point_in_lamps_reach(xy, triangle):
+    if not check_valid_gamut(triangle) or check_point_in_lamps_reach(xy, triangle):
         return xy
     return get_closest_point_to_point(xy, triangle)
 
