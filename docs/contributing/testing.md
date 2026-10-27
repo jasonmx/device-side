@@ -121,8 +121,8 @@ Such a test runs twice, so you are asked only what a machine can't check:
    the test and asks what you saw instead. It is skipped if its automated run failed, and if a step fails after Enter it prints
    `nothing to observe` and the reason.
 
-`--unattended` skips the observed runs and reports them `not observed`. They don't fail, but a test proves its
-fields and capabilities in a bench record only when both of its runs pass.
+`--unattended` skips the observed runs and reports them `not observed`. They don't fail, but a test counts toward
+a bench record only when both of its runs pass.
 
 ### Run reports
 
@@ -132,17 +132,14 @@ out in time.
 
 ### Bench records
 
-When every test of an adapter passes, the run writes `docs/bench/<integration>/<action>.md`: the adapter's
-fingerprint (`scripts/fingerprint.py`), the Home Assistant version, the devices' model and firmware, and the
-capabilities and fields the tests reached. A failed or partial (`-k`) run writes nothing.
-
-`scripts/check_tiers.py` computes each adapter's tier from all its records and prints the table; CI runs it.
+When every test of an adapter passes, the run writes `docs/bench/<integration>/<action>.md`: the date, the Home
+Assistant version, the devices' model and firmware, and each test's result. A failed or partial (`-k`) run writes
+nothing. Records are evidence for people, not read by any script: the PR that clears an adapter's `experimental`
+flag cites one.
 
 ### Tester reports
 
 A passing [Test report](../../.github/ISSUE_TEMPLATE/test-report.yml) issue becomes its own record,
 `docs/bench/<integration>/<action>-issue-<N>.md`, next to the rig's, so a rig run never overwrites it. It uses the
-rig record's key/value table: `Source` cites the issue (`tester report, #<N>`), and `Fingerprint` is the adapter's
-at the RC tag the tester ran (`git checkout <rc> && scripts/fingerprint.py`). List only the capabilities and fields
-the report shows working. If the tester had device_side options on, an `Options` row lists them; leave it out
-when none were. The tests table is optional.
+rig record's key/value table: `Source` cites the issue and the RC the tester ran (`tester report, #<N>, <rc>`).
+Note the capabilities, fields and device_side options the report shows working. The tests table is optional.

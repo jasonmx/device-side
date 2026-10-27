@@ -155,6 +155,9 @@ requires it.
   ESPHome (too experimental; auto-off is compiled into device YAML, no runtime primitive),
   Tasmota (small, declining share), TP-Link Kasa (local, has a countdown module, but waits for
   someone to ask). A request with evidence reopens any of these.
+- **Set scene while off on Zigbee dropped (2026-10-27):** Zigbee scenes live on the device and recall turns
+  lights on, and an HA-scene composition over `set_attributes` changes `set_scene`'s scope. `set_scene` stays
+  Hue-only until users ask.
 - **Set Turn-On Levels dropped (2026-10-25):** `set_turn_on_defaults` (the level and fade a device
   remembers for a plain turn-on) is a big, complicated lift. Revisit once a large user base shows
   whether it's needed and what it should look like.
@@ -199,17 +202,15 @@ requires it.
     address an HA group natively, which is fine because no device can. Goal throughout:
     minimize radio traffic and popcorning by sending to the largest unit the device accepts.
 - **Results:** `SupportsResponse.OPTIONAL`. Response maps entity_id to
-  `{status: unsupported|rejected|sent|confirmed|unchanged, integration, clamped_to?, detail?}`; `unchanged` means nothing was sent because the target is already where the call would leave it. Tier is not in the response: it is a subjective label about the code, not a fact
+  `{status: unsupported|rejected|sent|confirmed|unchanged, integration, clamped_to?, detail?}`; `unchanged` means nothing was sent because the target is already where the call would leave it. The release flag is not in the response: it is a label about the code, not a fact
   about this call. A query returns core's shape instead: each target's data under its entity_id, with
   targets that could not be read left out. Raise `HomeAssistantError` only on invalid input or when every
   target failed, so mixed rooms do not abort automations, until slice 9f moves the raise rule to core's.
-- **Stability tiers** per adapter (action x integration): `experimental | untested | beta |
-  stable`. Rules live in `CLAUDE.md` (Tiers, Releases); summary: only `experimental` is
-  declared (`AdapterScope.experimental`), the rest are computed by `scripts/check_tiers.py` from
-  coverage and bench records keyed by the adapter's fingerprint; `stable` means on `main`. A
-  tier covers the adapter's whole scope: there is no runtime tier gate and no options flow for
+- **Release flag** per adapter (action x integration): `AdapterScope.experimental` keeps it out
+  of a stable release; everything on `main` is stable. Rules live in `CLAUDE.md` (Release flag).
+  The flag covers the adapter's whole scope: there is no runtime gate and no options flow for
   it, and a capability or field nobody has tested is simply left out of
-  `AdapterScope.capabilities`/`.fields`, so `supports()` refuses it as not yet tested. Tier is not
+  `AdapterScope.capabilities`/`.fields`, so `supports()` refuses it as not yet tested. The flag is not
   logged per call and not returned in results.
 - **Quality bar:** HA quality scale Gold conventions (config flow, translations, tests,
   diagnostics, docs).
@@ -296,7 +297,7 @@ custom_components/device_side/
   icons.json             "services": {<action>: {"service": "mdi:..."}}
   translations/en.json   copy of strings.json
   core/
-    models.py            Status, Tier, ActionKind, Target, EntityResult, LightFields + validators
+    models.py            Status, ActionKind, Target, EntityResult, LightFields + validators
     scope.py             DurationLimits, AdapterScope, IntegrationInfo
     action.py            Action[RequestT] base class
     adapter.py              Adapter[RequestT] base class + gather() pacing helper
@@ -322,10 +323,9 @@ custom_components/device_side/
     hue/          __init__.py bridge.py transition_cache.py colors.py
                   set_attributes.py get_attributes.py set_scene.py move.py stop.py
 scripts/
-  check_tiers.py         computed tiers, coverage and scope-coverage checks for CI (slice 9c)
+  check_release.py       coverage bar for CI, and no experimental adapter in a release
   deploy.sh              the deploy sync command <branch>, then the deploy restart command (rig only)
   rig.py                 approval gate (inventory, adapters, duration, restart?) -> y/N -> deploy -> step files
-  fingerprint.py         adapter fingerprints: AST hash of the adapter and its package imports, without docstrings or AdapterScope
 docs/
   device_side_handoff-2026-10-23.md          existing
   plans/2026-10-23-device-side-repo-plan.md  this plan, saved in slice 0
@@ -350,7 +350,6 @@ copied from `/Users/jason/projects/hue-smooth-dimming`.
 ```python
 # core/models.py
 class Status(StrEnum): UNSUPPORTED, REJECTED, SENT, CONFIRMED, UNCHANGED
-class Tier(StrEnum): STABLE, BETA, UNTESTED, EXPERIMENTAL   # computed by check_tiers, never stored on an adapter
 class ActionKind(StrEnum): COMMAND, SETTING, QUERY
 
 @dataclass(frozen=True, slots=True)
@@ -488,23 +487,16 @@ of an adapter's targets at once so native group commands stay possible. Hue `mov
   `tests/core/test_actions_setup.py` asserts all three exist for every discovered action and
   every schema field has a strings entry.
 
-### Tier computation
+### Release gates
 
-`scripts/check_tiers.py` (slice 9c, `2026-10-25-release-gates.md`) imports the registry without `hass`
-and computes each adapter's tier from its records, found by path (`docs/bench/<integration>/<action>*.md`).
-It fails on a malformed record, a record with no adapter, or a non-experimental adapter under 95%
-coverage (`coverage.json`); CI runs it and prints the tier table. `--require-beta`, run only by
-`cut-release`, also fails on any `untested` adapter. It generates no docs: the README feature table and
-`docs/integrations.md` are hand-written. Fingerprint: AST hash of the adapter module and, in turn, the
-modules it imports from its own integration package, excluding docstrings and the `AdapterScope`
-declaration; bench records carry the fingerprint they tested and list the capabilities (Shelly: RPC components) and light fields they exercised. Proof
-follows the call: a record proves the device-side call, whatever HA domain the target shows, so a
-relay exposed as a `switch` or as an on/off `light` rides one record. `beta` needs a record with the
-current fingerprint, and every capability and field in scope covered: a capability by any passing
-record (any fingerprint), a field by a current-fingerprint record, an option in scope
-(`AdapterScope.options`) by current-fingerprint records with it on and with it off. Untested capabilities are left out of
-`AdapterScope.capabilities` and refused, not taken into scope on a sibling's proof. Adding a capability
-after a tester report is a scope edit plus a record listing it; the fingerprint survives it. Tier ladder: see `CLAUDE.md`. Tags come only from the `cut-release-candidate` and `cut-release`
+`scripts/check_release.py` (`2026-10-27-release-flag.md`, replacing slice 9c's computed tiers) imports the registry
+without `hass`. CI runs it with `--coverage coverage.json`, failing any adapter module under 95% line coverage, and
+prints which adapters are experimental; `--release`, run only by `cut-release`, fails on any experimental adapter. It
+generates no docs: the README feature table and `docs/integrations.md` are hand-written. A PR clears an adapter's flag
+by citing a passing bench record or tester issue covering its scope. Proof follows the call: a record proves the
+device-side call, whatever HA domain the target shows, so a relay exposed as a `switch` or as an on/off `light` rides
+one record. Untested capabilities are left out of `AdapterScope.capabilities` and refused, not taken into scope on a
+sibling's proof. Tags come only from the `cut-release-candidate` and `cut-release`
 workflows (a tag ruleset refuses any other), and `scripts/check_tag.py` refuses a tag not matching
 `^v\d+\.\d+\.\d+(rc\d+)?$` or not matching its branch.
 
@@ -594,9 +586,8 @@ Inventory format (per integration -> entities with role tags `light_dimmable`, `
 `light_color`, `switch_plug`, `group`, `scene`) is in `tests/rig/env.example` and
 `tests/rig/inventory.example.yaml`. **Claude asks before every rig run; the devices are
 in-use household lights.** Rig passes are recorded in `docs/bench/<integration>/<action>.md`
-(date, HA version, device model and firmware from `config/device_registry/list`, fingerprint from
-`scripts/fingerprint.py`, capabilities and fields reached, per-test table, source: rig run or
-test-report issue).
+(date, HA version, device model and firmware from `config/device_registry/list`, per-test table,
+source: rig run or test-report issue).
 
 ## Delivery sequence
 
@@ -617,6 +608,7 @@ test-report issue).
 | 9d | Rig coverage sweep | **plan in /plan first**; audit every adapter's scope (domains, capabilities, fields, native groups) against the maintainer's rig hardware; add inventory roles and step files for everything the rig can reach; rig runs leave a current-fingerprint bench record for each, so v0.1.0 launches with the widest scope the rig can prove. What the rig can't reach is listed for 9b and stays out of scope. |
 | 9e | Native groups survey | **plan in /plan first**; a short exploration of integration-native groups beyond Hue (Z2M and ZHA group entities; Matter and Shelly where HA exposes any): how each is detected and addressed, whether its native group command keeps the device-side behavior (timed off, transitions) across members, and a rig check of each candidate. Outcome: per integration, `native_groups` on or off for v0.1.0, recorded as a decision here, with bench records for those turned on. Hue's `grouped_light` ships in 7 regardless. |
 | 9f | Core-aligned failure behavior | **plan in /plan first**; move the dispatcher's raise rule from "raise when every target failed" to core's, per `docs/action-behavior.md`: unavailable or missing targets skipped with core's warning; a field a target can't take dropped; a target the caller named that the action can never support raises (as `ServiceNotSupported`); a device or bridge error raises; a query that reads nothing raises. Decide whether command actions keep their optional status response, which core's commands don't have, and whether `nothing_to_set` becomes a warning (a hue_dimmer call passing only zeros did nothing). Every action's tests and the rig's `expect_error` steps follow. |
+| 13 | Zigbee parity and timer state | Plan: `docs/plans/2026-10-27-zigbee-parity-timer-state.md` (13a to 13k). `get_attributes` takes switches and reports a running timer (Shelly, Matter, ZHA, Z2M where readable); ZHA and Z2M gain `get_attributes`, `move`/`stop` (hue cycling included) and `set_attributes` while off; after a probe spike, by integration, with the Hue A60 visiting the Hue bridge, ZHA and Z2M once each after that integration's code freezes. Needs 7c and 9f first. |
 | 12 | `v0.1.0` ("v1" names the scope, not the version) | feature complete for this plan; scope limited to what rig runs (and any tester reports) cover; README feature table current; release checklist adapted from hue_dimmer; the `predicted_state` default reviewed (flip it to off if flaky), on the regression issues and rig runs since it landed. |
 | 9b | Remote tester flow (after `v0.1.0`) | **plan in /plan first**; starts when an adapter needs hardware the rig lacks (a reported bug on someone else's device, a community integration such as Z-Wave JS). Standalone tester runner: one file (`uv run`, PEP 723 inline metadata, aiohttp WebSocket + PyYAML), talks to HA_URL + long-lived token, assumes integration installed via HACS or by hand (no deploy), runs 9a's YAML step files with a confirmation gate on every run; `tests/rig/client.py` moved to a location both the runner and `scripts/rig.py` import; runner prints a prefilled `test-report.yml` issue body; RC-only umbrella Repairs issue with multi-select flow and prefilled per-test links; bench files filled from tester reports. |
 
@@ -633,6 +625,7 @@ so no later rig test is written twice, and the release gates (9c) land before th
 9d (rig coverage sweep) and 9e (native groups survey) were added on 2026-10-25, between 9c and v0.1.0.
 9f (core-aligned failure behavior) was added on 2026-10-26, after the Hue port showed device_side's raise rule
 differs from both core's and hue_dimmer's.
+13 (Zigbee parity and timer state) was added on 2026-10-27, after a v0.1.0 gap review.
 
 `v0.0.x` releases are cut between slices whenever a set of adapters reaches beta; one release may carry
 several integrations or actions.
@@ -721,7 +714,7 @@ the first action of that session is slice 0.
 
 ## Verification (end to end)
 
-- `pre-commit run --all-files`, `pytest` (unit), `scripts/check_tiers.py` all green in CI
+- `pre-commit run --all-files`, `pytest` (unit), `scripts/check_release.py --coverage` all green in CI
   on every PR.
 - On the rig, with approval (there is no dev HA): first deploy adds the single entry, every
   action appears with translated names, light fields hide for switch-only selections; call

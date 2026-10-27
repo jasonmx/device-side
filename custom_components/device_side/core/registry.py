@@ -15,7 +15,7 @@ _LOGGER = logging.getLogger(__name__)
 class AdapterRegistry:
     """Actions, integrations and the adapters joining them, built from module data with no side effects and no hass.
 
-    That is what lets check_tiers.py and the rig runner import it offline, and tests build one from an explicit list.
+    That is what lets check_release.py and the rig runner import it offline, and tests build one from an explicit list.
     """
 
     def __init__(self, actions: Iterable[type[Action]], integration_modules: Iterable[str | ModuleType]):

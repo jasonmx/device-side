@@ -24,15 +24,6 @@ class Status(StrEnum):
 FAILED = frozenset({Status.UNSUPPORTED, Status.REJECTED})
 
 
-class Tier(StrEnum):
-    """Computed by check_tiers.py from coverage and bench records; never stored on an adapter."""
-
-    STABLE = "stable"
-    BETA = "beta"
-    UNTESTED = "untested"
-    EXPERIMENTAL = "experimental"
-
-
 class ActionKind(StrEnum):
     COMMAND = "command"
     SETTING = "setting"
