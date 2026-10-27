@@ -75,6 +75,9 @@ class FakeHA:
         self.calls: list[tuple[str, str, dict]] = []
 
     def set(self, entity_id: str, state: str, **attributes) -> None:
+        # HA keeps an entity's name whatever its state; every other attribute is the new state's own.
+        if name := self.states.get(entity_id, {}).get("attributes", {}).get("friendly_name"):
+            attributes = {"friendly_name": name} | attributes
         self.states[entity_id] = {"entity_id": entity_id, "state": state, "attributes": attributes}
 
     def later(self, delay: float, entity_id: str, state: str) -> None:
@@ -410,8 +413,8 @@ async def test_setup_runs_before_the_brief_and_the_steps_after_enter(tmp_path):
     assert printed[start + 1 : start + 5] == [
         "",
         "--- turn_on_for / on_then_off on switch_plug (1 of 1) ---",
+        "Lights: switch.plug",
         "You'll see: \033[1mIt clicks on then off.\033[0m",
-        "Watch for: Two clicks.",
     ]
     enter = calls_at_enter[0]
     assert ha.calls[enter - 1] == ("switch", "turn_off", {"entity_id": "switch.plug"})
@@ -690,6 +693,22 @@ async def test_a_group_without_the_attribute_uses_inventory_members(tmp_path):
     result = await run_one(ha, steps, inv, registry=NO_ATTRIBUTES_REGISTRY)
     assert outcomes(result) == {"every_member[group]": (Outcome.PASS, "")}
     assert ha.states["light.a"]["state"] == "off"  # restored: the inventory's members were snapshotted too
+
+
+async def test_an_observed_group_brief_names_the_group_and_its_members(tmp_path):
+    ha = FakeHA(
+        {"light.room": {"attributes": {"friendly_name": "Room"}}, "light.a": {"attributes": {"friendly_name": "A"}}},
+        members_on("light.a", "light.b"),
+    )
+    ha.states["light.b"] = {"entity_id": "light.b", "state": "off", "attributes": {}}  # no friendly name: its ID
+    setup_first = "    setup:\n      - set: {state: off}\n    steps:\n"
+    text = GROUP.replace("    steps:\n      - set: {state: off}\n", setup_first)
+    text += "    observe: {see: Both turn on., watch: Both., ask: 'Both?'}\n"
+    inv = Inventory({"fake": [RigEntity("light.room", frozenset({"group"}), members=("light.a", "light.b"))]})
+    printed, (_, ask) = [], answers("", "y")
+    steps = [suite(tmp_path, text, "fake")]
+    await run(steps, inv, NO_ATTRIBUTES_REGISTRY, ha, tolerance=TOLERANCE, out=printed.append, ask=ask)
+    assert "Lights: Room (A, light.b)" in printed
 
 
 async def test_a_group_without_the_attribute_is_not_read_as_one_light(tmp_path):

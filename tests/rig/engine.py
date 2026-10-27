@@ -722,6 +722,7 @@ class _CaseRun:
         observe = self.case.test.observe
         assert observe is not None  # only a test with observe has an observed case
         await asyncio.sleep(SETUP_SETTLE_S)
+        self.out(f"Lights: {await self.lights_by_name()}")
         self.out(f"You'll see: {_bold(observe.see)}")
         self.out(f"Watch for: {observe.watch}")
         await self.answer("Press Enter to start... ")
@@ -740,6 +741,21 @@ class _CaseRun:
             except _NoOneThere:
                 saw = ""
             raise StepFailure(f"not seen: {observe.ask}" + (f"; saw: {saw}" if saw else ""))
+
+    async def lights_by_name(self) -> str:
+        """The case's lights by name, a group's members after it: the brief's step files can't name household lights."""
+
+        async def name(entity_id: str) -> str:
+            state = await self.ha.get_state(entity_id)
+            return (state and state["attributes"].get("friendly_name")) or entity_id
+
+        names = []
+        for entity_id in self.case.entities.values():
+            label = await name(entity_id)
+            if self.is_group(entity_id):
+                label += f" ({', '.join([await name(member) for member in await self.members(entity_id)])})"
+            names.append(label)
+        return "; ".join(names)
 
     async def answer(self, text: str) -> str:
         """The person's reply, stripped; EOF there means nobody is at the rig."""
