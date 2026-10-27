@@ -112,6 +112,10 @@ class ReportFilter:
         def detach() -> None:
             unsubscribe()
             unlisten()
+            # Nothing will show a running fade's end now: hand HA back to the bridge.
+            for light in self.api.lights:
+                if self.cache.running(light.id, BRIGHTNESS) is not None:
+                    self.hand_back(light.id)
 
         return detach
 
@@ -145,6 +149,18 @@ class ReportFilter:
                 event["on"] = {"on": False}
             self.api.events.emit(EventType.RESOURCE_UPDATED, event)
         self._show_rooms_soon(self._rooms(brightness))
+
+    def hand_back(self, light_id: str) -> None:
+        """Send aiohue what the bridge last reported for the light and HA was not shown: nothing predicts it now."""
+        if not self.hiding or not (held := self.cache.release(light_id)):
+            return
+        event: dict = {"id": light_id, "type": ResourceTypes.LIGHT.value, MARKER: True}
+        if "on" in held:
+            event["on"] = {"on": held["on"]}
+        if BRIGHTNESS in held:
+            event["dimming"] = {"brightness": held[BRIGHTNESS]}
+        self.api.events.emit(EventType.RESOURCE_UPDATED, event)
+        self._show_rooms_soon(self._rooms([light_id]))
 
     def _on_event(self, event_type: EventType, data: dict | None) -> None:
         # Runs inside aiohue's event loop: an exception here would stop core hue's events too.
@@ -259,21 +275,35 @@ def _end_key(light_id: str) -> str:
 
 def forget(hass: HomeAssistant, light_id: str) -> None:
     """A change made other than by a move or stop: drop the light's prediction and the fade end still to show."""
-    transition_cache(hass).forget(light_id)
-    get_runtime(hass).schedule(hass, _end_key(light_id), [])
+    cache = transition_cache(hass)
+    running = cache.running(light_id, BRIGHTNESS) is not None
+    cache.forget(light_id)
+    _forgotten(hass, light_id, running)
 
 
 async def write_forgetting(hass: HomeAssistant, light_id: str, write: Awaitable) -> None:
     """Forget the light before the write, so its report reaches HA rather than being taken for the bulb's own. A
     refused write left the light where its move had it, so the prediction comes back."""
     cache = transition_cache(hass)
+    running = cache.running(light_id, BRIGHTNESS) is not None
     forgotten = cache.forget(light_id)
     try:
         await write
     except Exception:
         cache.restore(light_id, forgotten)
         raise
+    _forgotten(hass, light_id, running)
+
+
+def _forgotten(hass: HomeAssistant, light_id: str, running: bool) -> None:
+    """Drop the end still to show. A fade still running goes on to the end the bridge reported at its start, so HA
+    is shown that, as it would be with predicted_state off; a write's own report, before or after, wins. A halt
+    stays shown: the bridge's late report of it may never come."""
     get_runtime(hass).schedule(hass, _end_key(light_id), [])
+    if running:
+        for reports in get_runtime(hass).integration_state.get("hue_filters", {}).values():
+            if reports.api.lights.get(light_id) is not None:
+                reports.hand_back(light_id)
 
 
 def applies_later(api: HueBridgeV2) -> bool:

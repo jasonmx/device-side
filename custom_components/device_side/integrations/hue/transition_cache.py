@@ -141,6 +141,10 @@ class TransitionCache:
             for key in keys:
                 hidden.pop(key, None)
 
+    def release(self, resource_id: str) -> dict[str, float | bool]:
+        """The bridge's values aiohue was not shown, now to be shown, so no longer kept here."""
+        return self._hidden.pop(resource_id, {})
+
     def bridge_value(self, resource_id: str, key: str, held: float | bool) -> float | bool:
         """What the bridge last reported for key: aiohue's value (held), unless it was hidden from aiohue since."""
         return self._hidden.get(resource_id, {}).get(key, held)

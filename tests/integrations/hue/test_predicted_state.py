@@ -11,8 +11,7 @@ from custom_components.device_side.core.runtime import get_runtime
 from custom_components.device_side.integrations.hue.move import end_echo
 from custom_components.device_side.integrations.hue.transition_cache import MIN_BRIGHTNESS_STEP, transition_cache
 
-from .conftest import Clock
-from .test_report_filter import light_event, setup_room
+from .conftest import light_event, setup_room
 from ...conftest import advance, call, wall_clock_now
 from ...fixtures.hue import add_hue_entity, add_hue_group, hue_entry
 
@@ -20,13 +19,6 @@ pytestmark = pytest.mark.usefixtures("setup_production")
 
 # light "one" from 20 % to full at sweep_time 10 takes 8 s.
 FADE_S = 8.0
-
-
-@pytest.fixture
-def clock(hass) -> Clock:
-    clock = Clock()
-    transition_cache(hass).clock = clock
-    return clock
 
 
 async def settle(hass) -> None:
@@ -131,6 +123,48 @@ async def test_a_change_from_ha_drops_the_end(hass, bridge, clock):
     await advance(hass, start, FADE_S + 1)
 
     assert shown(bridge, "one") == (True, 55.0)
+
+
+async def test_a_color_change_from_ha_mid_fade_hands_ha_back_to_the_bridge(hass, bridge, clock):
+    # Nothing will show the fade's end now, so HA shows the end the bridge reported at its start.
+    await setup_room(hass, bridge)
+    async_mock_service(hass, "light", "turn_on")
+    await raise_one(hass)
+    report(bridge, light_event("one", brightness=100.0))
+    clock.now += 2.0
+
+    warmer = {"entity_id": "light.one", "color_temp_kelvin": 3000}
+    await hass.services.async_call("light", "turn_on", warmer, blocking=True)
+    await settle(hass)
+
+    assert shown(bridge, "one") == (True, 100.0)
+
+
+async def test_a_change_from_ha_after_a_stop_keeps_the_halt(hass, bridge, clock):
+    await setup_room(hass, bridge)
+    async_mock_service(hass, "light", "turn_on")
+    await raise_one(hass)
+    report(bridge, light_event("one", brightness=100.0))
+    clock.now += 4.0
+    await call(hass, "stop", {"entity_id": "light.one"})
+
+    warmer = {"entity_id": "light.one", "color_temp_kelvin": 3000}
+    await hass.services.async_call("light", "turn_on", warmer, blocking=True)
+    await settle(hass)
+
+    assert shown(bridge, "one") == (True, 60.0)
+
+
+async def test_unloading_mid_fade_hands_ha_back_to_the_bridge(hass, bridge, clock, setup_production):
+    await setup_room(hass, bridge)
+    await raise_one(hass)
+    report(bridge, light_event("one", brightness=100.0))
+    await settle(hass)
+
+    assert await hass.config_entries.async_unload(setup_production.entry_id)
+    await settle(hass)
+
+    assert shown(bridge, "one") == (True, 100.0)
 
 
 async def test_set_attributes_mid_fade_reaches_ha(hass, bridge, clock):
