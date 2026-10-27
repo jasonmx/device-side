@@ -98,6 +98,33 @@ async def test_light_is_out_of_scope(setup_matter, hass):
     assert response["switch.plug"] == CONFIRMED
 
 
+def _no_client(entry):
+    del entry.runtime_data
+
+
+def _node_lookup_raises(entry):
+    entry.runtime_data.adapter.matter_client.get_node.side_effect = KeyError("node gone")
+
+
+def _node_missing(entry):
+    entry.runtime_data.adapter.matter_client.get_node.return_value = None
+
+
+@pytest.mark.parametrize("break_node", [_no_client, _node_lookup_raises, _node_missing])
+async def test_unreachable_node_is_not_addressable(setup_matter, hass, break_node):
+    """No Matter client, a node lookup that raises, or no node: the target is not addressable."""
+    entry, send_cmd, _ = matter_device(hass, endpoint_id=EP)
+    break_node(entry)
+    add_matter_entity(hass, entry, "switch.gone", endpoint_id=EP)
+    second_entry, _, _ = matter_device(hass, endpoint_id=2)
+    add_matter_entity(hass, second_entry, "switch.plug", endpoint_id=2)
+
+    response = await call(hass, "turn_on_for", {"entity_id": ["switch.gone", "switch.plug"], "duration": 5})
+
+    assert response["switch.gone"]["detail"] == "not_addressable"
+    assert response["switch.plug"] == CONFIRMED
+
+
 async def test_dead_front_bit_alone_is_not_lt(setup_matter, hass):
     """FeatureMap 0x2 is DeadFrontBehavior, not Lighting: the endpoint is refused."""
     entry, send_cmd, _ = matter_device(hass, endpoint_id=EP, feature_map=0x0002)
