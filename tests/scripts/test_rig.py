@@ -1,15 +1,21 @@
 """scripts/rig.py's preflight and gate. Nothing here touches the rig: no ssh, no HA."""
 
+import asyncio
 import importlib.util
 import itertools
+import os
+import signal
 import types
 from pathlib import Path
 
 import pytest
 
 from custom_components.device_side.core.registry import AdapterRegistry
+from tests.rig import engine
 from tests.rig.engine import load_step_file, load_step_files
 from tests.rig.inventory import Inventory, load_env, main_checkout
+from tests.rig.journal import Journal
+from tests.scripts import rig_fakes as fakes
 
 REPO = Path(__file__).parents[2]
 _spec = importlib.util.spec_from_file_location("rig", REPO / "scripts" / "rig.py")
@@ -455,3 +461,144 @@ def test_check_tokens_stops_a_run_of_an_adapter_with_options_without_an_admin_to
     with pytest.raises(SystemExit, match="hue needs HA_ADMIN_TOKEN"):
         rig.check_tokens(env, [rig.Suite(step_file, "hue")], registry)
     rig.check_tokens({**env, "HA_ADMIN_TOKEN": "admin"}, [rig.Suite(step_file, "hue")], registry)
+
+
+async def test_pause_journals_each_entity_before_turning_it_off(tmp_path):
+    journal = Journal(tmp_path / rig.JOURNAL_NAME)
+    ha = PauseHA({"switch.al_office": "on", "automation.motion_den": "on"})
+    seen = []  # what the journal held as each call was sent
+    call_service = ha.call_service
+
+    async def journaled(domain, service, data):
+        seen.append((service, journal.get("paused")))
+        await call_service(domain, service, data)
+
+    ha.call_service = journaled
+    paused: list[str] = []
+    await rig.pause(ha, list(ha.states), paused, journal)
+    await rig.resume(ha, paused, journal)
+
+    both = ["switch.al_office", "automation.motion_den"]
+    assert seen == [("turn_off", both[:1]), ("turn_off", both), ("turn_on", both), ("turn_on", both)]
+    assert not journal.path.exists()
+
+
+class RigHA(fakes.FakeAdmin):
+    async def close(self):
+        pass
+
+
+def rig_ha(monkeypatch, light: str, opt: bool, automation: str) -> RigHA:
+    """One fake for both connections, with a light, device_side's options and a RIG_PAUSE automation."""
+    monkeypatch.setattr(engine, "OPTIONS_RELOAD_S", 0)
+    ha = RigHA(
+        {"light.a": {"state": light, "attributes": {"brightness": 200}}, "automation.motion": {"state": automation}},
+        options={"opt": opt},
+    )
+    ha.respond = lambda ha, action, data: {data["entity_id"]: {"status": "sent", "integration": "shelly"}}
+
+    async def connect(env):
+        return ha, ha
+
+    monkeypatch.setattr(rig, "connect", connect)
+    return ha
+
+
+def put_back(ha: RigHA) -> bool:
+    return (
+        ha.states["light.a"] == {"entity_id": "light.a", "state": "on", "attributes": {"brightness": 200}}
+        and ha.states["automation.motion"]["state"] == "on"
+        and ha.options == {"opt": True, "other": False}
+    )
+
+
+@pytest.mark.parametrize("signum", [signal.SIGINT, signal.SIGTERM])
+async def test_a_signal_mid_case_puts_everything_back_and_leaves_no_journal(tmp_path, monkeypatch, capsys, signum):
+    ha = rig_ha(monkeypatch, light="on", opt=True, automation="on")
+    journal = Journal(tmp_path / rig.JOURNAL_NAME)
+    steps = write(tmp_path, "steps.yaml", fakes.WAITING_MIDWAY)
+    run_rig = rig.run_rig(
+        {"RIG_PAUSE": "automation.motion"},
+        [rig.Suite(load_step_file(steps), "shelly")],
+        fakes.inventory("shelly", light_ct="light.a"),
+        fakes.OPTION_REGISTRY,
+        None,
+        True,
+        journal,
+    )
+    task = asyncio.create_task(run_rig)
+    while ha.states["light.a"]["state"] != "off":
+        await asyncio.sleep(0.005)
+    assert set(journal.sections) == {"paused", "options", "taken", "stored", "power"}
+
+    os.kill(os.getpid(), signum)
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert "Aborting: putting devices back" in capsys.readouterr().out
+    assert put_back(ha)
+    assert not journal.path.exists()
+
+
+def aborted_journal(path: Path) -> Journal:
+    """What a run killed mid-case leaves: the light it turned off, the option it saved and the automation it paused."""
+    journal = Journal(path)
+    journal.update(
+        paused=["automation.motion"],
+        options={"opt": True, "other": False},
+        taken={"light.a": {"entity_id": "light.a", "state": "on", "attributes": {"brightness": 200}}},
+        stored={},
+        power={},
+    )
+    return journal
+
+
+async def test_recover_puts_back_what_an_aborted_run_left(tmp_path, monkeypatch):
+    ha = rig_ha(monkeypatch, light="off", opt=False, automation="off")
+    printed = []
+
+    await rig.recover(ha, ha, aborted_journal(tmp_path / rig.JOURNAL_NAME), out=printed.append)
+
+    assert put_back(ha)
+    assert [call[:2] for call in ha.calls] == [("light", "turn_on"), ("automation", "turn_on")]
+    assert "Putting light.a back on." in printed
+    assert not (tmp_path / rig.JOURNAL_NAME).exists()
+
+
+async def test_recover_without_an_admin_token_leaves_the_options_in_the_journal(tmp_path, monkeypatch):
+    ha = rig_ha(monkeypatch, light="off", opt=False, automation="off")
+    journal = aborted_journal(tmp_path / rig.JOURNAL_NAME)
+
+    await rig.recover(ha, None, journal, out=lambda _: None)
+
+    assert ha.options == {"opt": False, "other": False}
+    assert Journal(journal.path).sections == {"options": {"opt": True, "other": False}}
+
+
+def test_main_recovers_before_the_plan_and_recover_alone_stops_there(tmp_path, monkeypatch, capsys):
+    ha = rig_ha(monkeypatch, light="off", opt=False, automation="off")
+    aborted_journal(tmp_path / rig.JOURNAL_NAME)
+    monkeypatch.setattr(rig, "git", lambda *args, check=True: str(tmp_path) if "--git-common-dir" in args else "wt/x")
+    monkeypatch.setattr(rig, "load_env", lambda: {"HA_URL": "http://ha:8123", "HA_TOKEN": "tok"})
+
+    assert rig.main(["--dry-run", "--recover"]) == 1
+    assert "the next run puts them back before its gate" in capsys.readouterr().out
+    assert rig.main(["--recover"]) == 0
+    assert put_back(ha)
+    assert rig.main(["--recover"]) == 0
+    assert "No aborted run left anything to put back." in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("error", "line"),
+    [
+        (asyncio.CancelledError, "Aborted."),
+        (KeyboardInterrupt, "Aborted before putting everything back; the next run puts back the rest."),
+    ],
+)
+def test_a_stopped_run_ends_on_one_line_not_a_traceback(capsys, error, line):
+    async def stopped():
+        raise error
+
+    assert rig.run_tests(stopped()) == 1
+    assert capsys.readouterr().out == f"{line}\n"

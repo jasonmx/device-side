@@ -34,6 +34,9 @@ Rig tests are YAML step files in `tests/rig/steps/`, one per action. `scripts/ri
 every integration in your `tests/rig/inventory.yaml` that has an adapter for the action, after a y/N gate:
 the devices change state, so nothing moves until you say yes. `--dry-run` prints the plan and stops.
 
+Ctrl-C, SIGTERM or SIGHUP puts the devices back before the run exits; a second one leaves them. If a run dies before it can, the next run
+puts back what it left before its gate; `--recover` does only that.
+
 ### Token
 
 Make a dedicated Home Assistant user without admin rights and create its long-lived token for `HA_TOKEN` in

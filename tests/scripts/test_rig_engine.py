@@ -1,7 +1,9 @@
 """The rig engine against a fake HAClient: a state machine plus scripted device_side responses. No HA, no rig."""
 
 import asyncio
-import copy
+import contextlib
+import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -27,9 +29,18 @@ from tests.rig.engine import (
     write_report,
 )
 from tests.rig.inventory import Inventory, RigEntity
+from tests.rig.journal import Journal
+from tests.scripts.rig_fakes import (
+    OPTION_REGISTRY,
+    PENDING,
+    RESTORED_MIDWAY,
+    WAITING_MIDWAY,
+    FakeAdmin,
+    FakeHA,
+    inventory,
+)
 
 TOL = 0.2
-PENDING: list[asyncio.TimerHandle | asyncio.Task] = []
 TOLERANCE = {"shelly": TOL, "zha": TOL, "zigbee2mqtt": TOL, "hue": TOL, "fake": TOL}
 REGISTRY = AdapterRegistry.discover()
 
@@ -65,69 +76,12 @@ async def _cancel_pending():
     PENDING.clear()
 
 
-class FakeHA:
-    """Entity states HA would hold, plain on/off services, and device_side actions answered by `respond`."""
-
-    def __init__(self, states: dict[str, dict], respond: Callable | None = None):
-        self.states = {
-            entity_id: {"entity_id": entity_id, "state": "off", "attributes": {}} | state
-            for entity_id, state in states.items()
-        }
-        self.respond = respond
-        self.calls: list[tuple[str, str, dict]] = []
-
-    def set(self, entity_id: str, state: str, **attributes) -> None:
-        # HA keeps an entity's name whatever its state; every other attribute is the new state's own.
-        if name := self.states.get(entity_id, {}).get("attributes", {}).get("friendly_name"):
-            attributes = {"friendly_name": name} | attributes
-        self.states[entity_id] = {"entity_id": entity_id, "state": state, "attributes": attributes}
-
-    def later(self, delay: float, entity_id: str, state: str) -> None:
-        PENDING.append(asyncio.get_running_loop().call_later(delay, self.set, entity_id, state))
-
-    async def call_service(self, domain: str, service: str, data: dict | None = None, return_response=False):
-        self.calls.append((domain, service, dict(data or {})))
-        if domain == "device_side":
-            return self.respond(self, service, data)
-        entity_id = data["entity_id"]
-        attributes = {key: value for key, value in data.items() if key != "entity_id"}
-        state = "on" if service == "turn_on" else "off"
-        members = self.states[entity_id]["attributes"].get("entity_id")
-        for member in members or []:
-            self.set(member, state, **attributes)
-        self.set(entity_id, state, **attributes)
-        if members:
-            self.states[entity_id]["attributes"]["entity_id"] = members
-        return None
-
-    async def get_state(self, entity_id: str) -> dict | None:
-        return copy.deepcopy(self.states.get(entity_id))
-
-    async def wait_for(self, entity_id: str, predicate, timeout: float):
-        async with asyncio.timeout(timeout):
-            while not predicate(state := await self.get_state(entity_id)):
-                await asyncio.sleep(0.005)
-        return state
-
-    async def command(self, payload: dict):
-        return {
-            "get_config": {"version": "2026.10.1"},
-            "config/entity_registry/list_for_display": {"entities": [{"ei": "switch.plug", "di": "d1"}]},
-            "config/device_registry/list": [{"id": "d1", "model": "Mini", "model_id": "S3", "sw_version": "2.0"}],
-        }[payload["type"]]
-
-
 def timer_on(ha: FakeHA, action: str, data: dict) -> dict:
     """turn_on_for as a device with a working timer: on now, off after the duration."""
     entity_id = data["entity_id"]
     ha.set(entity_id, "on")
     ha.later(data["duration"]["seconds"], entity_id, "off")
     return {entity_id: {"status": "confirmed", "integration": "shelly"}}
-
-
-def inventory(integration: str = "shelly", **roles: str) -> Inventory:
-    entities = [RigEntity(entity_id, frozenset({role})) for role, entity_id in roles.items()]
-    return Inventory({integration: entities})
 
 
 def suite(tmp_path: Path, text: str, integration: str = "shelly") -> Suite:
@@ -1106,41 +1060,6 @@ def test_z2m_option_needs_an_option(tmp_path, args):
         suite(tmp_path, text, "zigbee2mqtt")
 
 
-OPTION_REGISTRY = SimpleNamespace(
-    adapter=lambda action, integration: SimpleNamespace(
-        scope=SimpleNamespace(
-            confirmable=False, capabilities=None, fields=frozenset(), options=frozenset({"opt", "other"})
-        )
-    )
-)
-
-
-class FakeAdmin(FakeHA):
-    """FakeHA plus device_side's entry and its options flow, which saves what it is sent."""
-
-    def __init__(self, states: dict[str, dict], respond: Callable | None = None, options: dict | None = None):
-        super().__init__(states, respond)
-        self.options = {"opt": True, "other": False} | (options or {})
-        self.saved: list[dict] = []
-        self.aborted = 0
-
-    async def command(self, payload: dict):
-        if payload["type"] == "config_entries/get":
-            return [{"entry_id": "e1", "state": "loaded"}]
-        return await super().command(payload)
-
-    async def rest(self, method: str, path: str, json: dict | None = None):
-        if path.endswith("/options/flow"):
-            schema = [{"name": name, "default": value, "type": "boolean"} for name, value in self.options.items()]
-            return {"type": "form", "flow_id": "f1", "data_schema": schema}
-        if method == "delete":
-            self.aborted += 1
-            return {"message": "Flow aborted"}
-        self.options = dict(json)
-        self.saved.append(dict(json))
-        return {"type": "create_entry"}
-
-
 def option_file(options: str = "") -> str:
     lines = ["action: move", "rig_seconds: 5"] + ([f"options: [{options}]"] if options else [])
     return "\n".join([*lines, "tests:", "  - name: t", "    roles: [light_ct]", "    steps:", "      - call: {}", ""])
@@ -1197,6 +1116,70 @@ async def test_options_already_in_force_are_not_saved(tmp_path, monkeypatch):
     assert not result.failed
     assert admin.saved == []
     assert admin.aborted == 1
+
+
+
+
+async def test_the_journal_holds_each_change_before_it_is_made_and_is_gone_after_the_run(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "OPTIONS_RELOAD_S", 0)
+    journal = Journal(tmp_path / "journal.json")
+    admin = FakeAdmin({"light.a": {"state": "on", "attributes": {"brightness": 200}}})
+    admin.respond = options_seen(admin)
+    seen = []  # what the journal held as each change was sent
+    rest, call_service = admin.rest, admin.call_service
+
+    async def save(method, path, json=None):
+        if method == "post" and not path.endswith("/options/flow"):
+            seen.append(("save", journal.get("options")))
+        return await rest(method, path, json)
+
+    async def light(domain, service, data=None, return_response=False):
+        if domain == "light":
+            seen.append((service, list(journal.get("taken", {}))))
+        return await call_service(domain, service, data, return_response)
+
+    admin.rest, admin.call_service = save, light
+    result = await run(
+        [suite(tmp_path, RESTORED_MIDWAY, "fake")], inventory("fake", light_ct="light.a"), OPTION_REGISTRY,
+        admin, admin=admin, tolerance=TOLERANCE, out=lambda _: None, journal=journal,
+    )
+
+    assert not result.failed
+    original = {"opt": True, "other": False}
+    assert seen == [
+        ("save", original),
+        ("turn_off", ["light.a"]),
+        ("turn_on", ["light.a"]),  # the restore step: the case goes on, so the journal keeps the light
+        ("turn_off", ["light.a"]),
+        ("turn_on", ["light.a"]),
+        ("save", original),
+    ]
+    assert admin.states["light.a"]["attributes"] == {"brightness": 200}
+    assert not journal.path.exists()
+
+
+async def test_a_run_cancelled_mid_case_puts_back_and_clears_its_journal(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "OPTIONS_RELOAD_S", 0)
+    journal = Journal(tmp_path / "journal.json")
+    admin = FakeAdmin({"light.a": {"state": "on", "attributes": {"brightness": 200}}})
+    admin.respond = options_seen(admin)
+    task = asyncio.create_task(
+        run(
+            [suite(tmp_path, WAITING_MIDWAY, "fake")], inventory("fake", light_ct="light.a"), OPTION_REGISTRY,
+            admin, admin=admin, tolerance=TOLERANCE, out=lambda _: None, journal=journal,
+        )
+    )
+    while admin.states["light.a"]["state"] != "off":
+        await asyncio.sleep(0.005)
+    assert journal.path.exists()
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert admin.states["light.a"] == {"entity_id": "light.a", "state": "on", "attributes": {"brightness": 200}}
+    assert admin.options == {"opt": True, "other": False}
+    assert not journal.path.exists()
 
 
 async def test_a_save_the_flow_refuses_closes_the_flow_and_raises():
@@ -1424,3 +1407,24 @@ def test_a_bad_bridge_step_does_not_parse(tmp_path, args, message):
     text = BRIDGE_STEPS.replace("bridge: {put: {on: {on: true}}}", f"bridge: {args}", 1)
     with pytest.raises(ValueError, match=message):
         suite(tmp_path, text)
+
+
+def test_a_run_cancelled_at_a_prompt_exits_without_waiting_for_an_answer():
+    # asyncio.run waits for its executor's threads at exit, and a thread blocked in input() never ends by itself.
+    answered = threading.Event()
+
+    def nobody_answers(_text: str) -> str:
+        answered.wait(10)
+        return ""
+
+    async def cancelled_at_the_prompt():
+        prompt = asyncio.create_task(engine._prompt(nobody_answers, "Press Enter to start... "))
+        await asyncio.sleep(0.05)
+        prompt.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await prompt
+
+    started = time.monotonic()
+    asyncio.run(cancelled_at_the_prompt())
+    assert time.monotonic() - started < 2
+    answered.set()
