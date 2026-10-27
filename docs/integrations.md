@@ -26,7 +26,7 @@ instance come from the entity's unique ID, which the Shelly integration writes a
 | `cct:N` | `CCT` | `light` | not yet | `brightness`, `transition`, `color_temp_kelvin` |
 | `rgb:N` | `RGB` | `light` | not yet | `brightness`, `transition`, `rgb_color` |
 | `rgbw:N` | `RGBW` | `light` | not yet | `brightness`, `transition`, `rgb_color` |
-| `rgbcct:N` | `RGBCCT` | `light` | not yet | `brightness`, `transition`, `color_temp_kelvin`, `rgb_color` |
+| `rgbcct:N` | `RGBCCT` | `light` | yes | `brightness`, `transition`, `color_temp_kelvin`, `rgb_color` |
 
 Any other Shelly entity (virtual booleans, scripts, circuit breakers) has no flip-back timer and
 returns `unsupported` with detail `not_addressable`. Shelly has no device-side groups, so a light
@@ -52,12 +52,12 @@ reports a running timer (`timer_duration`), the result is `confirmed`. Otherwise
 detail `timer_not_reported` (the device answered without a timer) or `readback_failed` (the
 read-back call itself failed). Either way the `Set` was accepted.
 
-Only relays are in scope so far, whether HA shows them as a switch or a light. A dimmer, CCT or RGB
-light returns `unsupported` with detail `capability_not_tested` until someone tests one. A light
-field (brightness, color, transition) on a light returns `unsupported` with detail
-`fields_not_tested` rather than being dropped silently; a field the component can't take at all
-returns `fields_not_supported`. Fields sent to a `switch` entity are
-ignored and the result says so with detail `light_fields_ignored`.
+Relays (whether HA shows them as a switch or a light) and `RGBCCT` color bulbs are in scope so far.
+A `Light`, `CCT`, `RGB` or `RGBW` light returns `unsupported` with detail `capability_not_tested`
+until someone tests one. A light field the component can't take, such as brightness on a relay,
+returns `unsupported` with detail `fields_not_supported` rather than being dropped silently;
+`hs_color` and `xy_color` return `fields_not_tested` (see Sharp edges). Fields sent to a `switch`
+entity are ignored and the result says so with detail `light_fields_ignored`.
 
 ### `turn_off_for`
 
@@ -82,9 +82,9 @@ input was not tested, and what it does may depend on the input mode.
   sent it: Home Assistant, the Shelly app or another integration (see Cancelling).
 - **Colors other than RGB.** `hs_color` and `xy_color` are refused rather than converted, because
   the conversion depends on the component's color mode. Send `rgb_color` or `color_temp_kelvin`.
-- **Only relays are in scope.** `Light`, `CCT`, `RGB`, `RGBW` and `RGBCCT` document `toggle_after`
-  the same way as `Switch`, but they are different firmware and no hardware run has covered them,
-  so they are refused until a tester reports one.
+- **Only relays and `RGBCCT` are in scope.** `Light`, `CCT`, `RGB` and `RGBW` document `toggle_after`
+  the same way, but they are different firmware and no hardware run has covered them, so they are
+  refused until a tester reports one.
 
 ## Zigbee2MQTT
 
