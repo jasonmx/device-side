@@ -21,7 +21,7 @@ from custom_components.device_side.integrations.zigbee2mqtt.addressing import (
 )
 from custom_components.device_side.integrations.zigbee2mqtt.detect import detect
 
-from ...conftest import advance, call, wall_clock_now
+from ...conftest import advance, call, refusal, wall_clock_now
 from ...fixtures.z2m import IEEE, add_z2m_entity, add_z2m_group, z2m_entry
 
 SENT = {"status": "sent", "integration": "zigbee2mqtt"}
@@ -86,10 +86,7 @@ async def test_light_with_multiple_fields_passes_them_all_to_turn_on(hass, setup
 async def test_switch_is_out_of_scope(hass, setup_production, publishes, turn_ons):
     add_z2m_entity(hass, z2m_entry(hass), "switch.plug")
 
-    with pytest.raises(HomeAssistantError) as raised:
-        await call(hass, "turn_on_for", {"entity_id": "switch.plug", "duration": 5})
-
-    assert raised.value.translation_placeholders["summary"] == "switch.plug: domain_not_tested"
+    assert await refusal(hass, "turn_on_for", {"entity_id": "switch.plug", "duration": 5}) == "domain_not_tested"
     assert not publishes
 
 
@@ -112,8 +109,8 @@ async def test_duration_clamped_to_z2m_max(hass, setup_production, publishes, tu
     assert json.loads(publishes[0].data["payload"]) == {"state": "ON", "on_time": 6553.4}
 
 
-async def test_non_z2m_mqtt_entity_is_unsupported(hass, setup_production, publishes, turn_ons):
-    """An MQTT entity whose device lacks the zigbee2mqtt_ identifier is not detected as Z2M."""
+async def test_non_z2m_mqtt_entity_is_refused(hass, setup_production, publishes, turn_ons):
+    """A named MQTT entity whose device lacks the zigbee2mqtt_ identifier raises TargetNotSupported."""
     entry = z2m_entry(hass)
     other_device = dr.async_get(hass).async_get_or_create(
         config_entry_id=entry.entry_id,
@@ -128,15 +125,10 @@ async def test_non_z2m_mqtt_entity_is_unsupported(hass, setup_production, publis
     hass.states.async_set("light.other_light", "off")
     add_z2m_entity(hass, entry, "light.kitchen")
 
-    response = await call(
-        hass, "turn_on_for", {"entity_id": ["light.kitchen", "light.other_light"], "duration": 5}
-    )
-
+    reason = await refusal(hass, "turn_on_for", {"entity_id": "light.other_light", "duration": 5})
+    assert reason == "integration_not_supported"
+    response = await call(hass, "turn_on_for", {"entity_id": "light.kitchen", "duration": 5})
     assert response["light.kitchen"] == SENT
-    assert response["light.other_light"]["status"] == "unsupported"
-    assert response["light.other_light"]["detail"] == "integration_not_supported"
-    assert len(publishes) == 1
-    assert publishes[0].data["topic"] == TOPIC
 
 
 async def test_publish_error_rejects_that_target(hass, setup_production, turn_ons):
@@ -147,7 +139,7 @@ async def test_publish_error_rejects_that_target(hass, setup_production, turn_on
     with pytest.raises(HomeAssistantError) as raised:
         await call(hass, "turn_on_for", {"entity_id": "light.kitchen", "duration": 5})
 
-    assert raised.value.translation_key == "all_targets_failed"
+    assert raised.value.translation_key == "targets_failed"
 
 
 async def test_turn_on_error_rejects_that_target(hass, setup_production, publishes):
@@ -159,7 +151,7 @@ async def test_turn_on_error_rejects_that_target(hass, setup_production, publish
     with pytest.raises(HomeAssistantError) as raised:
         await call(hass, "turn_on_for", {"entity_id": "light.kitchen", "duration": 5, "brightness": 128})
 
-    assert raised.value.translation_key == "all_targets_failed"
+    assert raised.value.translation_key == "targets_failed"
     assert not publishes  # publish was never reached
 
 
@@ -216,10 +208,7 @@ async def test_group_with_fields_calls_turn_on_then_publishes(hass, setup_produc
 async def test_group_on_custom_base_topic_is_not_addressable(hass, setup_production, publishes, turn_ons):
     add_z2m_group(hass, z2m_entry(hass), "light.downstairs", group_id=7, base_topic="z2m")
 
-    with pytest.raises(HomeAssistantError) as raised:
-        await call(hass, "turn_on_for", {"entity_id": "light.downstairs", "duration": 5})
-
-    assert raised.value.translation_placeholders["summary"] == "light.downstairs: not_addressable"
+    assert await refusal(hass, "turn_on_for", {"entity_id": "light.downstairs", "duration": 5}) == "not_addressable"
     assert not publishes
 
 
@@ -325,7 +314,7 @@ async def test_a_failed_turn_on_unsubscribes_and_rejects(hass, setup_production,
     with pytest.raises(HomeAssistantError) as raised:
         await call(hass, "turn_on_for", {"entity_id": "light.kitchen", "duration": 5, "brightness": 128})
 
-    assert raised.value.translation_key == "all_targets_failed"
+    assert raised.value.translation_key == "targets_failed"
     assert "timer" not in z2m.events
     assert z2m.subscribers[STATE_TOPIC] == []
 

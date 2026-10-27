@@ -1,5 +1,5 @@
-from dataclasses import dataclass, field
-from typing import ClassVar
+from dataclasses import dataclass, field, replace
+from typing import ClassVar, Self
 
 import probatio
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -17,6 +17,10 @@ class TurnOnForRequest(TimedRequest):
 
     def fields_present(self) -> frozenset[str]:
         return self.light.present()
+
+    def without(self, names: frozenset[str]) -> Self:
+        # Never nothing to do: with every field dropped the timer still runs, as light.turn_on still turns on.
+        return replace(self, light=self.light.without(names))
 
 
 # 10 ms steps; the dispatcher applies the 50 ms floor (core/duration.py) so it can report clamped_to.

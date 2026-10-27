@@ -88,10 +88,11 @@ class HueMove(Adapter[MoveRequest]):
 
     Up turns the light on. Down to 0 % is a plain soft off, on: false with the duration and no brightness, so the
     bridge keeps the stored brightness for the next plain on. Color temperature moves only lit lights, so without
-    brightness up a light or room with nothing lit is unchanged with off; a light in color (xy) mode is refused with
-    not_in_color_temp_mode. An attribute already at or past its limit is left out, and a move with nothing left to make
-    is unchanged with at_limit and nothing is sent. With predicted_state on, HA holds the start brightness while the
-    fade runs and shows the end once it has (report_filter); color temperature shows what the bridge reports.
+    brightness up a light or room with nothing lit is unchanged with off, and a light in color (xy) mode is left alone
+    with not_in_color_temp_mode. An attribute the bridge says the light can't move is dropped. An attribute already
+    at or past its limit is left out, and a move with nothing left to make is unchanged with at_limit and nothing is
+    sent. With predicted_state on, HA holds the start brightness while the fade runs and shows the end once it has
+    (report_filter); color temperature shows what the bridge reports.
     """
 
     action: ClassVar[str] = "move"
@@ -120,25 +121,26 @@ class HueMove(Adapter[MoveRequest]):
             if (resource := writer.get(rid)) is None:
                 return self.result(target, Status.REJECTED, detail="not_on_bridge")
             lights = api.groups.grouped_light.get_lights(rid) if target.is_group else [resource]
-            if (reason := refused(cache, request, resource, lights)) is not None:
-                return self.result(target, Status.UNSUPPORTED, detail=reason)
+            dropped = lacked(request, resource, lights)
+            move = request.without(dropped)
             fades: list[Fade | str] = []
-            if request.brightness:
-                fades.append(brightness_fade(cache, request, target, api))
-            if request.color_temp:
-                fades.append(color_temp_fade(cache, request, lights))
+            if move.brightness:
+                fades.append(brightness_fade(cache, move, target, api))
+            if move.color_temp:
+                fades.append(color_temp_fade(cache, move, lights))
             if not (made := [fade for fade in fades if isinstance(fade, Fade)]):
                 # A light that's off explains a brightness move down having nothing to do too.
-                return self.result(target, Status.UNCHANGED, detail="off" if "off" in fades else fades[0])
+                detail = "off" if "off" in fades else fades[0] if fades else "fields_dropped"
+                return self.result(target, Status.UNCHANGED, detail=detail)
             reports = report_filter(hass, target)
             for fade in made:
-                write = fade_write(writer, rid, fade, request.brightness == UP)
+                write = fade_write(writer, rid, fade, move.brightness == UP)
                 async with cache.recording((light_id, fade.attribute) for light_id in fade.starts):
                     for light_id, start in fade.starts.items():
                         cache.moving(light_id, fade.attribute, start, fade.ends[light_id], fade.duration)
                     await write
                 reports.fading(fade.attribute, fade.ends, fade.duration)
-            return self.result(target, Status.SENT)
+            return self.result(target, Status.SENT, detail="fields_dropped" if dropped else None)
 
         return await self.gather(hass, targets, send)
 
@@ -150,17 +152,14 @@ def tunable(cache: TransitionCache, request: MoveRequest, lights: list[Light]) -
     return lights if request.brightness == UP else lit(cache, lights)
 
 
-def refused(
-    cache: TransitionCache, request: MoveRequest, resource: Light | GroupedLight, lights: list[Light]
-) -> str | None:
-    """Why the light or room can't make the move, if it can't."""
-    if (request.brightness and resource.dimming is None) or (
-        request.color_temp and not any(light.color_temperature for light in lights)
-    ):
-        return "fields_not_supported"
-    if request.color_temp and not all(light.color_temperature.mirek_valid for light in tunable(cache, request, lights)):
-        return "not_in_color_temp_mode"
-    return None
+def lacked(request: MoveRequest, resource: Light | GroupedLight, lights: list[Light]) -> frozenset[str]:
+    """The attributes the bridge says the light or room can't move, with their limits, which the move drops."""
+    lacked: set[str] = set()
+    if resource.dimming is None:
+        lacked |= {"brightness", "brightness_limit"}
+    if not any(light.color_temperature for light in lights):
+        lacked |= {"color_temp", "color_temp_limit"}
+    return request.fields_present() & lacked
 
 
 def fade_write(writer: LightsController | GroupedLightController, rid: str, fade: Fade, up: bool) -> Awaitable:
@@ -197,10 +196,12 @@ def brightness_fade(cache: TransitionCache, request: MoveRequest, target: Target
 
 def color_temp_fade(cache: TransitionCache, request: MoveRequest, lights: list[Light]) -> Fade | str:
     """The color temperature fade toward the limit within the widest range among the lights, each light ending at the
-    edge of its own; off with no light to move, at_limit when there is none left to make. Mirek rises as the light
-    warms."""
+    edge of its own; off with no light to move, not_in_color_temp_mode while any is in color (xy) mode, at_limit when
+    there is none left to make. Mirek rises as the light warms."""
     if not (movers := tunable(cache, request, lights)):
         return "off"
+    if not all(light.color_temperature.mirek_valid for light in movers):
+        return "not_in_color_temp_mode"
     warmer = request.color_temp == WARMER
     schemas = {light.id: light.color_temperature.mirek_schema for light in movers}
     low = min(schema.mirek_minimum for schema in schemas.values())

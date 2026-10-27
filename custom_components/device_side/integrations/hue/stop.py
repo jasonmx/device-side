@@ -41,8 +41,10 @@ class HueStop(Adapter[Request]):
     def supports(self, hass: HomeAssistant, request: Request, target: Target) -> str | None:
         if (reason := super().supports(hass, request, target)) is not None:
             return reason
-        if bridge_api(target) is None:
+        if (api := bridge_api(target)) is None:
             return "bridge_v1"
+        if (resource := controller(api, target).get(resource_id(target))) is not None and resource.dimming is None:
+            return "not_dimmable"
         return None
 
     async def execute(self, hass: HomeAssistant, request: Request, targets: list[Target]) -> list[EntityResult]:
@@ -54,8 +56,6 @@ class HueStop(Adapter[Request]):
             rid = resource_id(target)
             if (resource := writer.get(rid)) is None:
                 return self.result(target, Status.REJECTED, detail="not_on_bridge")
-            if resource.dimming is None:
-                return self.result(target, Status.UNSUPPORTED, detail="not_dimmable")
             reports = report_filter(hass, target)
             if target.is_group:
                 lights = lit(cache, room_lights(api, target))

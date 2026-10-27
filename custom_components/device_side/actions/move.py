@@ -1,5 +1,5 @@
-from dataclasses import dataclass
-from typing import ClassVar
+from dataclasses import dataclass, replace
+from typing import ClassVar, Self
 
 import probatio
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -39,6 +39,12 @@ class MoveRequest(Request):
 
     def fields_present(self) -> frozenset[str]:
         return frozenset(name for name in (*DIRECTIONS, *LIMITS.values()) if getattr(self, name) is not None)
+
+    def without(self, names: frozenset[str]) -> Self:
+        return replace(self, **{name: None for name in names if name in (*DIRECTIONS, *LIMITS.values())})
+
+    def nothing_to_do(self) -> bool:
+        return not any(getattr(self, name) for name in DIRECTIONS)
 
 
 class Move(Action[MoveRequest]):
