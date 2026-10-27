@@ -4,11 +4,10 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import entity_registry as er
 
 from .transition_cache import BRIGHTNESS, COLOR_TEMP
 from ...core.models import Target
-from ...core.resolver import resolve
+from ...core.resolver import resolve_members
 from ...core.runtime import get_runtime
 
 if TYPE_CHECKING:
@@ -54,17 +53,8 @@ def expand_group(hass: HomeAssistant, target: Target) -> list[Target]:
 
     Only called for a target is_hue_group accepted, which has a v2 bridge.
     """
-    api = bridge_api(target)
-    entities = er.async_get(hass)
-    registry = get_runtime(hass).registry
-    members = []
-    for light in api.groups.grouped_light.get_lights(resource_id(target)):
-        entity_id = entities.async_get_entity_id("light", "hue", light.id)
-        if entity_id is not None and not isinstance(
-            member := resolve(hass, registry, entity_id, target.entity_id), str
-        ):
-            members.append(member)
-    return sorted(members, key=lambda member: member.entity_id)
+    lights = bridge_api(target).groups.grouped_light.get_lights(resource_id(target))
+    return resolve_members(hass, get_runtime(hass).registry, target, "hue", (light.id for light in lights))
 
 
 async def write_light(
