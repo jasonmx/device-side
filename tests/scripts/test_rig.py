@@ -328,15 +328,16 @@ def test_an_uncontested_lock_says_nothing(tmp_path):
 
 
 def test_check_tokens_stops_a_zha_run_without_an_admin_token():
+    registry = AdapterRegistry.discover()
     step_file = next(f for f in load_step_files() if f.action == "turn_on_for")
     zha, shelly = rig.Suite(step_file, "zha"), rig.Suite(step_file, "shelly")
     env = {"HA_URL": "http://ha:8123", "HA_TOKEN": "tok"}
     with pytest.raises(SystemExit, match="HA_URL and HA_TOKEN"):
-        rig.check_tokens({}, [shelly])
+        rig.check_tokens({}, [shelly], registry)
     with pytest.raises(SystemExit, match="zha needs HA_ADMIN_TOKEN"):
-        rig.check_tokens(env, [shelly, zha])
-    rig.check_tokens(env, [shelly])
-    rig.check_tokens({**env, "HA_ADMIN_TOKEN": "admin"}, [zha])
+        rig.check_tokens(env, [shelly, zha], registry)
+    rig.check_tokens(env, [shelly], registry)
+    rig.check_tokens({**env, "HA_ADMIN_TOKEN": "admin"}, [zha], registry)
 
 
 class PauseHA:
@@ -386,3 +387,13 @@ async def test_pause_stops_on_an_unknown_entity():
 def test_pause_list_refuses_other_domains():
     with pytest.raises(SystemExit, match="automations and switches only, got light.hall"):
         rig.pause_list({"RIG_PAUSE": "switch.al_office, light.hall"})
+
+
+def test_check_tokens_stops_a_run_of_an_adapter_with_options_without_an_admin_token():
+    # Its options are pinned through device_side's options flow, which is admin only.
+    registry = AdapterRegistry.discover()
+    step_file = next(f for f in load_step_files() if f.action == "move")
+    env = {"HA_URL": "http://ha:8123", "HA_TOKEN": "tok"}
+    with pytest.raises(SystemExit, match="hue needs HA_ADMIN_TOKEN"):
+        rig.check_tokens(env, [rig.Suite(step_file, "hue")], registry)
+    rig.check_tokens({**env, "HA_ADMIN_TOKEN": "admin"}, [rig.Suite(step_file, "hue")], registry)

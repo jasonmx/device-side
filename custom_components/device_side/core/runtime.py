@@ -7,7 +7,7 @@ from homeassistant.core import CALLBACK_TYPE, HomeAssistant
 from homeassistant.helpers.event import async_call_later
 from homeassistant.util.hass_dict import HassKey
 
-from ..const import DOMAIN
+from ..const import DOMAIN, PREDICTED_STATE_DEFAULT
 
 if TYPE_CHECKING:
     from .dispatcher import Dispatcher
@@ -30,6 +30,8 @@ class DeviceSideData:
     pending: dict[str, list[CALLBACK_TYPE]] = field(default_factory=dict)
     # Listeners attached on first use, by the caller's key, with what they were attached for (the Hue report filters).
     listeners: dict[str, tuple[object, CALLBACK_TYPE]] = field(default_factory=dict)
+    # The entry's predicted_state option: Hue fades show device_side's predictions in HA.
+    predicted_state: bool = PREDICTED_STATE_DEFAULT
 
     def semaphore(self, key: str, limit: int) -> asyncio.Semaphore:
         if (semaphore := self.semaphores.get(key)) is None:

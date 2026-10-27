@@ -436,19 +436,20 @@ async def test_up_after_our_soft_off_starts_at_the_bottom(hass, bridge, clock):
 
 
 async def test_a_change_from_elsewhere_mid_move_starts_the_next_move_from_it(hass, bridge, clock):
-    # The Hue app sets 80 % 3 s into a 20 % to 100 % fade: the next move starts there, not at the predicted 50 %.
+    # The Hue app sets 10 % 3 s into a 20 % to 100 % fade: the next move starts there, not at the predicted 44 %.
     entity_id = await lamp(hass, bridge, brightness_pct=20.0)
     await call(hass, "move", {"entity_id": entity_id, "brightness": "up", "sweep_time": 10})
     clock.now += 3
     bridge.api.events.emit(
-        EventType.RESOURCE_UPDATED, {"id": "light-1", "type": "light", "dimming": {"brightness": 80}}
+        EventType.RESOURCE_UPDATED, {"id": "light-1", "type": "light", "dimming": {"brightness": 10}}
     )
-    hass.states.async_set(entity_id, "on", {"brightness": percent(80.0)})
+    hass.states.async_set(entity_id, "on", {"brightness": percent(10.0)})
     await hass.async_block_till_done()
 
     await call(hass, "move", {"entity_id": entity_id, "brightness": "down", "sweep_time": 10})
 
-    assert bridge.puts[-1] == ("light/light-1", {"on": {"on": False}, "dynamics": {"duration": 8000}})
+    # HA holds 10 % as 26/255, so 10.2 % to go.
+    assert bridge.puts[-1] == ("light/light-1", {"on": {"on": False}, "dynamics": {"duration": 1020}})
 
 
 async def test_a_late_stop_report_keeps_the_prediction(hass, bridge, clock):
@@ -488,3 +489,18 @@ async def test_a_write_mid_move_starts_the_next_move_from_the_report(hass, bridg
     await call(hass, "move", {"entity_id": entity_id, "brightness": "down", "sweep_time": 10})
 
     assert bridge.puts[-1] == ("light/light-1", {"on": {"on": False}, "dynamics": {"duration": 8000}})
+
+
+async def test_the_fade_is_timed_from_when_the_write_was_sent(hass, bridge, clock):
+    # The bridge starts the fade once it has the write; its reply comes back later.
+    entity_id = await lamp(hass, bridge, brightness_pct=20.0)
+    request = bridge.api.request
+
+    async def slow(*args, **kwargs):
+        clock.now += 0.5
+        return await request(*args, **kwargs)
+
+    bridge.api.request = slow
+    await call(hass, "move", {"entity_id": entity_id, "brightness": "up", "sweep_time": 10})
+
+    assert transition_cache(hass).value("light-1", "brightness", 0.0) == pytest.approx(25.0)

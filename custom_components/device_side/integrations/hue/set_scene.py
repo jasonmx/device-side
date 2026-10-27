@@ -8,7 +8,7 @@ from aiohue.v2.models.scene import Scene
 from homeassistant.core import HomeAssistant
 
 from .bridge import bridge_api, resource_id, write_light
-from .transition_cache import transition_cache
+from .report_filter import write_forgetting
 from ...core.adapter import Adapter
 from ...core.models import EntityResult, Request, Status, Target
 from ...core.scope import AdapterScope
@@ -72,12 +72,10 @@ class HueSetScene(Adapter[Request]):
             if not (writes := scene_light_writes(scene)):
                 return self.result(target, Status.UNCHANGED, detail="nothing_to_set")
 
-            cache = transition_cache(hass)
             failed = 0
             for light_id, write in writes:
                 try:
-                    await write_light(api, light_id, **write)
-                    cache.forget(light_id)
+                    await write_forgetting(hass, light_id, write_light(api, light_id, **write))
                 except Exception as err:  # noqa: BLE001 - one light's failure must not stop the rest of the scene
                     failed += 1
                     _LOGGER.warning("set_scene %s: write to light %s failed: %s", target.entity_id, light_id, err)

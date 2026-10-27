@@ -4,8 +4,8 @@
 |---|---|
 | Result | pass |
 | Date | 2026-10-27 |
-| Source | rig run (`scripts/rig.py`), commit `64fc247` |
-| Fingerprint | `c8b18f1bf688afb9` (`integrations/hue/move.py`) |
+| Source | rig run (`scripts/rig.py`), commit `d16a62b` |
+| Fingerprint | `1520029e790936f8` (`integrations/hue/move.py`) |
 | Home Assistant | 2026.10.2 |
 | Device | Hue ambiance lamp (`LTA009`), firmware `1.163.1`; Zone, firmware `unknown` |
 | Capabilities | every capability the adapter addresses |

@@ -6,7 +6,7 @@ from homeassistant.core import HomeAssistant
 
 from . import colors
 from .bridge import bridge_api, resource_id, write_light
-from .transition_cache import transition_cache
+from .report_filter import write_forgetting
 from ...actions.set_attributes import SetAttributesRequest
 from ...core.adapter import Adapter
 from ...core.models import EntityResult, Status, Target
@@ -91,8 +91,7 @@ class HueSetAttributes(Adapter[SetAttributesRequest]):
                 if dropped:
                     return self.result(target, Status.UNSUPPORTED, detail="fields_not_supported")
                 return self.result(target, Status.UNCHANGED, detail="within_limits")
-            await write_light(api, light.id, **write)
-            transition_cache(hass).forget(light.id)
+            await write_forgetting(hass, light.id, write_light(api, light.id, **write))
             return self.result(target, Status.SENT, detail="fields_dropped" if dropped else None)
 
         return await self.gather(hass, targets, send)

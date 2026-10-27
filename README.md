@@ -29,6 +29,8 @@ If you're OK with that, let's dive in.
 
 Details per integration are in [docs/integrations.md](docs/integrations.md), including the Zigbee2MQTT option Device Side turns on for Hue bulbs timed with a color. Shelly Gen 1, Hue Bridge v1, and Zigbee plugs and switches are unsupported.
 
+During a Hue fade, Home Assistant shows the brightness Device Side predicts, rather than the end value the bridge reports as the fade starts. This is on by default; turn it off in Device Side's options.
+
 ## Get Started
 Requires at least one core integration to be installed: Matter, ZHA, Z2M via MQTT, Shelly, or Philips Hue.
 
