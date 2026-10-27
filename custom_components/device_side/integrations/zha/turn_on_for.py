@@ -1,14 +1,16 @@
-"""ZHA turn_on_for: optional light.turn_on for fields, OnWithTimedOff through zha.issue_zigbee_cluster_command,
-then an OnOff and OnTime read-back."""
+"""ZHA turn_on_for: optional light.turn_on for fields, OnWithTimedOff through zha.issue_zigbee_cluster_command (or
+one zha.issue_zigbee_group_command for a ZHA group's members), then an OnOff and OnTime read-back per light."""
 
+import asyncio
 import logging
 from typing import ClassVar
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import Unauthorized
+from homeassistant.helpers import entity_registry as er
 
 from . import zcl
-from .addressing import address
+from .addressing import Address, address, group_id
 from ...actions.turn_on_for import TurnOnForRequest
 from ...core.adapter import Adapter
 from ...core.models import EntityResult, Status, Target
@@ -29,12 +31,20 @@ _LOGGER = logging.getLogger(__name__)
 class ZHATurnOnFor(Adapter[TurnOnForRequest]):
     """Send OnWithTimedOff on the OnOff cluster; light.turn_on first when fields are present.
 
-    issue_zigbee_cluster_command is an admin-only action, so the call carries the caller's context: a non-admin
-    caller is refused by ZHA, not let through with Device Side's own rights. The zha library raises on a
-    delivery failure or a non-success ZCL status, so a command that returns was accepted. A new timer replaces a
-    running one, so reading OnTime straight back shows whether ours is running: CONFIRMED when it sits within
-    _READBACK_SLACK_TENTHS under the request and OnOff reads on, otherwise SENT with a detail. OnTime alone is
-    not proof: a Tuya TS011F plug stores it as its own countdown and stays off.
+    The dispatcher expands a ZHA group entity into its member lights (groups.expand_group). Members that came from
+    the same group get one groupcast, so they start in lockstep: one light.turn_on on the group entity for fields,
+    then one OnWithTimedOff to the group. Expanding them into one command each would start them a slot apart under
+    max_concurrency, visibly so in a large group (docs/plans/2026-10-27-zha-groups-probe.md). Every other target
+    gets its own command.
+
+    issue_zigbee_cluster_command and issue_zigbee_group_command are admin-only actions, so the call carries the
+    caller's context: a non-admin caller is refused by ZHA, not let through with Device Side's own rights. The zha
+    library raises on a unicast delivery failure or a non-success ZCL status, so a unicast that returns was
+    accepted; a groupcast returns at once with no delivery feedback, and a member that can't run the timer drops
+    it silently. So each light is read back either way: a new timer replaces a running one, so reading OnTime
+    straight back shows whether ours is running: CONFIRMED when it sits within _READBACK_SLACK_TENTHS under the
+    request and OnOff reads on, otherwise SENT with a detail. OnTime alone is not proof: a Tuya TS011F plug stores
+    it as its own countdown and stays off.
     """
 
     action: ClassVar[str] = "turn_on_for"
@@ -60,56 +70,118 @@ class ZHATurnOnFor(Adapter[TurnOnForRequest]):
     async def execute(
         self, hass: HomeAssistant, request: TurnOnForRequest, targets: list[Target]
     ) -> list[EntityResult]:
+        on_time = round(request.duration_s * 10)
+        groups: dict[tuple[str, int], list[Target]] = {}
+        singles: list[Target] = []
+        for target in targets:
+            if (gid := _via_zha_group(hass, target)) is not None:
+                groups.setdefault((target.via_group, gid), []).append(target)
+            else:
+                singles.append(target)
+
         async def send(target: Target) -> EntityResult:
-            if (addr := address(target.entry.unique_id)) is None:  # supports() already refused this target
-                return self.result(target, Status.UNSUPPORTED, detail="not_addressable")
+            return await self._unicast(hass, request, target, on_time)
 
-            if request.light.present():
-                await hass.services.async_call(
-                    "light",
-                    "turn_on",
-                    {"entity_id": target.entity_id, **request.light.as_turn_on_data()},
-                    blocking=True,
-                    context=request.context,
-                )
-            on_time = round(request.duration_s * 10)
-            try:
-                await hass.services.async_call(
-                    "zha",
-                    "issue_zigbee_cluster_command",
-                    {
-                        "ieee": addr.ieee,
-                        "endpoint_id": addr.endpoint_id,
-                        "cluster_id": zcl.ON_OFF_CLUSTER,
-                        "cluster_type": "in",
-                        "command": _ON_WITH_TIMED_OFF,
-                        "command_type": "server",
-                        "params": {
-                            "on_off_control": 0,
-                            "on_time": on_time,
-                            "off_wait_time": 0,
-                        },
+        runs = [self._groupcast(hass, request, *group, members, on_time) for group, members in groups.items()]
+        batches = await asyncio.gather(self.gather(hass, singles, send), *runs)
+        return [result for batch in batches for result in batch]
+
+    async def _unicast(
+        self, hass: HomeAssistant, request: TurnOnForRequest, target: Target, on_time: int
+    ) -> EntityResult:
+        if (addr := address(target.entry.unique_id)) is None:  # supports() already refused this target
+            return self.result(target, Status.UNSUPPORTED, detail="not_addressable")
+        if request.light.present():
+            await self._turn_on(hass, request, target.entity_id)
+        try:
+            await hass.services.async_call(
+                "zha",
+                "issue_zigbee_cluster_command",
+                {
+                    "ieee": addr.ieee,
+                    "endpoint_id": addr.endpoint_id,
+                    "cluster_id": zcl.ON_OFF_CLUSTER,
+                    "cluster_type": "in",
+                    "command": _ON_WITH_TIMED_OFF,
+                    "command_type": "server",
+                    "params": {
+                        "on_off_control": 0,
+                        "on_time": on_time,
+                        "off_wait_time": 0,
                     },
-                    blocking=True,
-                    context=request.context,
-                )
-            except Unauthorized:
-                return self.result(target, Status.REJECTED, detail="admin_required")
+                },
+                blocking=True,
+                context=request.context,
+            )
+        except Unauthorized:
+            return self.result(target, Status.REJECTED, detail="admin_required")
+        return await self._read_back(hass, target, addr, on_time)
 
-            # The comparison sits in the try too: a value it can't compare is a failed read, not a failed command.
-            try:
-                read = await zcl.read_attributes(hass, addr, zcl.ON_OFF_CLUSTER, (zcl.ON_OFF, zcl.ON_TIME))
-                on_off, remaining = read[zcl.ON_OFF], read[zcl.ON_TIME]
-                if on_off not in (0, 1):  # zigpy's Bool and Python's bool both equal 0 or 1; anything else is no answer
-                    raise ValueError(f"OnOff read {on_off!r}")
-                running = 0 < remaining and on_time - _READBACK_SLACK_TENTHS <= remaining <= on_time
-            except Exception as err:  # noqa: BLE001 - zha and zigpy errors can't be imported here; see zcl.py
-                _LOGGER.debug("%s read-back failed for %s: %s", self.action, target.entity_id, err)
-                return self.result(target, Status.SENT, detail="readback_failed")
-            if not on_off:
-                return self.result(target, Status.SENT, detail="not_on")
-            if running:
-                return self.result(target, Status.CONFIRMED)
-            return self.result(target, Status.SENT, detail="timer_not_reported")
+    async def _groupcast(
+        self,
+        hass: HomeAssistant,
+        request: TurnOnForRequest,
+        group_entity: str,
+        gid: int,
+        members: list[Target],
+        on_time: int,
+    ) -> list[EntityResult]:
+        if request.light.present():
+            await self._turn_on(hass, request, group_entity)
+        try:
+            await hass.services.async_call(
+                "zha",
+                "issue_zigbee_group_command",
+                {
+                    "group": gid,
+                    "cluster_id": zcl.ON_OFF_CLUSTER,
+                    "command": _ON_WITH_TIMED_OFF,
+                    # Positional only: on/off control, on time, off wait time.
+                    "args": [0, on_time, 0],
+                },
+                blocking=True,
+                context=request.context,
+            )
+        except Unauthorized:
+            return [self.result(target, Status.REJECTED, detail="admin_required") for target in members]
 
-        return await self.gather(hass, targets, send)
+        async def read_back(target: Target) -> EntityResult:
+            # supports() refused any member without an address, so address() can't be None here.
+            return await self._read_back(hass, target, address(target.entry.unique_id), on_time)
+
+        return await self.gather(hass, members, read_back)
+
+    async def _turn_on(self, hass: HomeAssistant, request: TurnOnForRequest, entity_id: str) -> None:
+        await hass.services.async_call(
+            "light",
+            "turn_on",
+            {"entity_id": entity_id, **request.light.as_turn_on_data()},
+            blocking=True,
+            context=request.context,
+        )
+
+    async def _read_back(self, hass: HomeAssistant, target: Target, addr: Address, on_time: int) -> EntityResult:
+        # The comparison sits in the try too: a value it can't compare is a failed read, not a failed command.
+        # OnTime is optional: a light without it (the rig's Sengled E11-G13) can't run the timer, which a groupcast
+        # doesn't report, so it reads as no timer: not_on, or timer_not_reported when fields turned it on.
+        try:
+            read = await zcl.read_attributes(hass, addr, zcl.ON_OFF_CLUSTER, (zcl.ON_OFF,), optional=(zcl.ON_TIME,))
+            on_off, remaining = read[zcl.ON_OFF], read.get(zcl.ON_TIME, 0)
+            if on_off not in (0, 1):  # zigpy's Bool and Python's bool both equal 0 or 1; anything else is no answer
+                raise ValueError(f"OnOff read {on_off!r}")
+            running = 0 < remaining and on_time - _READBACK_SLACK_TENTHS <= remaining <= on_time
+        except Exception as err:  # noqa: BLE001 - zha and zigpy errors can't be imported here; see zcl.py
+            _LOGGER.debug("%s read-back failed for %s: %s", self.action, target.entity_id, err)
+            return self.result(target, Status.SENT, detail="readback_failed")
+        if not on_off:
+            return self.result(target, Status.SENT, detail="not_on")
+        if running:
+            return self.result(target, Status.CONFIRMED)
+        return self.result(target, Status.SENT, detail="timer_not_reported")
+
+
+def _via_zha_group(hass: HomeAssistant, target: Target) -> int | None:
+    """The Zigbee group ID of the ZHA group the target was expanded from, or None."""
+    if target.via_group is None or (entry := er.async_get(hass).async_get(target.via_group)) is None:
+        return None
+    return group_id(entry.unique_id) if entry.platform == "zha" else None

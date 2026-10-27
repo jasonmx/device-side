@@ -1,4 +1,6 @@
-"""Fabricate ZHA entities the way the zha library registers them."""
+"""Fabricate ZHA entities and groups the way the zha library registers them."""
+
+from types import SimpleNamespace
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
@@ -38,3 +40,10 @@ def add_zha_entity(
     )
     hass.states.async_set(entity_id, state)
     return entity_id
+
+
+def zha_group(*members: tuple[str, int]) -> SimpleNamespace:
+    """A zha library Group: members as (ieee, endpoint_id), the way GroupMember exposes them."""
+    return SimpleNamespace(
+        members=[SimpleNamespace(device=SimpleNamespace(ieee=ieee), endpoint_id=endpoint) for ieee, endpoint in members]
+    )

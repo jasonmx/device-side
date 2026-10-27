@@ -1,5 +1,5 @@
-"""ZHA turn_on_for: optional light.turn_on, OnWithTimedOff through issue_zigbee_cluster_command, then an OnOff and
-OnTime read-back."""
+"""ZHA turn_on_for: optional light.turn_on, OnWithTimedOff through issue_zigbee_cluster_command (or one
+issue_zigbee_group_command for a ZHA group's members), then an OnOff and OnTime read-back."""
 
 from unittest.mock import AsyncMock
 
@@ -15,7 +15,7 @@ from custom_components.device_side.integrations.zha import zcl
 from custom_components.device_side.integrations.zha.addressing import address
 
 from ...conftest import call
-from ...fixtures.zha import IEEE, add_zha_entity, zha_entry
+from ...fixtures.zha import IEEE, add_zha_entity, zha_entry, zha_group
 
 CONFIRMED = {"status": "confirmed", "integration": "zha"}
 
@@ -100,7 +100,7 @@ async def test_on_time_within_slack_confirms(hass, setup_production, commands, r
     response = await call(hass, "turn_on_for", {"entity_id": "light.bulb", "duration": 5})
 
     assert response == {"light.bulb": CONFIRMED}
-    readback.assert_awaited_once_with(hass, (IEEE, 11), 0x0006, (0x0000, 0x4001))
+    readback.assert_awaited_once_with(hass, (IEEE, 11), 0x0006, (0x0000,), optional=(0x4001,))
 
 
 @pytest.mark.parametrize("remaining", [0, 51, 19])
@@ -157,15 +157,6 @@ async def test_entity_without_a_light_unique_id_is_not_addressable(hass, setup_p
         await call(hass, "turn_on_for", {"entity_id": "light.quirk", "duration": 5})
 
     assert raised.value.translation_placeholders["summary"] == "light.quirk: not_addressable"
-
-
-async def test_zha_group_is_not_supported(hass, setup_production, commands, turn_ons):
-    add_zha_entity(hass, zha_entry(hass), "light.zha_group", unique_id="light_zha_group_0x0002")
-
-    with pytest.raises(HomeAssistantError) as raised:
-        await call(hass, "turn_on_for", {"entity_id": "light.zha_group", "duration": 5})
-
-    assert raised.value.translation_placeholders["summary"] == "light.zha_group: group_not_supported"
 
 
 async def test_zha_error_rejects_that_target(hass, setup_production, turn_ons):
@@ -241,3 +232,108 @@ async def test_non_admin_caller_is_refused_by_zha(
 )
 def test_address(unique_id, expected):
     assert address(unique_id) == expected
+
+
+A, B = "00:00:00:00:00:00:00:0a", "00:00:00:00:00:00:00:0b"
+
+
+@pytest.fixture
+def group_commands(hass):
+    return async_mock_service(hass, "zha", "issue_zigbee_group_command")
+
+
+@pytest.fixture
+def two_light_group(hass, zha_groups):
+    """light.zha_group, ZHA group 2, of light.a and light.b."""
+    entry = zha_entry(hass)
+    add_zha_entity(hass, entry, "light.zha_group", unique_id="light_zha_group_0x0002")
+    add_zha_entity(hass, entry, "light.a", ieee=A)
+    add_zha_entity(hass, entry, "light.b", ieee=B)
+    zha_groups[2] = zha_group((A, 11), (B, 11))
+    return entry
+
+
+async def test_group_members_get_one_groupcast_and_a_read_back_each(
+    hass, setup_production, two_light_group, commands, group_commands, turn_ons, readback
+):
+    response = await call(hass, "turn_on_for", {"entity_id": "light.zha_group", "duration": 5})
+
+    assert response == {"light.a": CONFIRMED, "light.b": CONFIRMED}
+    assert [command.data for command in group_commands] == [
+        {"group": 2, "cluster_id": 6, "command": 0x42, "args": [0, 50, 0]}
+    ]
+    assert not commands
+    assert not turn_ons
+    assert sorted(read.args[1].ieee for read in readback.await_args_list) == [A, B]
+
+
+async def test_group_fields_turn_on_the_group_entity_once(
+    hass, setup_production, two_light_group, group_commands, turn_ons
+):
+    await call(hass, "turn_on_for", {"entity_id": "light.zha_group", "duration": 5, "brightness": 120})
+
+    assert [turn_on.data for turn_on in turn_ons] == [{"entity_id": "light.zha_group", "brightness": 120}]
+    assert len(group_commands) == 1
+
+
+@pytest.mark.parametrize(("on", "detail"), [(False, "not_on"), (True, "timer_not_reported")])
+async def test_a_member_without_on_time_reports_no_timer(
+    hass, setup_production, two_light_group, group_commands, readback, on, detail
+):
+    """A member that can't run the timer drops the groupcast silently; its read-back says so."""
+    readback.side_effect = lambda hass, addr, *args, **kwargs: (
+        {zcl.ON_OFF: on} if addr.ieee == B else reads(50)
+    )
+
+    response = await call(hass, "turn_on_for", {"entity_id": "light.zha_group", "duration": 5})
+
+    assert response == {"light.a": CONFIRMED, "light.b": {"status": "sent", "integration": "zha", "detail": detail}}
+
+
+async def test_a_group_zha_no_longer_knows_is_an_empty_group(hass, setup_production, zha_groups, group_commands):
+    add_zha_entity(hass, zha_entry(hass), "light.zha_group", unique_id="light_zha_group_0x0002")
+
+    with pytest.raises(HomeAssistantError) as raised:
+        await call(hass, "turn_on_for", {"entity_id": "light.zha_group", "duration": 5})
+
+    assert raised.value.translation_placeholders["summary"] == "light.zha_group: empty_group"
+    assert not group_commands
+
+
+async def test_a_light_named_directly_or_through_an_ha_group_gets_its_own_command(
+    hass, setup_production, two_light_group, commands, group_commands
+):
+    add_zha_entity(hass, two_light_group, "light.bulb")
+    hass.states.async_set("group.room", "on", {"entity_id": ["light.bulb"]})
+
+    response = await call(hass, "turn_on_for", {"entity_id": ["group.room", "light.zha_group"], "duration": 5})
+
+    assert response == {"light.bulb": CONFIRMED, "light.a": CONFIRMED, "light.b": CONFIRMED}
+    assert [command.data["ieee"] for command in commands] == [IEEE]
+    assert len(group_commands) == 1
+
+
+async def test_non_admin_caller_is_refused_for_every_member(
+    hass, setup_production, two_light_group, hass_read_only_user, readback
+):
+    calls: list[ServiceCall] = []
+
+    async def handler(service: ServiceCall) -> None:
+        calls.append(service)
+
+    schema = probatio.Schema({}, extra=probatio.ALLOW_EXTRA)
+    async_register_admin_service(hass, "zha", "issue_zigbee_group_command", handler, schema)
+
+    with pytest.raises(HomeAssistantError) as raised:
+        await hass.services.async_call(
+            DOMAIN,
+            "turn_on_for",
+            {"entity_id": "light.zha_group", "duration": 5},
+            blocking=True,
+            return_response=True,
+            context=Context(user_id=hass_read_only_user.id),
+        )
+
+    assert raised.value.translation_placeholders["summary"] == "light.a: admin_required, light.b: admin_required"
+    assert not calls
+    readback.assert_not_awaited()
