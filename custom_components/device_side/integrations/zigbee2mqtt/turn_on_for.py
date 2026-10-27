@@ -7,6 +7,7 @@ from typing import ClassVar
 from homeassistant.core import HomeAssistant
 
 from .addressing import topic
+from .native_control import COLOR_FIELDS, ensure_native_control
 from ...actions.turn_on_for import TurnOnForRequest
 from ...core.adapter import Adapter
 from ...core.models import EntityResult, Status, Target
@@ -31,7 +32,9 @@ class Z2MTurnOnFor(Adapter[TurnOnForRequest]):
 
     With fields: calls light.turn_on first (blocking) so HA's MQTT light entity applies brightness,
     color and transition through its own protocol, then publishes {"state":"ON","on_time":<seconds, 1dp>}
-    to the device's command topic. Without fields: publishes only.
+    to the device's command topic. Without fields: publishes only. With a color or color temperature, a Hue
+    light (or a group with a Hue member) first gets Z2M's hue_native_control turned on (native_control.py),
+    so it lights in that color rather than its last one.
 
     Z2M publishes no state for a timed command, and Hue bulbs on Z2M don't report, so HA's state would go
     stale. The adapter then asks Z2M to read the state back ({"state":""} on the get topic): 1 s after the
@@ -70,6 +73,8 @@ class Z2MTurnOnFor(Adapter[TurnOnForRequest]):
             if set_topic is None:  # defense in depth; supports() already refused this target
                 return self.result(target, Status.UNSUPPORTED, detail="not_addressable")
 
+            if request.light.present() & COLOR_FIELDS:
+                await ensure_native_control(hass, target)
             if request.light.present():
                 await hass.services.async_call(
                     "light",

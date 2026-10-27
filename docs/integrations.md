@@ -153,6 +153,24 @@ failed read is logged at debug level. We don't use or recommend configuring attr
 instead: it would have to be set up on every bulb, and Z2M's maintainers turned it off for Hue to
 avoid reports that conflict with its optimistic state.
 
+**Hue native control.** Z2M sends on and color as separate Zigbee commands, and a Hue bulb drops a
+color it receives while off, so a timer with a color would light at the bulb's last color first.
+Z2M's per-device option `hue_native_control` sends on, brightness, color and color temperature as
+one Philips command instead, which lights in the new color from the start and keeps the timer.
+
+So the first time a call carries `color_temp_kelvin`, `rgb_color`, `hs_color` or `xy_color` to a
+Hue bulb (manufacturer `Philips` in Home Assistant's device registry), Device Side turns that
+option on for it, and logs it at info level. It checks Z2M's settings on every such call, which adds
+a fraction of a second before the light turns on, waits up to 5 s for Z2M's answer when it changes
+the option, and sends the timer either way. If Z2M doesn't answer, it logs a warning
+and that one call may light at the last color first. Calls without a color or color temperature
+never touch the option.
+
+The option is Z2M's, so it applies to every command Z2M sends the bulb, not just Device Side's: all
+of them use the Philips protocol, and Z2M no longer simulates on/off transitions for it. To turn it
+back off, set `hue_native_control` to false in the device's settings in Z2M's frontend; Device Side
+turns it on again at the next timer with a color.
+
 ### Groups
 
 A Z2M group entity is one target: Device Side publishes once to the group's ID topic, and Z2M
@@ -160,6 +178,11 @@ sends one `OnWithTimedOff` to the Zigbee group, so every member starts its timer
 fields, `light.turn_on` goes to the group entity first, as for a device. The state read-backs go
 to the group's own topic, `zigbee2mqtt/<group ID>/get`; Z2M rebuilds the group's state from its
 members' answers and shows it off only once every member is off.
+
+A command to a group uses the group's Z2M options, not its members', so for a timer with a color
+Device Side turns `hue_native_control` on as an option of the group itself when any member is a Hue
+bulb (members read from `zigbee2mqtt/bridge/groups`). A group takes a color only when every member
+can show one, as Z2M exposes the features its members share.
 
 ### Cancelling
 
@@ -180,6 +203,12 @@ firmware. Most Z2M-supported lights cancel the timer on any state change.
 - **A device named after a group's ID.** Z2M accepts a purely numeric friendly name and looks up
   devices before groups, so a device whose friendly name is exactly a group's ID takes that
   group's command. Don't name a device with a bare number.
+- **Other brands' color bulbs.** Hue native control is Philips-only, so a color bulb of any other
+  brand, timed with a color from off, may light at its last color for a moment first. Untested;
+  if yours does, open an issue.
+- **Old color shown at first.** With Hue native control on, a Hue light may report its old color
+  for the first seconds of a timer while it shows the new one, so Home Assistant shows the old
+  color until the next report.
 - **Restart during a timer.** Pending state reads are lost when Home Assistant restarts or Device
   Side unloads, so the light's state stays stale until the device next reports or is next
   commanded.

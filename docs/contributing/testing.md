@@ -40,10 +40,11 @@ Make a dedicated Home Assistant user without admin rights and create its long-li
 `.env.rig`. The rig only calls actions and reads states and registries, so admin isn't needed, and a non-admin
 token can't change your configuration if it leaks.
 
-ZHA is the exception. Its cluster command is an admin-only action, and the ZHA adapter passes the caller's
-context through to it, so a non-admin token is refused. Put an admin user's token in `HA_ADMIN_TOKEN`: the ZHA
-suites run on it and every other suite stays on `HA_TOKEN`. Without it, a run that includes ZHA stops before the
-gate; `--integration` leaves ZHA out.
+ZHA and Zigbee2MQTT are the exceptions. ZHA's cluster command is an admin-only action, and the ZHA adapter passes
+the caller's context through to it, so a non-admin token is refused. The Zigbee2MQTT suites set and read Z2M
+device options over MQTT, which only an admin may. Put an admin user's token in `HA_ADMIN_TOKEN`: those suites run
+on it and every other suite stays on `HA_TOKEN`. Without it, a run that includes either stops before the gate;
+`--integration` leaves them out.
 
 ### Writing a step file
 
@@ -73,6 +74,8 @@ tests:
 | `sample` | Polls `attribute` for `for` seconds and expects it `rising`, `falling` or `steady`, optionally within `min`/`max`. `source: device_side` reads `device_side.get_attributes` instead of HA's state, in its units (brightness in percent), for a fade HA shows only the end of. |
 | `do` | Prints an instruction for the person and waits for Enter. Only in the `setup` of an observed test. |
 | `restore` | Puts back the state from before the test. It also runs after every test, pass or fail. |
+| `z2m_option` | Sets Zigbee2MQTT device options on the target (`hue_native_control: false`) and waits for Z2M's ok. Does nothing in another integration's suite. |
+| `expect_z2m_option` | Expects the target's Zigbee2MQTT device options to hold the given values. Does nothing in another integration's suite. |
 
 Any step takes `target: <role>` to act on another role the test lists. Durations accept numbers, `duration`
 (the last call's), `tol` (the integration's timing tolerance) and `+ - *`. `only: [<integration>]` limits a
