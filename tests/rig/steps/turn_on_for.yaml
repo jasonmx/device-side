@@ -22,13 +22,13 @@ tests:
       - expect_error: {key: all_targets_failed, summary: fields_not_supported}
       - expect_state: {state: unchanged}
 
-  # A relay shown as a light refuses brightness because Shelly's scope has no fields yet.
-  - name: refuses_brightness_out_of_scope
+  # A Shelly relay shown as a light refuses brightness: its Switch component is on/off.
+  - name: refuses_brightness_on_a_relay_light
     roles: [light_onoff]
     only: [shelly]
     steps:
       - call: {duration: 6, brightness: 128}
-      - expect_error: {key: all_targets_failed, summary: fields_not_tested}
+      - expect_error: {key: all_targets_failed, summary: fields_not_supported}
       - expect_state: {state: unchanged}
 
   # A bulb takes the same timer; a dimmer's own On command, not a relay's.
@@ -47,7 +47,7 @@ tests:
   # Brightness is set by light.turn_on before the timer starts, and holds until the device turns itself off.
   - name: bulb_brightness_then_off
     roles: [light_dimmable]
-    only: [zha, zigbee2mqtt]
+    only: [shelly, zha, zigbee2mqtt]
     steps:
       - set: {state: off}
       - wait: 2  # ZHA ignores a light's "on" report for 1.5 s after light.turn_off
@@ -59,10 +59,10 @@ tests:
       - expect_state: {state: off, within: 2 * tol}
 
   # Color temperature rides the same light.turn_on as brightness. On Z2M the option is turned off first, so the run
-  # proves the adapter turns Hue native control on (z2m_option steps do nothing on ZHA).
+  # proves the adapter turns Hue native control on (z2m_option steps do nothing elsewhere).
   - name: bulb_color_temp_then_off
     roles: [light_ct]
-    only: [zha, zigbee2mqtt]
+    only: [shelly, zha, zigbee2mqtt]
     steps:
       - z2m_option: {hue_native_control: false}
       - set: {state: off}
@@ -74,6 +74,39 @@ tests:
       - expect_state: {state: on}
       - expect_state: {state: off, within: 2 * tol}
       - expect_z2m_option: {hue_native_control: true}
+
+  # Shelly sends transition in the same Set as the timer: the bulb fades up to the brightness, then turns itself off.
+  - name: bulb_transition_then_off
+    roles: [light_dimmable]
+    only: [shelly]
+    steps:
+      - set: {state: off}
+      - call: {duration: 6, brightness: 128, transition: 2}
+      - expect_response: {status: expected, integration: self}
+      - expect_state: {state: on, brightness: {min: 120, max: 136}, within: tol + 2}
+      - wait: duration - tol - 2
+      - expect_state: {state: on}
+      - expect_state: {state: off, within: 2 * tol}
+
+  # Shelly's RGBCCT Set carries mode rgb with the color, so color_mode rgb shows the bulb left color temperature.
+  # Watched, as no automated check sees whether it lit warm white first.
+  - name: rgbcct_bulb_rgb_then_off
+    roles: [light_color]
+    only: [shelly]
+    setup:
+      - set: {state: on, color_temp_kelvin: 2700}
+      - set: {state: off}
+    steps:
+      - call: {duration: 6, rgb_color: [255, 0, 0]}
+      - expect_response: {status: expected, integration: self}
+      - expect_state: {state: on, color_mode: rgb, rgb_color: [255, 0, 0], within: tol}
+      - wait: duration - tol
+      - expect_state: {state: on}
+      - expect_state: {state: off, within: 2 * tol}
+    observe:
+      see: The Shelly color bulb, off and last warm white, turns on red for 6 seconds, then turns itself off.
+      watch: 'The first moment it lights: red from the start, with no flash of warm white.'
+      ask: Did it come on red and turn itself off about 6 seconds later?
 
   # A color rides the same light.turn_on as brightness. Setup leaves the bulb in color temperature, so color_mode
   # xy shows the call moved it to color; Z2M reports every color field in xy. One test per field, as a record
