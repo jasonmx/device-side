@@ -93,6 +93,12 @@ class HAClient:
         result = await self.command(payload)
         return result.get("response") if return_response else None
 
+    async def rest(self, method: str, path: str, json: dict | None = None) -> Any:
+        """A REST call, for what the WebSocket API lacks (an options flow)."""
+        async with self._session.request(method, f"{self.url}{path}", json=json) as response:
+            response.raise_for_status()
+            return await response.json()
+
     async def get_state(self, entity_id: str) -> dict | None:
         async with self._session.get(f"{self.url}/api/states/{entity_id}") as response:
             if response.status == 404:

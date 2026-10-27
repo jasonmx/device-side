@@ -14,6 +14,19 @@
       "default": "Success! You can now use device_side actions in your automations."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Device Side options",
+        "data": {
+          "predicted_state": "Show predicted brightness during Hue fades"
+        },
+        "data_description": {
+          "predicted_state": "A Hue bridge reports a fade's end brightness as soon as it starts, and where a stopped fade halted late or never. With this on, Home Assistant shows the brightness at the start, where a stop halted it, and the end once the fade has run. Turn it off to show what the bridge reports."
+        }
+      }
+    }
+  },
   "exceptions": {
     "not_loaded": {
       "message": "Device Side is not loaded. Check the integration is set up and enabled."

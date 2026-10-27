@@ -5,11 +5,13 @@ where the light halted late or not at all. Each move and stop is recorded here s
 from the value the light is really at, which is what makes a hold, release, hold sequence continue smoothly.
 
 The end values a write makes the bridge report are armed here too, so report_filter can tell them, and the bulb's late
-reports of the path travelled, from a real change made elsewhere, which forgets the light.
+reports of the path travelled, from a real change made elsewhere, which forgets the light. With predicted_state on,
+report_filter hides those reports from HA, and so from aiohue's models; what the bridge reported is kept here instead,
+so the echo a write expects is worked out from what the bridge holds.
 """
 
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 
 from homeassistant.core import HomeAssistant
@@ -21,6 +23,8 @@ BRIGHTNESS = "brightness"
 API_SETTLE_SECONDS = 15
 # How far a report may be from an armed end value or the path travelled and still be ours (80 % reads 79.84).
 REPORT_TOLERANCE = 0.5
+# The dimmest step a Hue light makes (1/254), in percent.
+MIN_BRIGHTNESS_STEP = 0.4
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +48,12 @@ class Echo:
     expires_at: float
 
 
+@dataclass(frozen=True, slots=True)
+class Forgotten:
+    echo: Echo | None
+    transitions: dict[tuple[str, str], Transition]
+
+
 class TransitionCache:
     """Transitions keyed by (resource_id, attribute); a stop is a transition of zero duration at the halt value.
 
@@ -54,6 +64,8 @@ class TransitionCache:
         self.clock = clock
         self._transitions: dict[tuple[str, str], Transition] = {}
         self._echoes: dict[str, Echo] = {}
+        # The bridge's last report of a value HA was not shown, by resource and "on" or "brightness".
+        self._hidden: dict[str, dict[str, float | bool]] = {}
 
     def value(self, resource_id: str, attribute: str, reported: float) -> float:
         """The predicted value inside the guard window, else the reported one."""
@@ -119,17 +131,38 @@ class TransitionCache:
             del echo.values[key]
         return matched
 
+    def hidden(self, resource_id: str, values: dict[str, float | bool]) -> None:
+        """The bridge reported these values and HA (so aiohue) was not shown them."""
+        self._hidden.setdefault(resource_id, {}).update(values)
+
+    def shown(self, resource_id: str, keys: Iterable[str]) -> None:
+        """A report of these keys reached aiohue, which holds the bridge's values for them again."""
+        if (hidden := self._hidden.get(resource_id)) is not None:
+            for key in keys:
+                hidden.pop(key, None)
+
+    def bridge_value(self, resource_id: str, key: str, held: float | bool) -> float | bool:
+        """What the bridge last reported for key: aiohue's value (held), unless it was hidden from aiohue since."""
+        return self._hidden.get(resource_id, {}).get(key, held)
+
     def follows(self, resource_id: str) -> bool:
         """Whether a write of ours is still expected to report, or a transition is inside its guard window."""
         if (echo := self._echoes.get(resource_id)) is not None and echo.values and self.clock() <= echo.expires_at:
             return True
         return any(self._live(rid, attribute) for rid, attribute in list(self._transitions) if rid == resource_id)
 
-    def forget(self, resource_id: str) -> None:
-        """A real change made elsewhere: drop every prediction and armed echo for the resource."""
-        self._echoes.pop(resource_id, None)
-        for key in [key for key in self._transitions if key[0] == resource_id]:
-            del self._transitions[key]
+    def forget(self, resource_id: str) -> Forgotten:
+        """A real change made elsewhere: drop every prediction and armed echo for the resource, returned for restore."""
+        transitions = {
+            key: self._transitions.pop(key) for key in [key for key in self._transitions if key[0] == resource_id]
+        }
+        return Forgotten(self._echoes.pop(resource_id, None), transitions)
+
+    def restore(self, resource_id: str, forgotten: Forgotten) -> None:
+        """Put back what forget dropped, for a write the bridge refused."""
+        if forgotten.echo is not None:
+            self._echoes[resource_id] = forgotten.echo
+        self._transitions.update(forgotten.transitions)
 
     def _live(self, resource_id: str, attribute: str) -> Transition | None:
         """The entry inside its guard window, pruning it once expired."""

@@ -44,7 +44,8 @@ ZHA and Zigbee2MQTT are the exceptions. ZHA's cluster command is an admin-only a
 the caller's context through to it, so a non-admin token is refused. The Zigbee2MQTT suites set and read Z2M
 device options over MQTT, which only an admin may. Put an admin user's token in `HA_ADMIN_TOKEN`: those suites run
 on it and every other suite stays on `HA_TOKEN`. Without it, a run that includes either stops before the gate;
-`--integration` leaves them out.
+`--integration` leaves them out. Suites whose adapter has options (Hue `move` and `stop`) need it too, to set them
+(below).
 
 ### Writing a step file
 
@@ -80,6 +81,10 @@ tests:
 Any step takes `target: <role>` to act on another role the test lists. Durations accept numbers, `duration`
 (the last call's), `tol` (the integration's timing tolerance) and `+ - *`. `only: [<integration>]` limits a
 test to some integrations; when those pile up, split the file.
+
+An adapter with options runs each file for its action with them pinned through Device Side's options flow:
+`options: [<name>]` at the top of a file turns those on, and every other option in the adapter's scope runs off.
+Its record is `<action>-<name>.md`, with an `Options` row. The rig's own options are put back when the run ends.
 
 An integration in `SETTLE_S` (`tests/rig/inventory.py`) predicts a light's brightness for a while after a
 `move` or `stop`, so a later test on that light waits until it reads the device again.

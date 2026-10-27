@@ -247,7 +247,7 @@ def main(argv: list[str] | None = None) -> int:
     registry = AdapterRegistry.discover()
     suites = select(load_step_files(), inventory, args.integration)
     if not args.dry_run:
-        check_tokens(env, suites)
+        check_tokens(env, suites, registry)
     if not any(registry.adapter(suite.action, suite.integration) for suite in suites):
         raise SystemExit("No rig test matches the inventory's integrations.")
     deploy = deploy_state(env.get("RIG_STATUS_CMD", ""))
@@ -277,13 +277,19 @@ def main(argv: list[str] | None = None) -> int:
     return asyncio.run(run_rig(env, suites, inventory, registry, args.keyword, args.unattended))
 
 
-def check_tokens(env: dict, suites: list[Suite]) -> None:
-    """Stop before the gate when .env.rig lacks a token the run needs."""
+def check_tokens(env: dict, suites: list[Suite], registry: AdapterRegistry) -> None:
+    """Stop before the gate when .env.rig lacks a token the run needs: ADMIN_INTEGRATIONS and any adapter with
+    options (they are set through device_side's options flow) need HA_ADMIN_TOKEN."""
     if not (env.get("HA_URL") and env.get("HA_TOKEN")):
         raise SystemExit("HA_URL and HA_TOKEN must be set in .env.rig (see tests/rig/env.example)")
     if env.get("HA_ADMIN_TOKEN"):
         return
-    if admin_only := sorted({suite.integration for suite in suites} & ADMIN_INTEGRATIONS):
+    with_options = {
+        suite.integration
+        for suite in suites
+        if (adapter := registry.adapter(suite.action, suite.integration)) is not None and adapter.scope.options
+    }
+    if admin_only := sorted(({suite.integration for suite in suites} & ADMIN_INTEGRATIONS) | with_options):
         raise SystemExit(
             f"{', '.join(admin_only)} needs HA_ADMIN_TOKEN in .env.rig (an admin user's token), "
             "or leave it out with --integration"

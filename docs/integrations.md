@@ -448,6 +448,15 @@ value, as do `set_attributes` and `set_scene`. Not caught: a change from outside
 (the Hue app, a dimmer switch) to a value on the path the light has just travelled, and
 `hue.activate_scene`.
 
+With **Show predicted brightness during Hue fades** on (the default), Home Assistant shows Device
+Side's predictions in place of those reports: the brightness at the start while a fade runs, where a
+stop halted the light, and the end once the fade has run. A fade to off shows the light on until it
+ends, a move up from off shows it on at its dimmest, and a room shows the mean of its lit lights. A
+change made elsewhere shows at once. Nothing is sent while a fade runs, so a dashboard slider holds
+still and then jumps to the stop or the end. After Home Assistant restarts, or reconnects to the
+bridge, mid-fade, it shows what the bridge reports. To always show what the bridge reports, turn the
+option off: Settings › Devices & services › Device Side › Configure.
+
 ### `turn_on_for`, `turn_off_for`
 
 `unsupported` with `no_adapter`. The bridge's own timers can do the flip, but nothing cancels

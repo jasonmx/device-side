@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant
 
 from .bridge import bridge_api, controller, resource_id
 from .move import end_echo, in_soft_off, light_brightness, lit, reported_brightness, room_lights
-from .report_filter import attach_report_filter
+from .report_filter import report_filter
 from .transition_cache import BRIGHTNESS, transition_cache
 from ...core.adapter import Adapter
 from ...core.models import EntityResult, Request, Status, Target
@@ -20,12 +20,15 @@ class HueStop(Adapter[Request]):
     The bridge refuses a dimming stop during a soft off, so a light our move is fading to off is cut instead with
     on: true and its predicted brightness, no duration. A room in one is cut light by light, each at its own
     prediction. A room's halt is recorded per lit light, where predictions live. A light or room with nothing lit
-    (off, or fading off from elsewhere, which can't be predicted) is unchanged with off and nothing is sent.
+    (off, or fading off from elsewhere, which can't be predicted) is unchanged with off and nothing is sent. With
+    predicted_state on, HA is shown the halt at once (report_filter).
     """
 
     action: ClassVar[str] = "stop"
     integration: ClassVar[str] = "hue"
-    scope: ClassVar[AdapterScope] = AdapterScope(experimental=True, native_groups=True)
+    scope: ClassVar[AdapterScope] = AdapterScope(
+        experimental=True, options=frozenset({"predicted_state"}), native_groups=True
+    )
 
     def supports(self, hass: HomeAssistant, request: Request, target: Target) -> str | None:
         if (reason := super().supports(hass, request, target)) is not None:
@@ -45,7 +48,7 @@ class HueStop(Adapter[Request]):
                 return self.result(target, Status.REJECTED, detail="not_on_bridge")
             if resource.dimming is None:
                 return self.result(target, Status.UNSUPPORTED, detail="not_dimmable")
-            attach_report_filter(hass, target)
+            reports = report_filter(hass, target)
             if target.is_group:
                 halts = {light.id: light_brightness(cache, light) for light in lit(cache, room_lights(api, target))}
             elif lit(cache, [resource]):
@@ -57,7 +60,8 @@ class HueStop(Adapter[Request]):
             if fading_off := {light_id for light_id in halts if in_soft_off(cache, light_id)}:
                 # The cut reports on and its brightness; a dimming stop reports nothing.
                 echoes = {
-                    light_id: end_echo(api.lights.get(light_id), halts[light_id], up=True) for light_id in fading_off
+                    light_id: end_echo(cache, api.lights.get(light_id), halts[light_id], up=True)
+                    for light_id in fading_off
                 }
                 write = asyncio.gather(
                     *(
@@ -72,6 +76,7 @@ class HueStop(Adapter[Request]):
                 await writer.set_dimming_delta(rid)
             for light_id, value in halts.items():
                 cache.stopped(light_id, BRIGHTNESS, value)
+            reports.halted(halts)
             return self.result(target, Status.SENT)
 
         return await self.gather(hass, targets, send)

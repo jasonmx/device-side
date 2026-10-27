@@ -12,6 +12,7 @@ from custom_components.device_side.core.registry import AdapterRegistry
 from tests.rig import engine
 from tests.rig.client import HAError
 from tests.rig.engine import (
+    CaseResult,
     Outcome,
     RunResult,
     Suite,
@@ -669,7 +670,9 @@ def members_on(*members: str) -> Callable:
 
 
 GROUP_REGISTRY = SimpleNamespace(
-    adapter=lambda action, integration: SimpleNamespace(scope=SimpleNamespace(confirmable=False, fields=frozenset()))
+    adapter=lambda action, integration: SimpleNamespace(
+        scope=SimpleNamespace(confirmable=False, fields=frozenset(), options=frozenset())
+    )
 )
 
 
@@ -750,7 +753,7 @@ tests:
       - call: {duration: 6, brightness: 128, transition: 1}
       - expect_response: {status: expected}
 """
-    scope = SimpleNamespace(confirmable=False, fields=frozenset({"brightness"}))
+    scope = SimpleNamespace(confirmable=False, fields=frozenset({"brightness"}), options=frozenset())
     registry = SimpleNamespace(adapter=lambda action, integration: SimpleNamespace(scope=scope))
 
     def sent(ha, action, data):
@@ -777,7 +780,7 @@ tests:
       - call: {action: move, brightness: up}
       - call: {}
 """
-    scope = SimpleNamespace(confirmable=False, fields=frozenset({"brightness"}))
+    scope = SimpleNamespace(confirmable=False, fields=frozenset({"brightness"}), options=frozenset())
     registry = SimpleNamespace(adapter=lambda action, integration: SimpleNamespace(scope=scope))
 
     def respond(ha, action, data):
@@ -1161,3 +1164,121 @@ def test_z2m_option_needs_an_option(tmp_path, args):
     text = Z2M_COLOR.replace("z2m_option: {hue_native_control: false}", f"z2m_option: {args}")
     with pytest.raises(ValueError, match="name an option"):
         suite(tmp_path, text, "zigbee2mqtt")
+
+
+OPTION_REGISTRY = SimpleNamespace(
+    adapter=lambda action, integration: SimpleNamespace(
+        scope=SimpleNamespace(confirmable=False, fields=frozenset(), options=frozenset({"opt", "other"}))
+    )
+)
+
+
+class FakeAdmin(FakeHA):
+    """FakeHA plus device_side's entry and its options flow, which saves what it is sent."""
+
+    def __init__(self, states: dict[str, dict], respond: Callable | None = None, options: dict | None = None):
+        super().__init__(states, respond)
+        self.options = {"opt": True, "other": False} | (options or {})
+        self.saved: list[dict] = []
+
+    async def command(self, payload: dict):
+        if payload["type"] == "config_entries/get":
+            return [{"entry_id": "e1", "state": "loaded"}]
+        return await super().command(payload)
+
+    async def rest(self, method: str, path: str, json: dict | None = None):
+        if path.endswith("/options/flow"):
+            schema = [{"name": name, "default": value, "type": "boolean"} for name, value in self.options.items()]
+            return {"type": "form", "flow_id": "f1", "data_schema": schema}
+        self.options = dict(json)
+        self.saved.append(dict(json))
+        return {"type": "create_entry"}
+
+
+def option_file(options: str = "") -> str:
+    lines = ["action: move", "rig_seconds: 5"] + ([f"options: [{options}]"] if options else [])
+    return "\n".join([*lines, "tests:", "  - name: t", "    roles: [light_ct]", "    steps:", "      - call: {}", ""])
+
+
+def options_seen(admin: FakeAdmin) -> Callable:
+    def respond(ha, action, data):
+        if action == "move":  # the snapshot reads get_attributes too
+            seen.append(dict(admin.options))
+        return {data["entity_id"]: {"status": "sent", "integration": "fake"}}
+
+    seen: list[dict] = []
+    respond.seen = seen
+    return respond
+
+
+async def test_each_suite_runs_with_its_options_and_the_rig_gets_its_own_back(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "OPTIONS_RELOAD_S", 0)
+    admin = FakeAdmin({"light.a": {}})
+    admin.respond = respond = options_seen(admin)
+    (tmp_path / "plain").mkdir()
+    (tmp_path / "on").mkdir()
+    plain = suite(tmp_path / "plain", option_file(), "fake")
+    on = suite(tmp_path / "on", option_file("opt"), "fake")
+
+    result = await run(
+        [plain, on],
+        inventory("fake", light_ct="light.a"),
+        OPTION_REGISTRY,
+        admin,
+        admin=admin,
+        tolerance=TOLERANCE,
+        out=lambda _: None,
+    )
+
+    assert not result.failed
+    assert respond.seen == [{"opt": False, "other": False}, {"opt": True, "other": False}]
+    assert admin.options == {"opt": True, "other": False}  # as the rig had them
+    assert [suite_result.suite.name for suite_result in result.suites] == ["move", "move-opt"]
+
+
+async def test_a_suite_whose_adapter_has_options_needs_the_admin_token(tmp_path):
+    out: list[str] = []
+    result = await run(
+        [suite(tmp_path, option_file(), "fake")],
+        inventory("fake", light_ct="light.a"),
+        OPTION_REGISTRY,
+        FakeHA({"light.a": {}}),
+        tolerance=TOLERANCE,
+        out=out.append,
+    )
+    assert result.suites == []
+    assert "fake / move: needs HA_ADMIN_TOKEN, skipped" in out
+
+
+async def test_an_option_outside_the_adapters_scope_is_a_schema_error(tmp_path):
+    with pytest.raises(engine.SchemaError, match="has no option nope"):
+        await run_one(
+            FakeAdmin({"light.a": {}}),
+            suite(tmp_path, option_file("nope"), "fake"),
+            inventory("fake", light_ct="light.a"),
+            registry=OPTION_REGISTRY,
+            admin=None,
+        )
+
+
+def test_a_step_file_lists_options_by_name(tmp_path):
+    path = tmp_path / "steps.yaml"
+    path.write_text(option_file().replace("rig_seconds: 5", "rig_seconds: 5\noptions: predicted_state"))
+    with pytest.raises(engine.SchemaError, match="options must be a list"):
+        load_step_file(path)
+
+
+async def test_a_record_with_options_on_is_named_and_marked_for_them(tmp_path):
+    adapter = REGISTRY.adapter("move", "hue")
+    steps = suite(tmp_path, option_file("predicted_state"), "hue")
+    case = CaseResult("t[light_ct]", "light_ct", "light", Outcome.PASS, reached=True)
+    result = RunResult([SuiteResult(steps, adapter, [case], complete=True)])
+
+    [path] = await write_records(result, FakeHA({}), REGISTRY, tmp_path / "bench", "2026-10-27", "rig run")
+
+    assert path == tmp_path / "bench" / "hue" / "move-predicted_state.md"
+    assert "| Options | `predicted_state` |" in path.read_text()
+    plain = render_record(
+        SuiteResult(suite(tmp_path, option_file(), "hue"), adapter, [case], True), "Hue", "", [], "", ""
+    )
+    assert "Options" not in plain
