@@ -14,7 +14,7 @@ from custom_components.device_side.const import DOMAIN
 from custom_components.device_side.integrations.zha import zcl
 from custom_components.device_side.integrations.zha.addressing import address
 
-from ...conftest import call
+from ...conftest import call, refusal
 from ...fixtures.zha import IEEE, add_zha_entity, zha_entry, zha_group
 
 CONFIRMED = {"status": "confirmed", "integration": "zha"}
@@ -75,10 +75,8 @@ async def test_brightness_calls_turn_on_first(hass, setup_production, commands, 
 async def test_untested_field_is_refused(hass, setup_production, commands, turn_ons):
     add_zha_entity(hass, zha_entry(hass), "light.bulb")
 
-    with pytest.raises(HomeAssistantError) as raised:
-        await call(hass, "turn_on_for", {"entity_id": "light.bulb", "duration": 5, "hs_color": [30, 50]})
-
-    assert raised.value.translation_placeholders["summary"] == "light.bulb: fields_not_tested"
+    data = {"entity_id": "light.bulb", "duration": 5, "hs_color": [30, 50]}
+    assert await refusal(hass, "turn_on_for", data) == "fields_not_tested"
     assert not commands
 
 
@@ -144,19 +142,13 @@ async def test_failed_read_is_sent(hass, setup_production, commands, readback, r
 async def test_switch_is_out_of_scope(hass, setup_production, commands, turn_ons):
     add_zha_entity(hass, zha_entry(hass), "switch.plug")
 
-    with pytest.raises(HomeAssistantError) as raised:
-        await call(hass, "turn_on_for", {"entity_id": "switch.plug", "duration": 5})
-
-    assert raised.value.translation_placeholders["summary"] == "switch.plug: domain_not_tested"
+    assert await refusal(hass, "turn_on_for", {"entity_id": "switch.plug", "duration": 5}) == "domain_not_tested"
 
 
 async def test_entity_without_a_light_unique_id_is_not_addressable(hass, setup_production, commands, turn_ons):
     add_zha_entity(hass, zha_entry(hass), "light.quirk", unique_id=f"{IEEE}-1-6-child_lock")
 
-    with pytest.raises(HomeAssistantError) as raised:
-        await call(hass, "turn_on_for", {"entity_id": "light.quirk", "duration": 5})
-
-    assert raised.value.translation_placeholders["summary"] == "light.quirk: not_addressable"
+    assert await refusal(hass, "turn_on_for", {"entity_id": "light.quirk", "duration": 5}) == "not_addressable"
 
 
 async def test_zha_error_rejects_that_target(hass, setup_production, turn_ons):
@@ -171,10 +163,11 @@ async def test_zha_error_rejects_that_target(hass, setup_production, turn_ons):
 
     hass.services.async_register("zha", "issue_zigbee_cluster_command", handler)
 
-    response = await call(hass, "turn_on_for", {"entity_id": ["light.bulb", "light.gone"], "duration": 5})
+    with pytest.raises(HomeAssistantError) as raised:
+        await call(hass, "turn_on_for", {"entity_id": ["light.bulb", "light.gone"], "duration": 5})
 
-    rejected = {"status": "rejected", "integration": "zha", "detail": "error"}
-    assert response == {"light.bulb": CONFIRMED, "light.gone": rejected}
+    assert raised.value.translation_key == "targets_failed"
+    assert "light.gone: error" in raised.value.translation_placeholders["summary"]
 
 
 @pytest.fixture
@@ -290,13 +283,11 @@ async def test_a_member_without_on_time_reports_no_timer(
     assert response == {"light.a": CONFIRMED, "light.b": {"status": "sent", "integration": "zha", "detail": detail}}
 
 
-async def test_a_group_zha_no_longer_knows_is_an_empty_group(hass, setup_production, zha_groups, group_commands):
+async def test_a_group_zha_no_longer_knows_is_skipped_as_empty(hass, setup_production, zha_groups, group_commands):
     add_zha_entity(hass, zha_entry(hass), "light.zha_group", unique_id="light_zha_group_0x0002")
 
-    with pytest.raises(HomeAssistantError) as raised:
-        await call(hass, "turn_on_for", {"entity_id": "light.zha_group", "duration": 5})
+    await call(hass, "turn_on_for", {"entity_id": "light.zha_group", "duration": 5}, return_response=False)
 
-    assert raised.value.translation_placeholders["summary"] == "light.zha_group: empty_group"
     assert not group_commands
 
 
@@ -349,7 +340,8 @@ async def test_a_failed_groupcast_rejects_only_that_groups_members(
 
     hass.services.async_register("zha", "issue_zigbee_group_command", handler)
 
-    response = await call(hass, "turn_on_for", {"entity_id": ["light.bulb", "light.zha_group"], "duration": 5})
+    with pytest.raises(HomeAssistantError) as raised:
+        await call(hass, "turn_on_for", {"entity_id": ["light.bulb", "light.zha_group"], "duration": 5})
 
-    rejected = {"status": "rejected", "integration": "zha", "detail": "error"}
-    assert response == {"light.bulb": CONFIRMED, "light.a": rejected, "light.b": rejected}
+    # light.bulb was confirmed, so it is not among the failures.
+    assert raised.value.translation_placeholders["summary"] == "light.a: error, light.b: error"

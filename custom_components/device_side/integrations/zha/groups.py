@@ -15,8 +15,8 @@ def expand_group(hass: HomeAssistant, target: Target) -> list[Target]:
 
     A ZHA group has one entity per domain among its members (a light group, a switch group), so a light group
     expands to its lights only. A member's entity is found by the unique_id the zha library gives it,
-    "{ieee}-{endpoint_id}". A group ZHA no longer knows expands to nothing, which the dispatcher reports as
-    empty_group: issue_zigbee_group_command would accept the call and send nothing.
+    "{ieee}-{endpoint_id}". A group ZHA no longer knows expands to nothing, which the dispatcher skips as an
+    empty group: issue_zigbee_group_command would accept the call and send nothing.
     """
     if (gid := group_id(target.entry.unique_id)) is None or (group := zcl.gateway(hass).get_group(gid)) is None:
         return []

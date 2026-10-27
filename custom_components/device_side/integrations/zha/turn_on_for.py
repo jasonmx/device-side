@@ -89,8 +89,7 @@ class ZHATurnOnFor(Adapter[TurnOnForRequest]):
     async def _unicast(
         self, hass: HomeAssistant, request: TurnOnForRequest, target: Target, on_time: int
     ) -> EntityResult:
-        if (addr := address(target.entry.unique_id)) is None:  # supports() already refused this target
-            return self.result(target, Status.UNSUPPORTED, detail="not_addressable")
+        addr = address(target.entry.unique_id)  # supports() refused the targets it can't address
         if request.light.present():
             await self._turn_on(hass, request, target.entity_id)
         try:

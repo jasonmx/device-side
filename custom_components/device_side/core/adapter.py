@@ -23,12 +23,12 @@ class Adapter[RequestT: Request](ABC):
     def supports(self, hass: HomeAssistant, request: RequestT, target: Target) -> str | None:
         """None if this adapter can serve the target, else a reason key. Sync and cheap: no I/O.
 
-        The default checks the domains in scope, and on lights the fields in scope. Switches ignore light fields
-        rather than refuse them; the dispatcher records that in the result's detail.
+        The request is the one the target will get, its lacked fields and scope.drops already dropped. The default
+        checks the domains and fields in scope: a field left that nobody has tested is refused, never dropped.
         """
         if target.domain not in self.scope.domains:
             return "domain_not_tested"
-        if target.domain == "light" and request.fields_present() - self.scope.fields:
+        if request.fields_present() - self.scope.drops - self.scope.fields:
             return "fields_not_tested"
         return None
 

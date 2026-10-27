@@ -8,6 +8,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry, async_
 
 from custom_components.device_side import actions
 from custom_components.device_side.const import DOMAIN
+from custom_components.device_side.core.errors import TargetNotSupported
 from custom_components.device_side.core.registry import AdapterRegistry
 
 from .fakes.scripted import SCRIPT
@@ -55,6 +56,13 @@ async def call(hass: HomeAssistant, service: str, data: dict, return_response: b
     return await hass.services.async_call(
         DOMAIN, service, data, blocking=True, return_response=return_response
     )
+
+
+async def refusal(hass: HomeAssistant, service: str, data: dict) -> str:
+    """The reason a call raises with for a named target that can never take the action."""
+    with pytest.raises(TargetNotSupported) as raised:
+        await call(hass, service, data)
+    return raised.value.reason
 
 
 def wall_clock_now() -> datetime:

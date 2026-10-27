@@ -9,7 +9,7 @@ from pytest_homeassistant_custom_component.common import async_mock_service
 from custom_components.device_side.integrations.hue.transition_cache import transition_cache
 
 from .conftest import Clock
-from ...conftest import call
+from ...conftest import call, refusal
 from ...fixtures.hue import add_hue_entity, add_hue_group, hue_entry
 
 pytestmark = pytest.mark.usefixtures("setup_production")
@@ -151,29 +151,27 @@ async def test_a_refused_move_is_rejected_and_not_cached(hass, bridge, clock):
     assert bridge.puts[-1] == ("light/light-1", move_put(100.0, 4000, on=True))
 
 
-async def test_light_without_dimming_is_unsupported(hass, bridge):
+async def test_light_without_dimming_drops_brightness_fields(hass, bridge):
     entity_id = await lamp(hass, bridge, brightness=None, mirek=None)
 
-    with pytest.raises(HomeAssistantError) as raised:
-        await call(hass, "move", {"entity_id": entity_id, "brightness": "up"})
+    response = await call(hass, "move", {"entity_id": entity_id, "brightness": "up"})
 
-    assert raised.value.translation_placeholders["summary"] == "light.lamp: fields_not_supported"
+    # The adapter drops brightness for a non-dimmable light; nothing is sent.
+    assert response == {entity_id: {"status": "unchanged", "integration": "hue", "detail": "fields_dropped"}}
+    assert bridge.puts == []
 
 
 @pytest.mark.parametrize(
-    ("data", "reason"),
+    "data",
     [
-        pytest.param({"saturation": "up"}, "fields_not_tested", id="saturation_not_yet"),
-        pytest.param({"hue": "up"}, "fields_not_tested", id="hue_unsupported_on_hue"),
+        pytest.param({"saturation": "up"}, id="saturation_not_yet"),
+        pytest.param({"hue": "up"}, id="hue_unsupported_on_hue"),
     ],
 )
-async def test_attributes_out_of_scope_are_refused(hass, bridge, data, reason):
+async def test_attributes_out_of_scope_are_refused(hass, bridge, data):
     entity_id = await lamp(hass, bridge)
 
-    with pytest.raises(HomeAssistantError) as raised:
-        await call(hass, "move", {"entity_id": entity_id, **data})
-
-    assert raised.value.translation_placeholders["summary"] == f"light.lamp: {reason}"
+    assert await refusal(hass, "move", {"entity_id": entity_id, **data}) == "fields_not_tested"
     assert bridge.puts == []
 
 
@@ -202,13 +200,10 @@ async def test_stop_halts_a_room_with_one_write(hass, bridge):
     assert bridge.puts == [("grouped_light/grouped-1", {"dimming_delta": {"action": "stop"}})]
 
 
-async def test_stop_on_a_light_without_dimming_is_unsupported(hass, bridge):
+async def test_stop_on_a_light_without_dimming_is_refused(hass, bridge):
     entity_id = await lamp(hass, bridge, brightness=None, mirek=None)
 
-    with pytest.raises(HomeAssistantError) as raised:
-        await call(hass, "stop", {"entity_id": entity_id})
-
-    assert raised.value.translation_placeholders["summary"] == "light.lamp: not_dimmable"
+    assert await refusal(hass, "stop", {"entity_id": entity_id}) == "not_dimmable"
 
 
 @pytest.mark.parametrize("action", ["move", "stop"])
@@ -230,10 +225,7 @@ async def test_v1_bridge_is_refused(hass, bridge, action):
     add_hue_entity(hass, entry, "light.lamp", "light-1")
     data = {"brightness": "up"} if action == "move" else {}
 
-    with pytest.raises(HomeAssistantError) as raised:
-        await call(hass, action, {"entity_id": "light.lamp", **data})
-
-    assert raised.value.translation_placeholders["summary"] == "light.lamp: bridge_v1"
+    assert await refusal(hass, action, {"entity_id": "light.lamp", **data}) == "bridge_v1"
 
 
 @pytest.mark.parametrize("target", ["light", "room"])
@@ -591,20 +583,23 @@ async def test_an_attribute_at_its_limit_is_left_out(hass, bridge):
     assert bridge.puts == [("light/light-1", ct_put(454, 8400))]
 
 
-@pytest.mark.parametrize(
-    ("light", "reason"),
-    [
-        pytest.param({"mirek": None}, "fields_not_supported", id="no_color_temperature"),
-        pytest.param({"mirek_valid": False}, "not_in_color_temp_mode", id="in_color_mode"),
-    ],
-)
-async def test_color_temp_refused(hass, bridge, light, reason):
-    entity_id = await lamp(hass, bridge, **light)
+async def test_color_temp_dropped_without_color_temp_support(hass, bridge):
+    # A light with no color temperature feature has the field dropped; the adapter sends nothing.
+    entity_id = await lamp(hass, bridge, mirek=None)
 
-    with pytest.raises(HomeAssistantError) as raised:
-        await call(hass, "move", {"entity_id": entity_id, "color_temp": "warmer"})
+    response = await call(hass, "move", {"entity_id": entity_id, "color_temp": "warmer"})
 
-    assert raised.value.translation_placeholders["summary"] == f"light.lamp: {reason}"
+    assert response == {entity_id: {"status": "unchanged", "integration": "hue", "detail": "fields_dropped"}}
+    assert bridge.puts == []
+
+
+async def test_color_temp_unchanged_in_color_mode(hass, bridge):
+    # A light in xy color mode can't be moved to a color temperature; unchanged with the detail.
+    entity_id = await lamp(hass, bridge, mirek_valid=False)
+
+    response = await call(hass, "move", {"entity_id": entity_id, "color_temp": "warmer"})
+
+    assert response == {entity_id: {"status": "unchanged", "integration": "hue", "detail": "not_in_color_temp_mode"}}
     assert bridge.puts == []
 
 
@@ -682,7 +677,8 @@ async def test_a_rooms_cut_stops_color_temp_light_by_light(hass, bridge, clock):
     ]
 
 
-async def test_a_room_with_a_light_in_color_mode_is_refused(hass, bridge):
+async def test_a_room_with_a_light_in_color_mode_sends_brightness_only(hass, bridge):
+    # Color temp move is blocked by the light in xy mode; brightness still sends.
     bridge.light("one", on=True, mirek=300)
     bridge.light("two", on=True, mirek=300, mirek_valid=False)
     bridge.room("grouped-1", ["one", "two"], brightness=50.0)
@@ -690,8 +686,9 @@ async def test_a_room_with_a_light_in_color_mode_is_refused(hass, bridge):
     members = [add_hue_entity(hass, entry, f"light.{light_id}", light_id, state="on") for light_id in ("one", "two")]
     add_hue_group(hass, entry, "light.room", "grouped-1", members)
 
-    with pytest.raises(HomeAssistantError) as raised:
-        await call(hass, "move", {"entity_id": "light.room", "brightness": "up", "color_temp": "warmer"})
+    response = await call(hass, "move", {"entity_id": "light.room", "brightness": "up", "color_temp": "warmer"})
 
-    assert raised.value.translation_placeholders["summary"] == "light.room: not_in_color_temp_mode"
-    assert bridge.puts == []
+    assert response == {"light.room": SENT}
+    assert len(bridge.puts) == 1
+    assert bridge.puts[0][0] == "grouped_light/grouped-1"
+    assert "color_temperature" not in bridge.puts[0][1]

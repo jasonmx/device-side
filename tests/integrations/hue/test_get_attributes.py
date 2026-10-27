@@ -9,7 +9,7 @@ from homeassistant.util.color import color_xy_to_hs, color_xy_to_RGB
 
 from custom_components.device_side.integrations.hue.transition_cache import COLOR_TEMP, transition_cache
 
-from ...conftest import call
+from ...conftest import call, refusal
 from ...fixtures.hue import add_hue_entity, add_hue_group, hue_entry
 
 pytestmark = pytest.mark.usefixtures("setup_production")
@@ -121,19 +121,21 @@ async def test_empty_room_and_missing_light_fail(hass, bridge):
     with pytest.raises(HomeAssistantError) as raised:
         await call(hass, "get_attributes", {"entity_id": ["light.room", "light.gone"]})
 
-    assert raised.value.translation_placeholders["summary"] == "light.gone: not_on_bridge, light.room: empty_group"
+    # empty_group is skipped silently; only the device failure raises.
+    assert raised.value.translation_placeholders["summary"] == "light.gone: not_on_bridge"
 
 
-async def test_query_answers_when_only_some_targets_fail(hass, bridge):
+async def test_query_raises_when_any_target_fails(hass, bridge):
     bridge.light("light-1")
     entry = await hue_entry(hass, bridge)
     add_hue_entity(hass, entry, "light.lamp", "light-1")
     add_hue_entity(hass, entry, "light.gone", "light-gone")
 
-    response = await call(hass, "get_attributes", {"entity_id": ["light.lamp", "light.gone"]})
+    with pytest.raises(HomeAssistantError) as raised:
+        await call(hass, "get_attributes", {"entity_id": ["light.lamp", "light.gone"]})
 
-    # As core does for a target it cannot call, the one that failed is left out.
-    assert set(response) == {"light.lamp"}
+    # Any rejected target raises targets_failed, even when others succeeded.
+    assert raised.value.translation_placeholders["summary"] == "light.gone: not_on_bridge"
 
 
 async def test_v1_bridge_is_refused(hass, bridge):
@@ -141,10 +143,7 @@ async def test_v1_bridge_is_refused(hass, bridge):
     entry = await hue_entry(hass, bridge, api_version=1)
     add_hue_entity(hass, entry, "light.lamp", "light-1")
 
-    with pytest.raises(HomeAssistantError) as raised:
-        await call(hass, "get_attributes", {"entity_id": "light.lamp"})
-
-    assert raised.value.translation_placeholders["summary"] == "light.lamp: bridge_v1"
+    assert await refusal(hass, "get_attributes", {"entity_id": "light.lamp"}) == "bridge_v1"
 
 
 async def test_color_temp_reads_the_prediction_mid_move(hass, bridge, clock):

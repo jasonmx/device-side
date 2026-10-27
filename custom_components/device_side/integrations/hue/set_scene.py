@@ -57,17 +57,16 @@ class HueSetScene(Adapter[Request]):
     def supports(self, hass: HomeAssistant, request: Request, target: Target) -> str | None:
         if (reason := super().supports(hass, request, target)) is not None:
             return reason
-        if bridge_api(target) is None:
+        if (api := bridge_api(target)) is None:
             return "bridge_v1"
+        if api.scenes.smart_scene.get(resource_id(target)) is not None:
+            return "smart_scene"
         return None
 
     async def execute(self, hass: HomeAssistant, request: Request, targets: list[Target]) -> list[EntityResult]:
         async def send(target: Target) -> EntityResult:
             api = bridge_api(target)
-            scene_id = resource_id(target)
-            if api.scenes.smart_scene.get(scene_id) is not None:
-                return self.result(target, Status.UNSUPPORTED, detail="smart_scene")
-            if (scene := api.scenes.scene.get(scene_id)) is None:
+            if (scene := api.scenes.scene.get(resource_id(target))) is None:
                 return self.result(target, Status.REJECTED, detail="scene_not_found")
             if not (writes := scene_light_writes(scene)):
                 return self.result(target, Status.UNCHANGED, detail="nothing_to_set")

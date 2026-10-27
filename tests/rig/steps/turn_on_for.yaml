@@ -14,22 +14,28 @@ tests:
       - expect_state: {state: on}
       - expect_state: {state: off, within: 2 * tol}
 
-  # A switch_as_x wrapper refuses light fields outright, on every integration.
-  - name: refuses_brightness_on_a_wrapper
+  # A switch_as_x wrapper drives an on/off switch, so brightness is dropped and the timer still runs.
+  - name: drops_brightness_on_a_wrapper
     roles: [light_wrapped]
     steps:
+      - set: {state: off}
       - call: {duration: 6, brightness: 128}
-      - expect_error: {key: all_targets_failed, summary: fields_not_supported}
-      - expect_state: {state: unchanged}
+      - expect_response: {status: expected, integration: self, detail: fields_dropped}
+      - expect_state: {state: on, within: tol}
+      - wait: duration - tol
+      - expect_state: {state: off, within: 2 * tol}
 
-  # A Shelly relay shown as a light refuses brightness: its Switch component is on/off.
-  - name: refuses_brightness_on_a_relay_light
+  # A Shelly relay shown as a light is on/off (its Switch component), so brightness is dropped likewise.
+  - name: drops_brightness_on_a_relay_light
     roles: [light_onoff]
     only: [shelly]
     steps:
+      - set: {state: off}
       - call: {duration: 6, brightness: 128}
-      - expect_error: {key: all_targets_failed, summary: fields_not_supported}
-      - expect_state: {state: unchanged}
+      - expect_response: {status: expected, integration: self, detail: fields_dropped}
+      - expect_state: {state: on, within: tol}
+      - wait: duration - tol
+      - expect_state: {state: off, within: 2 * tol}
 
   # A bulb takes the same timer; a dimmer's own On command, not a relay's.
   - name: bulb_on_then_off

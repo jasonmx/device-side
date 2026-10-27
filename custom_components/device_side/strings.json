@@ -37,8 +37,14 @@
     "invalid_duration": {
       "message": "Duration must be greater than zero."
     },
-    "all_targets_failed": {
-      "message": "No targeted entity accepted the command: {summary}"
+    "target_not_supported": {
+      "message": "{entity_id} can't take this action ({reason})."
+    },
+    "targets_failed": {
+      "message": "The command failed on: {summary}"
+    },
+    "no_entities_matched": {
+      "message": "No targeted entity could return a response."
     },
     "nothing_to_set": {
       "message": "Nothing to set. Give a brightness, a color temperature, a color, or a brightness limit."
@@ -53,7 +59,7 @@
   "services": {
     "get_attributes": {
       "name": "Get attributes",
-      "description": "Get brightness, color temp, and color (RGB, HS, XY), even if lights are off. Returns one record per target."
+      "description": "Get brightness, color temp, and color (RGB, HS, XY), even if lights are off, and any running on/off timer. Returns one record per target."
     },
     "move": {
       "name": "Move: dim, brighten, warm or cool",

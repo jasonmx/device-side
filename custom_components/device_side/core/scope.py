@@ -24,6 +24,8 @@ class AdapterScope:
     domains: frozenset[str] = frozenset({"light"})
     duration: DurationLimits | None = None
     fields: frozenset[str] = frozenset()
+    # Fields the integration can never send; dropped before the scope check, as a field the light lacks is.
+    drops: frozenset[str] = frozenset()
     # Device-side capabilities tested on hardware (Shelly: RPC component names); None covers all it can address.
     # A record proves only the capability the call reaches, so a sibling's untested capability is left out here.
     capabilities: frozenset[str] | None = None

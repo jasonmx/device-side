@@ -3,7 +3,7 @@
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 
-from ...conftest import call
+from ...conftest import call, refusal
 from ...fixtures.matter import (
     NODE_ID,
     add_matter_entity,
@@ -51,26 +51,12 @@ async def test_duration_converted_to_tenths(setup_matter, hass):
     assert cmd.onTime == 15  # 1.5 s * 10 = 15 tenths
 
 
-async def test_no_lt_feature_returns_unsupported(setup_matter, hass):
-    """An endpoint without the LT feature bit returns no_lt_feature unsupported."""
+async def test_no_lt_feature_is_refused(setup_matter, hass):
+    """An endpoint without the LT feature bit raises TargetNotSupported."""
     entry, send_cmd, _ = matter_device(hass, endpoint_id=EP, feature_map=0x0000)
     add_matter_entity(hass, entry, "switch.no_lt", endpoint_id=EP)
-    # need a second entity that succeeds so the call doesn't raise all_targets_failed
-    second_entry, _, _ = matter_device(hass, endpoint_id=2, feature_map=0x0001)
-    add_matter_entity(hass, second_entry, "switch.plug_with_lt", endpoint_id=2)
 
-    response = await call(
-        hass,
-        "turn_on_for",
-        {"entity_id": ["switch.no_lt", "switch.plug_with_lt"], "duration": 5},
-    )
-
-    assert response["switch.no_lt"] == {
-        "status": "unsupported",
-        "integration": "matter",
-        "detail": "no_lt_feature",
-    }
-    assert response["switch.plug_with_lt"] == CONFIRMED
+    assert await refusal(hass, "turn_on_for", {"entity_id": "switch.no_lt", "duration": 5}) == "no_lt_feature"
     send_cmd.assert_not_awaited()
 
 
@@ -86,16 +72,11 @@ async def test_plug_sends_on_with_timed_off(setup_matter, hass):
 
 
 async def test_light_is_out_of_scope(setup_matter, hass):
-    """A Matter light is refused until a tester's report brings lights into scope."""
+    """A Matter light raises TargetNotSupported until a tester's report brings lights into scope."""
     entry, send_cmd, _ = matter_device(hass, endpoint_id=EP)
     add_matter_entity(hass, entry, "light.bulb", endpoint_id=EP)
-    second_entry, _, _ = matter_device(hass, endpoint_id=2)
-    add_matter_entity(hass, second_entry, "switch.plug", endpoint_id=2)
 
-    response = await call(hass, "turn_on_for", {"entity_id": ["light.bulb", "switch.plug"], "duration": 5})
-
-    assert response["light.bulb"]["detail"] == "domain_not_tested"
-    assert response["switch.plug"] == CONFIRMED
+    assert await refusal(hass, "turn_on_for", {"entity_id": "light.bulb", "duration": 5}) == "domain_not_tested"
 
 
 def _no_client(entry):
@@ -111,49 +92,33 @@ def _node_missing(entry):
 
 
 @pytest.mark.parametrize("break_node", [_no_client, _node_lookup_raises, _node_missing])
-async def test_unreachable_node_is_not_addressable(setup_matter, hass, break_node):
-    """No Matter client, a node lookup that raises, or no node: the target is not addressable."""
+async def test_unreachable_node_is_refused(setup_matter, hass, break_node):
+    """No Matter client, a node lookup that raises, or no node: raises TargetNotSupported."""
     entry, send_cmd, _ = matter_device(hass, endpoint_id=EP)
     break_node(entry)
     add_matter_entity(hass, entry, "switch.gone", endpoint_id=EP)
-    second_entry, _, _ = matter_device(hass, endpoint_id=2)
-    add_matter_entity(hass, second_entry, "switch.plug", endpoint_id=2)
 
-    response = await call(hass, "turn_on_for", {"entity_id": ["switch.gone", "switch.plug"], "duration": 5})
-
-    assert response["switch.gone"]["detail"] == "not_addressable"
-    assert response["switch.plug"] == CONFIRMED
+    assert await refusal(hass, "turn_on_for", {"entity_id": "switch.gone", "duration": 5}) == "not_addressable"
+    send_cmd.assert_not_awaited()
 
 
 async def test_dead_front_bit_alone_is_not_lt(setup_matter, hass):
-    """FeatureMap 0x2 is DeadFrontBehavior, not Lighting: the endpoint is refused."""
+    """FeatureMap 0x2 is DeadFrontBehavior, not Lighting: raises TargetNotSupported."""
     entry, send_cmd, _ = matter_device(hass, endpoint_id=EP, feature_map=0x0002)
     add_matter_entity(hass, entry, "switch.dead_front", endpoint_id=EP)
-    second_entry, _, _ = matter_device(hass, endpoint_id=2, feature_map=0x0001)
-    add_matter_entity(hass, second_entry, "switch.plug", endpoint_id=2)
 
-    response = await call(hass, "turn_on_for", {"entity_id": ["switch.dead_front", "switch.plug"], "duration": 5})
-
-    assert response["switch.dead_front"] == {
-        "status": "unsupported",
-        "integration": "matter",
-        "detail": "no_lt_feature",
-    }
-    assert response["switch.plug"] == CONFIRMED
+    assert await refusal(hass, "turn_on_for", {"entity_id": "switch.dead_front", "duration": 5}) == "no_lt_feature"
+    send_cmd.assert_not_awaited()
 
 
 async def test_featuremap_missing_from_cache_is_not_lt(setup_matter, hass):
-    """An endpoint whose OnOff FeatureMap the node never reported is refused."""
-    entry, _, _ = matter_device(hass, endpoint_id=EP)
+    """An endpoint whose OnOff FeatureMap the node never reported raises TargetNotSupported."""
+    entry, send_cmd, _ = matter_device(hass, endpoint_id=EP)
     entry.runtime_data.adapter.matter_client.get_node.return_value.node_data.attributes = {}
     add_matter_entity(hass, entry, "switch.unreported", endpoint_id=EP)
-    second_entry, _, _ = matter_device(hass, endpoint_id=2)
-    add_matter_entity(hass, second_entry, "switch.plug", endpoint_id=2)
 
-    response = await call(hass, "turn_on_for", {"entity_id": ["switch.unreported", "switch.plug"], "duration": 5})
-
-    assert response["switch.unreported"]["detail"] == "no_lt_feature"
-    assert response["switch.plug"] == CONFIRMED
+    assert await refusal(hass, "turn_on_for", {"entity_id": "switch.unreported", "duration": 5}) == "no_lt_feature"
+    send_cmd.assert_not_awaited()
 
 
 async def test_readback_without_the_path_reports_timer_not_running(setup_matter, hass):
@@ -191,7 +156,7 @@ async def test_readback_returns_zero_reports_timer_not_running(setup_matter, has
 
 
 async def test_send_error_rejects_target(setup_matter, hass):
-    """If send_device_command raises, the target is REJECTED and all_targets_failed is raised."""
+    """If send_device_command raises, the target is REJECTED and targets_failed is raised."""
     entry, send_cmd, _ = matter_device(hass, endpoint_id=EP, feature_map=0x0001)
     send_cmd.side_effect = ConnectionError("device unreachable")
     add_matter_entity(hass, entry, "switch.bulb", endpoint_id=EP)
@@ -199,7 +164,7 @@ async def test_send_error_rejects_target(setup_matter, hass):
     with pytest.raises(HomeAssistantError) as raised:
         await call(hass, "turn_on_for", {"entity_id": "switch.bulb", "duration": 5})
 
-    assert raised.value.translation_key == "all_targets_failed"
+    assert raised.value.translation_key == "targets_failed"
 
 
 async def test_duration_beyond_limit_is_clamped(setup_matter, hass):
@@ -230,15 +195,4 @@ async def test_not_addressable_when_unique_id_unparseable(setup_matter, hass):
     )
     hass.states.async_set("switch.broken", "off", {})
 
-    # Need a successful entity alongside to avoid all_targets_failed.
-    entry2, _, _ = matter_device(hass, endpoint_id=2, feature_map=0x0001)
-    add_matter_entity(hass, entry2, "switch.good", endpoint_id=2)
-
-    response = await call(
-        hass,
-        "turn_on_for",
-        {"entity_id": ["switch.broken", "switch.good"], "duration": 5},
-    )
-
-    assert response["switch.broken"]["detail"] == "not_addressable"
-    assert response["switch.good"] == CONFIRMED
+    assert await refusal(hass, "turn_on_for", {"entity_id": "switch.broken", "duration": 5}) == "not_addressable"
