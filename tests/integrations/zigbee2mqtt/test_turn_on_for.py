@@ -307,12 +307,14 @@ async def test_no_state_by_the_timeout_still_sends_the_timer(hass, setup_product
     add_z2m_entity(hass, z2m_entry(hass), "light.kitchen", name="Kitchen")
     z2m.answer = False
 
-    with caplog.at_level(logging.DEBUG):
-        response = await call(hass, "turn_on_for", {"entity_id": "light.kitchen", "duration": 5, "brightness": 128})
+    response = await call(hass, "turn_on_for", {"entity_id": "light.kitchen", "duration": 5, "brightness": 128})
 
     assert response == {"light.kitchen": SENT}
     assert z2m.events == ["turn_on", "timer"]
-    assert "No state from Zigbee2MQTT for light.kitchen in 0.2 s; sending the timer" in caplog.text
+    assert (
+        "No state from Zigbee2MQTT for light.kitchen in 0.2 s, "
+        "so its timer starts late and it stays on that much longer" in caplog.text
+    )
     assert z2m.subscribers[STATE_TOPIC] == []
 
 

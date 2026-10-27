@@ -122,8 +122,11 @@ class Z2MTurnOnFor(Adapter[TurnOnForRequest]):
                 async with asyncio.timeout(_STATE_TIMEOUT_S):
                     await published
             except TimeoutError:
-                _LOGGER.debug(
-                    "No state from Zigbee2MQTT for %s in %s s; sending the timer", target.entity_id, _STATE_TIMEOUT_S
+                _LOGGER.warning(
+                    "No state from Zigbee2MQTT for %s in %s s, "
+                    "so its timer starts late and it stays on that much longer",
+                    target.entity_id,
+                    _STATE_TIMEOUT_S,
                 )
         finally:
             unsubscribe()
