@@ -16,12 +16,12 @@ If you're OK with that, let's dive in.
 
 ## Feature Availability
 
-|                        |         Shelly          | Zigbee2MQTT | ZHA | Matter | Hue |
-|:---------------------- |:-----------------------:|:-----------:|:---:|:------:|:---:|
-| On With Timed Off      | ✅ switches<br>🙋 lights |          |   |      | ❌ |
-| Off With Timed On      | ✅ switches<br>🙋 lights |     ❌      | ❌  |   ❌   | ❌ |
-| Smooth Dimming         |                         |           |   |      | ✅¹ |
-| Set Without Turning On |                         |           |   |      | ✅¹ |
+|                        |                   Shelly                   | Zigbee2MQTT | ZHA | Matter | Hue |
+|:---------------------- |:------------------------------------------:|:-----------:|:---:|:------:|:---:|
+| On With Timed Off      | ✅ switches, color bulbs<br>🙋 other lights |          |   |      | ❌ |
+| Off With Timed On      | ✅ switches, color bulbs<br>🙋 other lights |     ❌      | ❌  |   ❌   | ❌ |
+| Smooth Dimming         |                                            |           |   |      | ✅¹ |
+| Set Without Turning On |                                            |           |   |      | ✅¹ |
 
 ✅ Stable · 🙋 Ready for release once a [volunteer tests it](CONTRIBUTING.md) · ❌ Appears not possible
 

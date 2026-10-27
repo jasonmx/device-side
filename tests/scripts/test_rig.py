@@ -140,7 +140,8 @@ def test_select_plan_lines_and_estimate(inventory, tmp_path):
     write(
         bench / "shelly",
         "turn_on_for.md",
-        f"| Result | pass |\n| Fingerprint | `{current}` |\n| Capabilities | `Switch` |\n| Fields | none |\n",
+        f"| Result | pass |\n| Fingerprint | `{current}` |\n| Capabilities | `RGBCCT`, `Switch` |\n"
+        "| Fields | `brightness`, `color_temp_kelvin`, `rgb_color`, `transition` |\n",
     )
     assert rig.plan_lines(shelly_on + suites[1:2], inventory, registry, bench_dir=bench) == [
         "shelly / turn_on_for -> switch.plug (beta)",
@@ -148,8 +149,13 @@ def test_select_plan_lines_and_estimate(inventory, tmp_path):
         "    on_then_off[light_onoff]: no light_onoff entity in inventory",
         "    on_then_off[light_wrapped]: no light_wrapped entity in inventory",
         "    refuses_brightness_on_a_wrapper[light_wrapped]: no light_wrapped entity in inventory",
-        "    refuses_brightness_out_of_scope[light_onoff]: no light_onoff entity in inventory",
+        "    refuses_brightness_on_a_relay_light[light_onoff]: no light_onoff entity in inventory",
         "    bulb_on_then_off[light_dimmable]: no light_dimmable entity in inventory",
+        "    bulb_brightness_then_off[light_dimmable]: no light_dimmable entity in inventory",
+        "    bulb_color_temp_then_off[light_ct]: no light_ct entity in inventory",
+        "    bulb_transition_then_off[light_dimmable]: no light_dimmable entity in inventory",
+        "    rgbcct_bulb_rgb_then_off[light_color]: no light_color entity in inventory",
+        "    rgbcct_bulb_rgb_then_off[light_color] observed: no light_color entity in inventory",
         "hue / turn_off_for (no adapter, will skip)",
     ]
     # The tier is check_tiers': with no records, nothing is proven.
@@ -159,6 +165,7 @@ def test_select_plan_lines_and_estimate(inventory, tmp_path):
         "    on_then_off[light_onoff]: no light_onoff entity in inventory",
         "    on_then_off[light_wrapped]: no light_wrapped entity in inventory",
         "    bulb_on_then_off[light_dimmable]: no light_dimmable entity in inventory",
+        "    bulb_transition_then_off[light_dimmable]: no light_dimmable entity in inventory",
     ]
 
     shelly_seconds = sum(step_file.rig_seconds for step_file in step_files)

@@ -8,18 +8,22 @@ from ...fixtures.shelly import add_shelly_entity, shelly_device
 CONFIRMED = {"status": "confirmed", "integration": "shelly"}
 
 
-async def test_switch_and_relay_light_each_get_one_set_and_a_capability_out_of_scope_is_refused(hass, setup_production):
+async def test_each_capability_in_scope_gets_one_set_and_one_out_of_scope_is_refused(hass, setup_production):
     entry, call_rpc = shelly_device(hass)
     add_shelly_entity(hass, entry, "switch.heater", "switch:0", state="on")
     add_shelly_entity(hass, entry, "light.lamp", "switch:1", state="on")
     add_shelly_entity(hass, entry, "light.strip", "rgbw:0", state="on")
+    add_shelly_entity(hass, entry, "light.bulb", "rgbcct:2", state="on")
 
     response = await call(
-        hass, "turn_off_for", {"entity_id": ["light.strip", "light.lamp", "switch.heater"], "duration": 90}
+        hass,
+        "turn_off_for",
+        {"entity_id": ["light.strip", "light.lamp", "light.bulb", "switch.heater"], "duration": 90},
     )
 
     assert response == {
         "light.lamp": CONFIRMED,
+        "light.bulb": CONFIRMED,
         "switch.heater": CONFIRMED,
         "light.strip": {**CONFIRMED, "status": "unsupported", "detail": "capability_not_tested"},
     }
@@ -27,6 +31,7 @@ async def test_switch_and_relay_light_each_get_one_set_and_a_capability_out_of_s
     assert sorted(sets, key=lambda args: args.args[1]["id"]) == [
         rpc_call("Switch.Set", {"id": 0, "on": False, "toggle_after": 90.0}),
         rpc_call("Switch.Set", {"id": 1, "on": False, "toggle_after": 90.0}),
+        rpc_call("RGBCCT.Set", {"id": 2, "on": False, "toggle_after": 90.0}),
     ]
 
 
