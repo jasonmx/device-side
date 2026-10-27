@@ -135,4 +135,5 @@ A passing [Test report](../../.github/ISSUE_TEMPLATE/test-report.yml) issue beco
 `docs/bench/<integration>/<action>-issue-<N>.md`, next to the rig's, so a rig run never overwrites it. It uses the
 rig record's key/value table: `Source` cites the issue (`tester report, #<N>`), and `Fingerprint` is the adapter's
 at the RC tag the tester ran (`git checkout <rc> && scripts/fingerprint.py`). List only the capabilities and fields
-the report shows working. The tests table is optional.
+the report shows working. If the tester had device_side options on, an `Options` row lists them; leave it out
+when none were. The tests table is optional.

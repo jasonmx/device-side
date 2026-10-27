@@ -4,7 +4,8 @@
 Records are `docs/bench/<integration>/<action>.md` (a rig run) and `<action>-issue-<N>.md` (a tester report); an
 adapter's tier draws on all of them. A capability listed by any passing record stays covered while the adapter has
 at least one record with its current fingerprint that reached the device; a field needs a current-fingerprint
-record listing it.
+record listing it, and an option in scope a current-fingerprint record with it on and one with it off. A record
+with no Options row ran with every option off.
 
 Exits 1 on a malformed record, a record with no adapter, a non-experimental adapter module under 95% line coverage
 (with --coverage), or, with --require-beta, any adapter that is not beta or experimental.
@@ -47,6 +48,8 @@ class Record:
     # None: every capability the adapter addresses, as AdapterScope.capabilities=None means.
     capabilities: frozenset[str] | None
     fields: frozenset[str]
+    # The options the run had on.
+    options: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +89,7 @@ def parse_record(path: Path) -> Record:
         fingerprint=fp[1],
         capabilities=None if capabilities == ALL_CAPABILITIES else _names(path, "Capabilities", capabilities),
         fields=_names(path, "Fields", rows["Fields"]),
+        options=_names(path, "Options", rows.get("Options", "none")),
     )
 
 
@@ -127,6 +131,12 @@ def uncovered(scope, current_hash: str, records: list[Record]) -> list[str]:
         missing += [f"capability `{name}`" for name in sorted(scope.capabilities - proven)]
     fields = frozenset().union(*(record.fields for record in current))
     missing += [f"field `{name}`" for name in sorted(scope.fields - fields)]
+    for name in sorted(scope.options):
+        missing += [
+            f"option `{name}` {state}"
+            for state, on in (("on", True), ("off", False))
+            if not any((name in record.options) == on for record in current)
+        ]
     return missing
 
 

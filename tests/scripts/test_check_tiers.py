@@ -36,13 +36,22 @@ class FakeRegistry:
 
 SHELLY = AdapterScope(domains=frozenset({"switch"}), capabilities=frozenset({"Switch", "Light"}))
 ZHA = AdapterScope(fields=frozenset({"brightness"}))
+HUE = AdapterScope(options=frozenset({"predicted_state"}))
 
 
-def record(fp: str = CURRENT, capabilities: str = "`Switch`", fields: str = "none", result: str = "pass") -> str:
+def record(
+    fp: str = CURRENT,
+    capabilities: str = "`Switch`",
+    fields: str = "none",
+    result: str = "pass",
+    options: str | None = None,
+) -> str:
+    options_row = "" if options is None else f"| Options | {options} |\n"
     return (
         "# Shelly · turn_on_for\n\n| | |\n|---|---|\n"
         f"| Result | {result} |\n| Date | 2026-10-25 |\n| Fingerprint | `{fp}` (`turn_on_for.py`) |\n"
-        f"| Capabilities | {capabilities} |\n| Fields | {fields} |\n\n## Tests\n\n| Test | Target | Result |\n"
+        f"| Capabilities | {capabilities} |\n| Fields | {fields} |\n{options_row}\n## Tests\n\n"
+        "| Test | Target | Result |\n"
         "|---|---|---|\n| `on` | `switch` (switch_plug) | pass |\n"
     )
 
@@ -77,6 +86,15 @@ def test_parse_record_reads_the_rig_table(bench):
     )
     assert every.capabilities is None
     assert every.fields == {"brightness"}
+
+
+def test_parse_record_reads_the_options_row(bench):
+    assert ct.parse_record(bench("hue/move.md", record())).options == frozenset()
+    assert ct.parse_record(bench("hue/move.md", record(options="none"))).options == frozenset()
+    on = ct.parse_record(bench("hue/move.md", record(options="`predicted_state`")))
+    assert on.options == {"predicted_state"}
+    with pytest.raises(ct.RecordError, match="Options is neither"):
+        ct.parse_record(bench("hue/move.md", record(options="predicted_state")))
 
 
 def test_parse_record_reads_the_repos_own_records():
@@ -168,6 +186,29 @@ def test_sibling_records_union(bench):
     bench("zha/turn_on_for-issue-9.md", record(capabilities="none", fields="`brightness`"))
     [tier] = tiers(FakeRegistry({("turn_on_for", "zha"): ZHA}), bench.dir).values()
     assert tier.tier is Tier.BETA
+
+
+@pytest.mark.parametrize(
+    ("records", "uncovered"),
+    [
+        ({"move.md": None}, ("option `predicted_state` on",)),
+        ({"move.md": "`predicted_state`"}, ("option `predicted_state` off",)),
+        ({"move.md": None, "move-issue-5.md": "`predicted_state`"}, ()),
+        ({"move.md": "none", "move-issue-5.md": "`predicted_state`"}, ()),
+    ],
+)
+def test_an_option_needs_a_current_record_with_it_on_and_one_with_it_off(bench, records, uncovered):
+    for name, options in records.items():
+        bench(f"hue/{name}", record(capabilities=ct.ALL_CAPABILITIES, options=options))
+    [tier] = tiers(FakeRegistry({("move", "hue"): HUE}), bench.dir).values()
+    assert tier.uncovered == uncovered
+
+
+def test_a_stale_record_proves_no_option(bench):
+    bench("hue/move.md", record(capabilities=ct.ALL_CAPABILITIES))
+    bench("hue/move-issue-5.md", record(fp=STALE, capabilities=ct.ALL_CAPABILITIES, options="`predicted_state`"))
+    [tier] = tiers(FakeRegistry({("move", "hue"): HUE}), bench.dir).values()
+    assert tier.uncovered == ("option `predicted_state` on",)
 
 
 def test_malformed_and_orphan_records_are_errors(bench):

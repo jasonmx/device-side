@@ -325,7 +325,7 @@ scripts/
   check_tiers.py         computed tiers, coverage and scope-coverage checks for CI (slice 9c)
   deploy.sh              the deploy sync command <branch>, then the deploy restart command (rig only)
   rig.py                 approval gate (inventory, adapters, duration, restart?) -> y/N -> deploy -> step files
-  fingerprint.py         adapter fingerprints: AST hash without docstrings or the AdapterScope declaration
+  fingerprint.py         adapter fingerprints: AST hash of the adapter and its package imports, without docstrings or AdapterScope
 docs/
   device_side_handoff-2026-10-23.md          existing
   plans/2026-10-23-device-side-repo-plan.md  this plan, saved in slice 0
@@ -495,13 +495,14 @@ and computes each adapter's tier from its records, found by path (`docs/bench/<i
 It fails on a malformed record, a record with no adapter, or a non-experimental adapter under 95%
 coverage (`coverage.json`); CI runs it and prints the tier table. `--require-beta`, run only by
 `cut-release`, also fails on any `untested` adapter. It generates no docs: the README feature table and
-`docs/integrations.md` are hand-written. Fingerprint: AST hash of the adapter module, excluding
-docstrings and the `AdapterScope` declaration; bench records carry the fingerprint they
-tested and list the capabilities (Shelly: RPC components) and light fields they exercised. Proof
+`docs/integrations.md` are hand-written. Fingerprint: AST hash of the adapter module and, in turn, the
+modules it imports from its own integration package, excluding docstrings and the `AdapterScope`
+declaration; bench records carry the fingerprint they tested and list the capabilities (Shelly: RPC components) and light fields they exercised. Proof
 follows the call: a record proves the device-side call, whatever HA domain the target shows, so a
 relay exposed as a `switch` or as an on/off `light` rides one record. `beta` needs a record with the
 current fingerprint, and every capability and field in scope covered: a capability by any passing
-record (any fingerprint), a field by a current-fingerprint record. Untested capabilities are left out of
+record (any fingerprint), a field by a current-fingerprint record, an option in scope
+(`AdapterScope.options`) by current-fingerprint records with it on and with it off. Untested capabilities are left out of
 `AdapterScope.capabilities` and refused, not taken into scope on a sibling's proof. Adding a capability
 after a tester report is a scope edit plus a record listing it; the fingerprint survives it. Tier ladder: see `CLAUDE.md`. Tags come only from the `cut-release-candidate` and `cut-release`
 workflows (a tag ruleset refuses any other), and `scripts/check_tag.py` refuses a tag not matching
