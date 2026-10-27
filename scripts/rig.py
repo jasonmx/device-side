@@ -33,6 +33,7 @@ sys.path.insert(0, str(REPO))
 
 from custom_components.device_side.core.registry import AdapterRegistry  # noqa: E402
 from scripts.check_tiers import BENCH_DIR, compute  # noqa: E402
+from tests.rig.bridge import HueBridge  # noqa: E402
 from tests.rig.client import HAClient  # noqa: E402
 from tests.rig.engine import (  # noqa: E402
     ADMIN_INTEGRATIONS,
@@ -279,9 +280,14 @@ def main(argv: list[str] | None = None) -> int:
 
 def check_tokens(env: dict, suites: list[Suite], registry: AdapterRegistry) -> None:
     """Stop before the gate when .env.rig lacks a token the run needs: ADMIN_INTEGRATIONS and any adapter with
-    options (they are set through device_side's options flow) need HA_ADMIN_TOKEN."""
+    options (they are set through device_side's options flow) need HA_ADMIN_TOKEN; a Hue file with a bridge step
+    needs the bridge's host and key."""
     if not (env.get("HA_URL") and env.get("HA_TOKEN")):
         raise SystemExit("HA_URL and HA_TOKEN must be set in .env.rig (see tests/rig/env.example)")
+    if any(suite.integration == "hue" and suite.file.uses_bridge for suite in suites) and not (
+        env.get("HUE_BRIDGE_HOST") and env.get("HUE_APP_KEY")
+    ):
+        raise SystemExit("HUE_BRIDGE_HOST and HUE_APP_KEY must be set in .env.rig for the bridge step")
     if env.get("HA_ADMIN_TOKEN"):
         return
     with_options = {
@@ -334,6 +340,9 @@ async def run_rig(
     """Run the step files, then write a bench record for each adapter whose every test passed."""
     ha = HAClient(env["HA_URL"], env["HA_TOKEN"])
     admin = HAClient(env["HA_URL"], env["HA_ADMIN_TOKEN"]) if env.get("HA_ADMIN_TOKEN") else None
+    bridge = None
+    if env.get("HUE_BRIDGE_HOST") and env.get("HUE_APP_KEY"):
+        bridge = HueBridge(env["HUE_BRIDGE_HOST"], env["HUE_APP_KEY"])
     await ha.connect()
     if admin:
         await admin.connect()
@@ -341,7 +350,14 @@ async def run_rig(
     try:
         await pause(ha, pause_list(env), paused)
         result = await run(
-            suites, inventory, registry, ha, admin=admin, keyword=keyword, ask=None if unattended else input
+            suites,
+            inventory,
+            registry,
+            ha,
+            admin=admin,
+            keyword=keyword,
+            ask=None if unattended else input,
+            bridge=bridge,
         )
         stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         print(f"\nReport: {write_report(result, REPORT_DIR, f'rig run {stamp}')}")
@@ -351,6 +367,8 @@ async def run_rig(
             print(f"Wrote {path.relative_to(REPO)}; review the diff before committing it.")
     finally:
         await resume(ha, paused)
+        if bridge:
+            await bridge.close()
         await ha.close()
         if admin:
             await admin.close()

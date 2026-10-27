@@ -9,7 +9,7 @@ import pytest
 
 from custom_components.device_side.core.registry import AdapterRegistry
 from scripts.fingerprint import adapter_path, fingerprint
-from tests.rig.engine import load_step_files
+from tests.rig.engine import load_step_file, load_step_files
 from tests.rig.inventory import Inventory, load_env, main_checkout
 
 REPO = Path(__file__).parents[2]
@@ -387,6 +387,24 @@ async def test_pause_stops_on_an_unknown_entity():
 def test_pause_list_refuses_other_domains():
     with pytest.raises(SystemExit, match="automations and switches only, got light.hall"):
         rig.pause_list({"RIG_PAUSE": "switch.al_office, light.hall"})
+
+
+def test_check_tokens_stops_a_hue_bridge_step_without_the_bridge_settings(tmp_path):
+    registry = AdapterRegistry.discover()
+    path = tmp_path / "steps.yaml"
+    path.write_text(
+        "action: set_scene\nrig_seconds: 5\ntests:\n  - name: t\n    roles: [light_onoff]\n"
+        "    steps:\n      - bridge: {put: {on: {on: true}}}\n"
+    )
+    step_file = load_step_file(path)
+    env = {"HA_URL": "http://ha:8123", "HA_TOKEN": "tok", "HA_ADMIN_TOKEN": "admin"}
+    with pytest.raises(SystemExit, match="HUE_BRIDGE_HOST and HUE_APP_KEY"):
+        rig.check_tokens(env, [rig.Suite(step_file, "hue")], registry)
+    with pytest.raises(SystemExit, match="HUE_BRIDGE_HOST and HUE_APP_KEY"):
+        rig.check_tokens({**env, "HUE_BRIDGE_HOST": "bridge"}, [rig.Suite(step_file, "hue")], registry)
+    ready = {**env, "HUE_BRIDGE_HOST": "bridge", "HUE_APP_KEY": "key"}
+    rig.check_tokens(ready, [rig.Suite(step_file, "hue")], registry)
+    rig.check_tokens(env, [rig.Suite(step_file, "shelly")], registry)
 
 
 def test_check_tokens_stops_a_run_of_an_adapter_with_options_without_an_admin_token():
