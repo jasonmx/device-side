@@ -436,20 +436,18 @@ async def test_up_after_our_soft_off_starts_at_the_bottom(hass, bridge, clock):
 
 
 async def test_a_change_from_elsewhere_mid_move_starts_the_next_move_from_it(hass, bridge, clock):
-    # The Hue app sets 10 % 3 s into a 20 % to 100 % fade: the next move starts there, not at the predicted 44 %.
+    # The Hue app turns the light off 3 s into a 20 % to 100 % fade: the next move starts from off, not the predicted
+    # 50 %.
     entity_id = await lamp(hass, bridge, brightness_pct=20.0)
     await call(hass, "move", {"entity_id": entity_id, "brightness": "up", "sweep_time": 10})
     clock.now += 3
-    bridge.api.events.emit(
-        EventType.RESOURCE_UPDATED, {"id": "light-1", "type": "light", "dimming": {"brightness": 10}}
-    )
-    hass.states.async_set(entity_id, "on", {"brightness": percent(10.0)})
+    bridge.api.events.emit(EventType.RESOURCE_UPDATED, {"id": "light-1", "type": "light", "on": {"on": False}})
+    hass.states.async_set(entity_id, "off", {})
     await hass.async_block_till_done()
 
-    await call(hass, "move", {"entity_id": entity_id, "brightness": "down", "sweep_time": 10})
+    await call(hass, "move", {"entity_id": entity_id, "brightness": "up", "sweep_time": 10})
 
-    # HA holds 10 % as 26/255, so 10.2 % to go.
-    assert bridge.puts[-1] == ("light/light-1", {"on": {"on": False}, "dynamics": {"duration": 1020}})
+    assert bridge.puts[-1] == ("light/light-1", move_put(100.0, 10000, on=True))
 
 
 async def test_a_late_stop_report_keeps_the_prediction(hass, bridge, clock):

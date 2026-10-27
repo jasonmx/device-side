@@ -8,8 +8,7 @@ from aiohue.v2.controllers.events import EventType
 from pytest_homeassistant_custom_component.common import async_mock_service
 
 from custom_components.device_side.core.runtime import get_runtime
-from custom_components.device_side.integrations.hue.move import end_echo
-from custom_components.device_side.integrations.hue.transition_cache import MIN_BRIGHTNESS_STEP, transition_cache
+from custom_components.device_side.integrations.hue.transition_cache import MIN_BRIGHTNESS_STEP
 
 from .conftest import light_event, setup_room
 from ...conftest import advance, call, wall_clock_now
@@ -99,17 +98,6 @@ async def test_a_stop_shows_the_halt_and_drops_the_end(hass, bridge, clock):
 
     await advance(hass, start, FADE_S + 1)
     assert shown(bridge, "one") == (True, 60.0)
-
-
-async def test_a_real_change_shows_at_once_and_drops_the_end(hass, bridge, clock):
-    await setup_room(hass, bridge)
-    start = wall_clock_now()
-    await raise_one(hass)
-
-    report(bridge, light_event("one", brightness=10.0))  # the Hue app, below where the fade started
-    await advance(hass, start, FADE_S + 1)
-
-    assert shown(bridge, "one") == (True, 10.0)
 
 
 async def test_a_change_from_ha_drops_the_end(hass, bridge, clock):
@@ -250,26 +238,42 @@ async def test_a_room_up_from_off_shows_on(hass, bridge, clock):
     assert room_shown(bridge) == (True, MIN_BRIGHTNESS_STEP)
 
 
-async def test_a_hidden_end_value_is_what_the_next_echo_is_worked_out_from(hass, bridge, clock):
-    # aiohue holds the halt; the bridge still holds the end value it reported, so a move back to it reports nothing.
+async def test_a_stale_report_after_a_stop_stays_hidden(hass, bridge, clock):
+    # The rig saw a bulb report, 4 s after a stop, the brightness it held before the move.
     await setup_room(hass, bridge)
-    cache = transition_cache(hass)
     await raise_one(hass)
-    report(bridge, light_event("one", brightness=100.0))
     clock.now += 4.0
     await call(hass, "stop", {"entity_id": "light.one"})
-    await settle(hass)
-    light = bridge.api.lights["one"]
 
-    assert light.dimming.brightness == 60.0
-    assert end_echo(cache, light, 100.0, up=True) == {}
-    assert end_echo(cache, light, 80.0, up=True) == {"brightness": 80.0}
-
-    report(bridge, light_event("one", brightness=62.0))  # a report that reaches aiohue: it holds the bridge's again
-    clock.now += 60.0
-    report(bridge, light_event("one", brightness=62.0))
+    clock.now += 4.0
+    report(bridge, light_event("one", brightness=56.0))
     await settle(hass)
-    assert end_echo(cache, light, 100.0, up=True) == {"brightness": 100.0}
+
+    assert shown(bridge, "one") == (True, 60.0)
+
+
+async def test_off_from_elsewhere_mid_fade_shows_at_once_and_drops_the_end(hass, bridge, clock):
+    await setup_room(hass, bridge)
+    start = wall_clock_now()
+    await raise_one(hass)
+    report(bridge, light_event("one", brightness=100.0))
+    clock.now += 2.0
+
+    report(bridge, light_event("one", on=False))  # the Hue app
+    await advance(hass, start, FADE_S + 1)
+
+    assert shown(bridge, "one") == (False, 100.0)  # the end value the bridge reported, handed back
+
+
+async def test_a_key_no_transition_owns_reaches_ha_mid_fade(hass, bridge, clock):
+    await setup_room(hass, bridge)
+    await raise_one(hass)
+
+    report(bridge, light_event("one", brightness=100.0, color_temperature={"mirek": 300}))
+    await settle(hass)
+
+    assert shown(bridge, "one") == (True, 20.0)
+    assert bridge.api.lights["one"].color_temperature.mirek == 300
 
 
 async def test_option_off_shows_what_the_bridge_reports(hass, bridge, clock):

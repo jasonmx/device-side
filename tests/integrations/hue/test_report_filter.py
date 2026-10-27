@@ -29,9 +29,8 @@ def cache(hass, clock):
     return transition_cache(hass)
 
 
-def moving_up(cache, clock, *, armed: dict | None = None) -> None:
-    """light "one" moving 20 % to 80 % over 10 s, 5 s in: the bulb may report anything from 20 to 80 %."""
-    cache.arm("one", armed if armed is not None else {BRIGHTNESS: 80.0}, 10.0)
+def moving_up(cache, clock) -> None:
+    """light "one" moving 20 % to 80 % over 10 s, 5 s in."""
     cache.moving("one", BRIGHTNESS, 20.0, 80.0, 10.0)
     clock.now += 5.0
 
@@ -39,16 +38,14 @@ def moving_up(cache, clock, *, armed: dict | None = None) -> None:
 @pytest.mark.parametrize(
     ("event", "report"),
     [
-        pytest.param(light_event("one", brightness=79.84), Report.ECHO, id="armed_end_value"),
-        pytest.param(light_event("one", brightness=35.18), Report.PATH, id="stale_mid_ramp_report"),
-        pytest.param(light_event("one", brightness=70.0), Report.PATH, id="ahead_of_the_prediction"),
-        pytest.param(light_event("one", brightness=19.5), Report.PATH, id="path_lower_edge"),
-        pytest.param(light_event("one", brightness=80.6), Report.REAL, id="past_the_target"),
-        pytest.param(light_event("one", brightness=19.4), Report.REAL, id="below_the_start"),
-        pytest.param(light_event("one", on=True), Report.PATH, id="on_while_lit"),
+        pytest.param(light_event("one", brightness=79.84), Report.OURS, id="end_value"),
+        pytest.param(light_event("one", brightness=35.18), Report.OURS, id="stale_mid_ramp_report"),
+        pytest.param(light_event("one", brightness=95.0), Report.OURS, id="past_the_target"),
+        pytest.param(light_event("one", brightness=10.0), Report.OURS, id="below_the_start"),
+        pytest.param(light_event("one", on=True), Report.OURS, id="on_while_lit"),
         pytest.param(light_event("one", on=False), Report.REAL, id="off_from_elsewhere"),
-        pytest.param(light_event("one", brightness=35.0, on=False), Report.REAL, id="any_real_value_makes_it_real"),
-        pytest.param(light_event("one", color={"xy": {"x": 0.3, "y": 0.3}}), None, id="no_brightness_or_on"),
+        pytest.param(light_event("one", brightness=35.0, on=False), Report.REAL, id="off_with_a_brightness"),
+        pytest.param(light_event("one", color={"xy": {"x": 0.3, "y": 0.3}}), None, id="a_key_nothing_owns"),
         pytest.param(light_event("two", brightness=35.0), None, id="untracked_light"),
         pytest.param(light_event("one", dimming={"min_dim_level": 0.2}), None, id="dimming_without_brightness"),
     ],
@@ -60,42 +57,38 @@ async def test_classify_a_light_mid_move(hass, bridge, cache, clock, event, repo
     assert classify(cache, bridge.api, event) is report
 
 
-async def test_an_end_value_is_echoed_once(hass, bridge, cache, clock):
+async def test_the_move_is_recorded_before_its_write(hass, bridge, cache):
+    # The bridge may report before the write returns.
     await setup_room(hass, bridge)
-    moving_up(cache, clock)
+    request = bridge.api.request
+    followed = []
 
-    assert classify(cache, bridge.api, light_event("one", brightness=80.0)) is Report.ECHO
-    assert not cache.echoed("one", BRIGHTNESS, 80.0)
+    async def recording(*args, **kwargs):
+        followed.append(cache.follows("one"))
+        return await request(*args, **kwargs)
+
+    bridge.api.request = recording
+    await call(hass, "move", {"entity_id": "light.one", "brightness": "up"})
+
+    assert followed == [True]
 
 
-async def test_the_echo_counts_before_the_move_is_recorded(hass, bridge, cache):
-    # Armed before the write; the bridge may report before the write returns and the move is recorded.
+async def test_soft_off_reports_are_ours(hass, bridge, cache, clock):
     await setup_room(hass, bridge)
-    cache.arm("two", {BRIGHTNESS: 80.0}, 10.0)
-
-    assert classify(cache, bridge.api, light_event("two", brightness=79.84)) is Report.ECHO
-
-
-async def test_soft_off_echo_and_the_lit_report_during_it(hass, bridge, cache, clock):
-    await setup_room(hass, bridge)
-    cache.arm("one", {"on": False}, 10.0)
     cache.moving("one", BRIGHTNESS, 100.0, 0.0, 10.0)
     clock.now += 1.0
 
-    assert classify(cache, bridge.api, light_event("one", on=False)) is Report.ECHO
+    assert classify(cache, bridge.api, light_event("one", on=False)) is Report.OURS
     clock.now += 7.0  # at 20 %, the bulb reports a second-old point lit
-    assert classify(cache, bridge.api, light_event("one", on=True, brightness=21.0)) is Report.PATH
-    clock.now += 2.0  # at 0 %: off is on the path
-    assert classify(cache, bridge.api, light_event("one", on=False)) is Report.PATH
+    assert classify(cache, bridge.api, light_event("one", on=True, brightness=21.0)) is Report.OURS
 
 
-async def test_up_from_off_echoes_on_and_the_end_value(hass, bridge, cache, clock):
+async def test_up_from_off_reports_are_ours(hass, bridge, cache, clock):
     await setup_room(hass, bridge)
-    cache.arm("one", {BRIGHTNESS: 100.0, "on": True}, 10.0)
     cache.moving("one", BRIGHTNESS, 0.0, 100.0, 10.0)
 
-    assert classify(cache, bridge.api, light_event("one", on=True)) is Report.ECHO
-    assert classify(cache, bridge.api, light_event("one", brightness=100.0)) is Report.ECHO
+    assert classify(cache, bridge.api, light_event("one", on=True)) is Report.OURS
+    assert classify(cache, bridge.api, light_event("one", brightness=100.0)) is Report.OURS
 
 
 async def test_after_the_window_every_event_is_untracked(hass, bridge, cache, clock):
@@ -112,7 +105,7 @@ async def test_a_grouped_light_is_decided_by_its_lights(hass, bridge, cache, clo
 
     assert classify(cache, bridge.api, room_event) is None
     moving_up(cache, clock)
-    assert classify(cache, bridge.api, room_event) is Report.PATH
+    assert classify(cache, bridge.api, room_event) is Report.OURS
 
 
 async def test_a_real_change_from_the_bridge_forgets_the_light(hass, bridge, cache, clock):
@@ -121,18 +114,18 @@ async def test_a_real_change_from_the_bridge_forgets_the_light(hass, bridge, cac
     clock.now += 2.0
     api = bridge.api
 
-    api.events.emit(EventType.RESOURCE_UPDATED, light_event("one", brightness=100.0))  # our echo
+    api.events.emit(EventType.RESOURCE_UPDATED, light_event("one", brightness=100.0))  # the bridge's end value
     api.events.emit(EventType.RESOURCE_UPDATED, light_event("one", brightness=25.0))  # the bulb, late
     await hass.async_block_till_done()
     assert cache.follows("one")
 
-    api.events.emit(EventType.RESOURCE_UPDATED, light_event("one", brightness=10.0))  # the Hue app
+    api.events.emit(EventType.RESOURCE_UPDATED, light_event("one", on=False))  # the Hue app
     await hass.async_block_till_done()
     assert not cache.follows("one")
-    assert api.lights["one"].dimming.brightness == 10.0  # aiohue applies every event: observe only
+    assert not api.lights["one"].on.on  # aiohue applies every event: observe only
 
 
-async def test_a_refused_move_disarms_its_echo(hass, bridge, cache):
+async def test_a_refused_move_records_nothing(hass, bridge, cache):
     await setup_room(hass, bridge)
     bridge.failing.add("one")
 
@@ -140,6 +133,20 @@ async def test_a_refused_move_disarms_its_echo(hass, bridge, cache):
         await call(hass, "move", {"entity_id": "light.one", "brightness": "up"})
 
     assert not cache.follows("one")
+
+
+@pytest.mark.parametrize(("action", "data"), [("move", {"brightness": "up"}), ("stop", {})])
+async def test_a_refused_write_puts_back_the_prediction_it_replaced(hass, bridge, cache, clock, action, data):
+    await setup_room(hass, bridge)
+    await call(hass, "move", {"entity_id": "light.one", "brightness": "down", "brightness_limit": 10})
+    clock.now += 0.5
+    before = cache.live("one", BRIGHTNESS)
+    bridge.failing.add("one")
+
+    with pytest.raises(HomeAssistantError):
+        await call(hass, action, {"entity_id": "light.one", **data})
+
+    assert cache.live("one", BRIGHTNESS) == before
 
 
 async def test_a_refused_write_from_set_attributes_keeps_the_prediction(hass, bridge, cache, clock):
@@ -152,7 +159,6 @@ async def test_a_refused_write_from_set_attributes_keeps_the_prediction(hass, br
         await call(hass, "set_attributes", {"entity_id": "light.one", "brightness": 40})
 
     assert cache.running("one", BRIGHTNESS) is not None
-    assert cache.echoed("one", BRIGHTNESS, 100.0)  # the move's echo, still armed
 
 
 def test_an_aiohue_without_the_private_handler_is_taken_to_apply_events_at_once():
@@ -247,13 +253,21 @@ async def test_a_failing_filter_never_stops_aiohue_applying_the_event(hass, brid
     assert "Hue report filter failed" in caplog.text
 
 
-@pytest.mark.parametrize("values", [{"brightness": 41.3}, {"brightness": 56.13}, {"on": False}])
-async def test_any_report_after_a_stop_is_ours_until_its_window_ends(hass, bridge, cache, clock, values):
+@pytest.mark.parametrize("brightness", [41.3, 56.13])
+async def test_any_brightness_after_a_stop_is_ours_until_its_window_ends(hass, bridge, cache, clock, brightness):
     # The rig saw a halt reported 0.9 from the prediction, and a stale report from before the move 16 above it.
     await setup_room(hass, bridge)
     cache.stopped("one", BRIGHTNESS, 40.4)
     clock.now += 5.0
 
-    assert classify(cache, bridge.api, light_event("one", **values)) is Report.PATH
+    assert classify(cache, bridge.api, light_event("one", brightness=brightness)) is Report.OURS
     clock.now += API_SETTLE_SECONDS
-    assert classify(cache, bridge.api, light_event("one", **values)) is None
+    assert classify(cache, bridge.api, light_event("one", brightness=brightness)) is None
+
+
+async def test_off_after_a_lit_halt_is_real(hass, bridge, cache, clock):
+    await setup_room(hass, bridge)
+    cache.stopped("one", BRIGHTNESS, 40.4)
+    clock.now += 5.0
+
+    assert classify(cache, bridge.api, light_event("one", on=False)) is Report.REAL

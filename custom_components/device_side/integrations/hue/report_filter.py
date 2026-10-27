@@ -1,9 +1,11 @@
 """Tell the bridge's reports of our own fades from real changes, and forget a prediction a real change ends.
 
-The bridge reports a fade's end value at its start, and the bulb reports points it has passed late (Tested behavior in
-docs/integrations.md). Either is ours; anything else is a change made elsewhere, so the light's prediction is dropped
-and the next move starts from what the bridge reports. A change made from Home Assistant drops it at once, whatever its
-value, by watching light and scene service calls.
+The bridge reports a fade's end value at its start, and the bulb reports late, stale values, and off any straight line
+(Tested behavior in docs/integrations.md), so no value tells ours apart. Instead, while a move or stop on a light is
+inside its guard window, every report of the keys its attribute owns (attributes.ATTRIBUTES) is ours, except a switch
+to off while the light's brightness heads somewhere lit: that is the Hue app, a dimmer or a Hue automation, so the
+light's prediction is dropped and the next move starts from what the bridge reports. A change made from Home Assistant
+drops it at once, whatever its value, by watching light and scene service calls.
 
 With the predicted_state option on, the reports that are ours are hidden from aiohue, and so from HA, which instead
 is sent what device_side predicts: the start value while a fade runs, the halt at a stop, the end once it has run.
@@ -25,13 +27,15 @@ from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.target import TargetSelection, async_extract_referenced_entity_ids
 
+from .attributes import ATTRIBUTES, event_fields, reported_values, strip
 from .bridge import bridge_api
-from .transition_cache import BRIGHTNESS, MIN_BRIGHTNESS_STEP, REPORT_TOLERANCE, TransitionCache, transition_cache
+from .transition_cache import BRIGHTNESS, MIN_BRIGHTNESS_STEP, TransitionCache, transition_cache
 from ...core.models import Target
 from ...core.runtime import get_runtime
 
 if TYPE_CHECKING:
     from aiohue.v2 import HueBridgeV2
+    from aiohue.v2.models.light import Light
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,52 +48,35 @@ FILTERS = "hue_filters"
 
 
 class Report(Enum):
-    ECHO = "echo"  # an end value a write of ours made the bridge report
-    PATH = "path"  # the bulb reporting a point it has passed, late; or a room, whose lights decide
+    OURS = "ours"  # a report of a key a live transition owns: the bridge's or the bulb's report of our fade or stop
     REAL = "real"  # a change made elsewhere
 
 
-def classify(cache: TransitionCache, api: HueBridgeV2, event: dict) -> Report | None:
-    """What a light's or grouped_light's update is, or None when it holds no brightness or on Device Side follows.
-
-    A light's event is real if any of its values is neither an armed end value nor on the path travelled. A
-    grouped_light's is never real on its own while one of its lights is followed: a real change to the room changes
-    its lights too, and their events decide.
-    """
-    resource_id = event["id"]
+def owned(cache: TransitionCache, api: HueBridgeV2, event: dict) -> frozenset[str]:
+    """The report keys a live transition owns: on a light, its own; on a grouped_light, any of its lights'."""
     if event.get("type") == ResourceTypes.GROUPED_LIGHT.value:
-        lights = api.groups.grouped_light.get_lights(resource_id)
-        return Report.PATH if any(cache.follows(light.id) for light in lights) else None
+        resource_ids = [light.id for light in api.groups.grouped_light.get_lights(event["id"])]
+    else:
+        resource_ids = [event["id"]]
+    return frozenset(
+        key for rid in resource_ids for attribute in cache.attributes(rid) for key in ATTRIBUTES[attribute].keys
+    )
+
+
+def classify(cache: TransitionCache, api: HueBridgeV2, event: dict) -> Report | None:
+    """What a light's or grouped_light's update is, or None when it reports no key a live transition owns.
+
+    A grouped_light's is never real on its own: a real change to the room changes its lights too, and their events
+    decide.
+    """
     values = reported_values(event)
-    if not values or not cache.follows(resource_id):
+    if not owned(cache, api, event) & values.keys():
         return None
-    reports = {_value(cache, resource_id, key, value) for key, value in values.items()}
-    return next(report for report in (Report.REAL, Report.PATH, Report.ECHO) if report in reports)
-
-
-def reported_values(event: dict) -> dict[str, float | bool]:
-    """The event's on and brightness, keyed "on" and "brightness"; only what changed is in an event."""
-    values: dict[str, float | bool] = {}
-    if (on := event.get("on")) is not None and "on" in on:
-        values["on"] = on["on"]
-    if (dimming := event.get("dimming")) is not None and "brightness" in dimming:
-        values[BRIGHTNESS] = dimming["brightness"]
-    return values
-
-
-def _value(cache: TransitionCache, light_id: str, key: str, value: float | bool) -> Report:
-    if cache.echoed(light_id, key, value):
-        return Report.ECHO
-    # After a stop the bulb may report its halt, or a value it held before the move, so anything it reports is ours.
-    if cache.halted(light_id, BRIGHTNESS):
-        return Report.PATH
-    if key == BRIGHTNESS:
-        return Report.PATH if cache.on_path(light_id, BRIGHTNESS, value) else Report.REAL
-    # on: true while the path is lit (the 17 % report mid soft off), on: false once it has reached 0.
-    if (path := cache.path(light_id, BRIGHTNESS)) is None:
-        return Report.REAL
-    lit = path[1] > REPORT_TOLERANCE if value else path[0] <= REPORT_TOLERANCE
-    return Report.PATH if lit else Report.REAL
+    if values.get("on") is False and event.get("type") == ResourceTypes.LIGHT.value:
+        # Our soft off reports off; off while the light heads somewhere lit, or holds a halt, is a switch elsewhere.
+        if (transition := cache.live(event["id"], BRIGHTNESS)) is not None and transition.target > 0:
+            return Report.REAL
+    return Report.OURS
 
 
 class ReportFilter:
@@ -119,52 +106,50 @@ class ReportFilter:
             unlisten()
             # Nothing will show a running fade's end now: hand HA back to the bridge.
             for light in self.api.lights:
-                if self.cache.running(light.id, BRIGHTNESS) is not None:
+                if _running(self.cache, light.id):
                     self.hand_back(light.id)
 
         return detach
 
-    def fading(self, ends: dict[str, float], duration: float) -> None:
-        """Show each light's end value once its fade has run, in place of any end still to show."""
+    def fading(self, attribute: str, ends: dict[str, float], duration: float) -> None:
+        """Show each light's end value once its fade has run, in place of any end of the attribute still to show.
+
+        A light HA shows off, faded up from off, is shown on at its dimmest at once, so HA doesn't hold it off for the
+        whole fade.
+        """
         if not self.hiding:
             return
         for light_id, target in ends.items():
 
             async def show_end(light_id: str = light_id, target: float = target) -> None:
-                self.show({light_id: target})
+                self.show(attribute, {light_id: target})
 
-            get_runtime(self.hass).schedule(self.hass, _end_key(light_id), [(duration, show_end)])
+            get_runtime(self.hass).schedule(self.hass, _end_key(light_id, attribute), [(duration, show_end)])
+        if attribute == BRIGHTNESS:
+            lights = [self.api.lights.get(light_id) for light_id, target in ends.items() if target > 0]
+            self.show(BRIGHTNESS, {light.id: _dimmest(light) for light in lights if light and not light.on.on})
 
-    def halted(self, halts: dict[str, float]) -> None:
+    def halted(self, attribute: str, halts: dict[str, float]) -> None:
         """Show each light where a stop halted it, and drop the end its fade would have shown."""
         if not self.hiding:
             return
         for light_id in halts:
-            get_runtime(self.hass).schedule(self.hass, _end_key(light_id), [])
-        self.show(halts)
+            get_runtime(self.hass).schedule(self.hass, _end_key(light_id, attribute), [])
+        self.show(attribute, halts)
 
-    def show(self, brightness: dict[str, float]) -> None:
-        """Send aiohue, and so HA, each light's brightness and its rooms'. 0 is off, leaving the stored brightness
-        alone, as a soft off does on the bridge."""
-        for light_id, value in brightness.items():
+    def show(self, attribute: str, values: dict[str, float]) -> None:
+        """Send aiohue, and so HA, each light's value of the attribute, and its rooms'."""
+        for light_id, value in values.items():
             event: dict = {"id": light_id, "type": ResourceTypes.LIGHT.value, MARKER: True}
-            if value > 0:
-                event |= {"on": {"on": True}, "dimming": {"brightness": value}}
-            else:
-                event["on"] = {"on": False}
-            self.api.events.emit(EventType.RESOURCE_UPDATED, event)
-        self._show_rooms_soon(self._rooms(brightness))
+            self.api.events.emit(EventType.RESOURCE_UPDATED, event | event_fields(ATTRIBUTES[attribute].shows(value)))
+        self._show_rooms_soon(self._rooms(values))
 
     def hand_back(self, light_id: str) -> None:
         """Send aiohue what the bridge last reported for the light and HA was not shown: nothing predicts it now."""
         if not self.hiding or not (held := self.cache.release(light_id)):
             return
         event: dict = {"id": light_id, "type": ResourceTypes.LIGHT.value, MARKER: True}
-        if "on" in held:
-            event["on"] = {"on": held["on"]}
-        if BRIGHTNESS in held:
-            event["dimming"] = {"brightness": held[BRIGHTNESS]}
-        self.api.events.emit(EventType.RESOURCE_UPDATED, event)
+        self.api.events.emit(EventType.RESOURCE_UPDATED, event | event_fields(held))
         self._show_rooms_soon(self._rooms([light_id]))
 
     def _on_event(self, event_type: EventType, data: dict | None) -> None:
@@ -173,9 +158,8 @@ class ReportFilter:
             if data is None or data.get(MARKER):
                 return
             report = classify(self.cache, self.api, data)
-            if self.hiding and report in (Report.ECHO, Report.PATH):
-                self._hide(data, report)
-                return
+            if self.hiding and report is Report.OURS:
+                self._hide(data)
             if data.get("type") == ResourceTypes.LIGHT.value:
                 self.cache.shown(data["id"], reported_values(data))
             if report is Report.REAL:
@@ -185,27 +169,17 @@ class ReportFilter:
         except Exception:
             _LOGGER.exception("Hue report filter failed on %s", data)
 
-    def _hide(self, data: dict, report: Report) -> None:
-        """Take our own report's on and brightness out of the event before aiohue applies it.
+    def _hide(self, data: dict) -> None:
+        """Take the report keys a live transition owns out of the event before aiohue applies it; the rest pass.
 
-        A move up from off still shows on, at the light's dimmest, so HA doesn't hold it off for the whole fade.
         A room shows what its lights are shown, once aiohue has applied them.
         """
-        resource_id = data["id"]
+        keys = owned(self.cache, self.api, data)
         if data.get("type") == ResourceTypes.GROUPED_LIGHT.value:
-            _strip(data)
-            self._show_rooms_soon({resource_id})
-            return
-        values = reported_values(data)
-        self.cache.hidden(resource_id, values)
-        light = self.api.lights.get(resource_id)
-        if report is Report.ECHO and values.get("on") is True and light is not None and not light.on.on:
-            dimmest = (light.dimming.min_dim_level if light.dimming else None) or MIN_BRIGHTNESS_STEP
-            data["on"] = {"on": True}
-            data["dimming"] = {**data.get("dimming", {}), "brightness": dimmest}
-            self._show_rooms_soon(self._rooms([resource_id]))
-            return
-        _strip(data)
+            self._show_rooms_soon({data["id"]})
+        else:
+            self.cache.hidden(data["id"], {key: value for key, value in reported_values(data).items() if key in keys})
+        strip(data, keys)
 
     def _rooms(self, light_ids: Iterable[str]) -> set[str]:
         """The grouped_lights of the rooms and zones holding any of the lights."""
@@ -269,20 +243,23 @@ class ReportFilter:
         return [light.id for light in lights]
 
 
-def _strip(data: dict) -> None:
-    data.pop("on", None)
-    if (dimming := data.get("dimming")) is not None:
-        dimming.pop("brightness", None)
+def _dimmest(light: Light) -> float:
+    return (light.dimming.min_dim_level if light.dimming else None) or MIN_BRIGHTNESS_STEP
 
 
-def _end_key(light_id: str) -> str:
-    return f"hue-end:{light_id}"
+def _running(cache: TransitionCache, light_id: str) -> bool:
+    """Whether a move of any attribute is still under way on the light."""
+    return any(cache.running(light_id, attribute) is not None for attribute in ATTRIBUTES)
+
+
+def _end_key(light_id: str, attribute: str) -> str:
+    return f"hue-end:{light_id}:{attribute}"
 
 
 def forget(hass: HomeAssistant, light_id: str) -> None:
     """A change made other than by a move or stop: drop the light's prediction and the fade end still to show."""
     cache = transition_cache(hass)
-    running = cache.running(light_id, BRIGHTNESS) is not None
+    running = _running(cache, light_id)
     cache.forget(light_id)
     _forgotten(hass, light_id, running)
 
@@ -291,12 +268,12 @@ async def write_forgetting(hass: HomeAssistant, light_id: str, write: Awaitable)
     """Forget the light before the write, so its report reaches HA rather than being taken for the bulb's own. A
     refused write left the light where its move had it, so the prediction comes back."""
     cache = transition_cache(hass)
-    running = cache.running(light_id, BRIGHTNESS) is not None
+    running = _running(cache, light_id)
     forgotten = cache.forget(light_id)
     try:
         await write
     except Exception:
-        cache.restore(light_id, forgotten)
+        cache.restore(forgotten)
         raise
     _forgotten(hass, light_id, running)
 
@@ -305,7 +282,8 @@ def _forgotten(hass: HomeAssistant, light_id: str, running: bool) -> None:
     """Drop the end still to show. A fade still running goes on to the end the bridge reported at its start, so HA
     is shown that, as it would be with predicted_state off; a write's own report, before or after, wins. A halt
     stays shown: the bridge's late report of it may never come."""
-    get_runtime(hass).schedule(hass, _end_key(light_id), [])
+    for attribute in ATTRIBUTES:
+        get_runtime(hass).schedule(hass, _end_key(light_id, attribute), [])
     if running:
         for reports in get_runtime(hass).integration_state.get(FILTERS, {}).values():
             if reports.api.lights.get(light_id) is not None:
