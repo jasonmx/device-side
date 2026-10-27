@@ -100,7 +100,7 @@ def plan_lines(
         roles = suite.file.roles
         entities = [entity for role in roles if (entity := inventory.entity(suite.integration, role))]
         targets = ", ".join(dict.fromkeys(entities)) or "no entity, will skip"
-        lines.append(f"{suite.integration} / {suite.action} -> {targets} ({tier})")
+        lines.append(f"{suite.integration} / {suite.name} -> {targets} ({tier})")
         for case in cases(suite, inventory, keyword):
             lines.append(f"    {case.id}: {case.skip or ', '.join(dict.fromkeys(case.entities.values()))}")
     return lines
