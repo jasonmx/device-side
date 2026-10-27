@@ -56,6 +56,17 @@ def topic(target: Target, suffix: str) -> str | None:
     return f"{_Z2M_BASE_TOPIC}/{addr}/{suffix}"
 
 
+def state_topic(target: Target) -> str | None:
+    """MQTT topic <base>/<friendly name> on which Z2M publishes this entity's state, or None.
+
+    Z2M names the HA device after its friendly name (a user's rename is name_by_user, which this ignores).
+    Addressable like topic(), with the same default base topic.
+    """
+    if topic(target, "set") is None or not target.device.name:
+        return None
+    return f"{_Z2M_BASE_TOPIC}/{target.device.name}"
+
+
 def group_id(target: Target) -> str | None:
     """The Z2M group ID of a group entity on the default base topic, or None for anything else."""
     if target.device is None or (addr := z2m_address(target.device)) is None:
