@@ -32,5 +32,14 @@ def address(unique_id: str) -> Address | None:
         return None
 
 
+def group_id(unique_id: str) -> int | None:
+    """The Zigbee group ID of a ZHA group entity, or None for any other entity."""
+    _, marker, hex_id = unique_id.partition(_GROUP_MARKER)
+    try:
+        return int(hex_id, 16) if marker else None
+    except ValueError:
+        return None
+
+
 def is_zha_group(hass: HomeAssistant, target: Target) -> bool:
     return _GROUP_MARKER in target.entry.unique_id
