@@ -389,4 +389,7 @@ async def resume(ha: HAClient, paused: list[str]) -> None:
 
 
 if __name__ == "__main__":
+    # Line by line even when stdout is a file, so a background caller sees "waiting for the lock" and each result
+    # as they happen rather than when the buffer fills.
+    sys.stdout.reconfigure(line_buffering=True)
     sys.exit(main())
