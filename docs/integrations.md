@@ -448,8 +448,9 @@ elsewhere (the Hue app, a dimmer switch, a Hue automation): a switch to off whil
 to, or halted at, a lit level, and a color or color temperature report, which a brightness move never
 makes. A scene recalled on the bridge ends the prediction of its room's or zone's lights, and a light
 or scene call from Home Assistant ends the prediction of every Hue light it targets at once, whatever
-its value, as do `set_attributes` and `set_scene`. Not caught: a brightness change from outside Home
-Assistant while a move or stop is remembered, such as one set in the Hue app.
+its value, as do `set_attributes` and `set_scene`. Not caught: a brightness change, or a switch to on,
+from outside Home Assistant while a move or stop is remembered, such as a light turned back on in the
+Hue app within 15 seconds of a fade to off.
 
 With **Show predicted brightness during Hue fades** on (the default), Home Assistant shows Device
 Side's predictions in place of those reports: the brightness at the start while a fade runs, where a
