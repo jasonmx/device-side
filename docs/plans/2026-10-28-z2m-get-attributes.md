@@ -16,7 +16,8 @@ under that key. Replies took 0.04–0.24 s.
 Decided in the interview (2026-10-28):
 - **Live ZCL reads.** Send one generic `read` per cluster, one after another. Each reply arrives on the state
   topic under a single key, `device_side_read`. Values are in raw ZCL units, so the row shaping can be shared
-  with 13e (ZHA). The key stays in Z2M's state cache (and `state.json`), and this is documented.
+  with 13e (ZHA). Revised after the probe (step 1): each bulb read gets `device_side_read` in its Z2M
+  `filtered_cache` option, so the key appears only in the reply and never in Z2M's state cache.
 - **A group returns one averaged row.** `native_groups=True`. Each member is read and the results are
   averaged the way Hue's room row is: the lit members, or all of them when every member is off. The row has a
   timer only when every lit member has one, and it reports the longest.
@@ -46,6 +47,25 @@ Decided in the interview (2026-10-28):
 
    If a finding contradicts the steps below, take it to Jason before writing the adapter.
 
+   **Findings (2026-10-28, two runs on the A60, the CT bulb and both group ceilings):**
+   - Off bulbs answer. `onTime` counts down in tenths (270 at 3 s, 174 at 12 s) and is 0 after `turn_off`.
+     Replies take 0.04–0.25 s, and nothing is retained.
+   - **Z2M deep-merges the key into its state cache** (`objectAssignDeep` in `lib/state.ts`), and every publish
+     for the device carries the whole cache. Each read also makes two publishes: Z2M's converter publish, still
+     carrying the stale key, then the keyed reply. So the key set can't tell a reply from stale state. A key
+     per call would be unambiguous, but it would grow every later publish and `state.json` without limit, and
+     only `device/remove` clears a device's state.
+   - **`filtered_cache` fixes it.** It is a documented device option (each entry an anchored regex). Z2M stores
+     the filtered state but publishes the unfiltered one. With the key in it, only the reply carries the key,
+     holding exactly that cluster's attributes; 32 of 32 reads fired together with a `/get` or a brightness
+     command each returned one fresh reply. Setting it also strips a leftover key on the next state write.
+   - **One unsupported attribute fails the whole read**, with no publish. The error reaches `bridge/logging`
+     naming the IEEE and the cluster (`UNSUPPORTED_ATTRIBUTE`; an unreachable bulb gives `Delivery failed`
+     after Z2M's 10 s). Support: `colorMode`, `colorTemperature`, `currentX`/`Y` on all three bulbs;
+     `enhancedColorMode` not on the ceilings; `currentHue`/`currentSaturation` only on the A60.
+   - A60 modes (`colorMode`/`enhancedColorMode`): CT 2/2, xy 1/1, raw enhanced hue 0/3. HA's `hs_color` and
+     Z2M's `color: {hue, saturation}` both land in xy mode, and HA lists the A60 as `color_temp`, `xy`.
+
 2. **Shared row shaping: `core/zcl_row.py`.** This is a pure function from ZCL attribute dicts to a row, so
    13e (ZHA) can reuse it:
    - **brightness:** `round(currentLevel * 100 / 254, 1)`, the percent Hue reports.
@@ -53,8 +73,8 @@ Decided in the interview (2026-10-28):
      - CT mode gives `color_temp_kelvin`, converted from mireds.
      - xy mode gives `xy_color` (/65535) plus the `rgb_color` and `hs_color` derived from it, as
        `hue/get_attributes.py:attributes` does.
-     - hs mode (enhanced hue when `enhancedColorMode` says so) gives `hs_color` plus the derived `rgb_color`
-       and `xy_color`.
+     - hs mode gives `hs_color` from `currentHue`/`currentSaturation` plus the derived `rgb_color` and
+       `xy_color`; a bulb whose read lacks hue and saturation reports its xy instead.
 
      Only the active mode is reported, as core and Hue do.
    - **timer:** if `onOff` and `onTime > 0`, call `core/timer.py:timer_row("off", onTime / 10, now)`.
@@ -67,14 +87,16 @@ Decided in the interview (2026-10-28):
    `async read_clusters(hass, target, clusters) -> dict[cluster, dict]`:
    - It subscribes to `addressing.state_topic(target)`, then for each cluster in turn publishes
      `{"read": {..., "state_property": "device_side_read"}}` to `topic(target, "set")`.
-   - It accepts the first non-retained message whose `device_side_read` keys equal that cluster's attribute
-     set. Because each cluster has its own attribute set, a stray publish carrying the previous read's value
-     can't be taken for a reply. Note in a comment that an on/off-only light, which reads one cluster, keeps
-     that small risk.
+   - First it makes sure the device's `filtered_cache` holds `device_side_read`, keeping the user's entries,
+     through the same bridge/info check and options request as `native_control` (shared, not copied). Failing
+     that, it raises: without the option a stale value could pass for a reply.
+   - It accepts the first non-retained message carrying `device_side_read` with that cluster's attributes.
+   - It watches `bridge/logging` too, and an error naming the device's IEEE and the cluster raises at once.
    - The timeout is 5 s per cluster, the same as `_STATE_TIMEOUT_S`. A timeout raises, so per 9f the call
      raises `targets_failed`.
-   - Which clusters to read follows the entity's `supported_color_modes`: onoff reads genOnOff; brightness adds
-     Level; any color mode adds Color.
+   - Which clusters and attributes to read follows the entity's `supported_color_modes`: onoff reads genOnOff;
+     brightness adds Level; any color mode adds Color with `colorMode`, plus `colorTemperature` for
+     `color_temp`, `currentX`/`currentY` for `xy`, and `currentHue`/`currentSaturation` for `hs`.
    - The subscribe and wait pattern comes from `turn_on_for.py:_turn_on` and `native_control.py:_wait`.
 
 4. **Group members.** Move the `bridge/groups` fetch out of `native_control.py:_has_hue_member` into a shared
@@ -109,7 +131,7 @@ Decided in the interview (2026-10-28):
    - `docs/integrations.md`, Z2M section:
      - what `get_attributes` reads, and that it reads live;
      - its cost (one round trip per cluster per bulb);
-     - the `device_side_read` key it leaves in Z2M's state;
+     - the `filtered_cache` entry it adds to each bulb it reads;
      - the group rule.
    - The README feature table: the Z2M `get_attributes` cell.
    - `TODO.md`: tick 13h.
