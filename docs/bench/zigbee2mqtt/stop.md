@@ -4,7 +4,7 @@
 |---|---|
 | Result | pass |
 | Date | 2026-10-28 |
-| Source | rig run (`scripts/rig.py`), commit `33932a6` |
+| Source | rig run (`scripts/rig.py`), commit `a09aca6` |
 | Home Assistant | 2026.10.2 |
 | Device | Hue white ambiance E27 800lm with Bluetooth (`8719514328242`), firmware `1.76.11`; Group, firmware `Zigbee2MQTT 2.14.2`; Hue Essential White and Color Ambiance A60 (`8720169392182`), firmware `1.126.9` |
 
