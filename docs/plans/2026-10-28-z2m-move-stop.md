@@ -3,8 +3,8 @@
 ## Context
 
 Slice 13 (`docs/plans/2026-10-27-zigbee-parity-timer-state.md`) brings the Hue-only actions to Zigbee before
-v0.1.0. 13i is Z2M's `move` (hold-to-dim: brightness, color temperature, saturation and hue ramp on the bulb
-itself) and `stop` (the release: halt where it is). The A60, the rig's only color bulb, is on Z2M now. After 13i
+v0.1.0. 13i is Z2M's `move` (hold-to-dim: brightness, saturation and hue ramp on the bulb itself; color
+temperature was dropped after the watched tests) and `stop` (the release: halt where it is). The A60, the rig's only color bulb, is on Z2M now. After 13i
 come 13j and the Z2M A60 run, which freezes Z2M code.
 
 Facts this builds on:
@@ -27,7 +27,10 @@ Facts this builds on:
     `colorMode`.
 
 Decided in the interview (2026-10-28):
-- **Moves write an end point.** Brightness, color temperature and saturation each write their limit (or range
+- **Color temperature moves are out of scope** (decided after the watched tests below, 2026-10-28). No command
+  halts a color temperature fade on a Hue bulb without a visible jump, so `color_temp` and `color_temp_limit`
+  are left out of the adapter's fields and refused, never dropped. The rest of this plan is edited to match.
+- **Moves write an end point.** Brightness and saturation each write their limit (or range
   end) with a `transition` worked out from the predicted start, as `hue/move.py` does.
   - Down to 0 is Z2M's soft off (`state: OFF` + `transition`), which keeps the level for the next plain on.
   - Z2M publishes the end value at once, as the Hue bridge does. No overlay on HA state (slice decision).
@@ -137,6 +140,23 @@ Decided in the interview (2026-10-28):
       a live read of 0.1746, 0.251), which HA took. Twice, same result. **So the write-back helper's skip branch
       (bulb not in hs mode) sends that get instead of writing.**
 
+   **Watched tests (2026-10-28, Jason by eye, Z2M CT bulb unless noted).** Each: a 10 s fade, halted 3 s in, then
+   15 s with only a read each second. The attribute held at the predicted halt every time; what he saw:
+
+   | Fade | Halt at 3 s | By eye |
+   |---|---|---|
+   | `color_temp` 153 → 454 mirek, native control on | `color_temp_move: stop` (`moveColorTemp`, mode stop) | jump |
+   | the same, native control off (standard ZCL fade) | `color_temp_move: stop` | jump |
+   | the same, native control on | raw `stopMoveStep` | jump |
+   | the same, through the **Hue bridge** (`device_side.move`, Hue `light_ct`) | `device_side.stop` | jump |
+   | the same, native control on | `color_temp: 191` (where a fade linear in kelvin would be), `transition: 0` | jump, maybe smaller |
+   | `brightness` + `color_temp` in one publish | `brightness_move: stop` | brightness froze; color carried on to 454, then a flash toward cold and back to warm |
+   | `brightness` 20 → 254 | `brightness_move: stop` | **clean freeze** |
+
+   So a Hue bulb's color temperature output departs from its `colorTemperature` attribute during a fade, and
+   every halt snaps it back, the bridge's own included. A color temperature fade that looks warmer also looks
+   brighter (at a fixed level 199, 4115 K looked brighter than 6535 K). Brightness stops are clean.
+
 2. **Shared Z2M helpers.**
    - `bridge.py`: `has_feature(hass, ieee, name)`, read from the retained `bridge/devices` (same retained-read
      pattern as `group_members`), for the `color_hs` check.
@@ -150,8 +170,8 @@ Decided in the interview (2026-10-28):
 
 3. **`zigbee2mqtt/move.py`: `Z2MMove(Adapter[MoveRequest])`.**
    - Scope: `AdapterScope(experimental=True, domains={"light"}, native_groups=True, fields=…)`. The fields are
-     `brightness`, `brightness_limit`, `color_temp`, `color_temp_limit`, `saturation`, `saturation_limit` and
-     `hue`, minus any the probe fails. `supports` refuses an unaddressable target (`not_addressable`), as the
+     `brightness`, `brightness_limit`, `saturation`, `saturation_limit` and `hue`, minus any the probe fails.
+     Color temperature is left out (decision above), so a call using it is refused. `supports` refuses an unaddressable target (`not_addressable`), as the
      other Z2M adapters do.
    - Per target, mirror `hue/move.py`'s rules and details, so each detail means the same on both integrations:
      - **Brightness:** the start is `cache.value(entity, BRIGHTNESS, HA percent, or 0 while off)`. Limit or
@@ -160,10 +180,6 @@ Decided in the interview (2026-10-28):
        - Down to a limit publishes `brightness` + `transition`. Down to 0 publishes `{"state": "OFF",
          "transition": d}`.
        - Down on an off light is `unchanged`, `off`.
-     - **Color temperature:** the range comes from HA's `min/max_color_temp_kelvin`, in mirek.
-       - It publishes `color_temp` + `transition`.
-       - A light that is off (and not raised in the same call) is `off`. One in a color mode is
-         `not_in_color_temp_mode`.
      - **Saturation:** the start is HA's `hs_color[1]`, and the publish is whichever end-point form probe (c)
        chose.
      - **Hue:** `hue_move` at rate `round(254 / sweep_time)`. Per `docs/action-behavior.md` (amended
@@ -174,7 +190,6 @@ Decided in the interview (2026-10-28):
        adapter to raw `enhancedMoveHue` with no API change.
      - **Dropped fields:** saturation and hue are dropped (`fields_dropped`) on a light without `color_hs`, as
        Hue drops what the bridge says a light can't do.
-   - Brightness and color temperature are separate publishes, unless probe (d) says they must share one.
    - Record each attribute's move in the core cache (the `recording` / `moving` pattern from `hue/move.py`),
      per member light for a group. A group's start is the mean of its lit members, as on Hue. A group gets one
      publish to its group topic, so the members fade together.
@@ -189,8 +204,8 @@ Decided in the interview (2026-10-28):
    - Scope: `experimental=True`, `domains={"light"}`, `native_groups=True`.
    - Send `brightness_move: stop` to every lit target, and to a target the cache shows fading to off (HA already
      shows it off).
-   - Send `color_temp_move: stop` where a move of ours is tracking color temperature, and `hue_move: stop` /
-     `saturation_move: stop` where one is tracking hue or saturation. If probe (b) or (c) shows a native stop
+   - Send `hue_move: stop` / `saturation_move: stop` where a move of ours is tracking hue or saturation. No
+     color temperature stop: our moves never fade it. If probe (b) or (c) shows a native stop
      doesn't halt our fades, use the raw `stopMoveStep` plus a `/get`.
    - Record each halt at its predicted value (`cache.stopped`), which covers the gap until Z2M's read-back.
      Cancel the move's scheduled end read-back. Start `write_back_xy` after a hue or saturation stop.
@@ -200,8 +215,8 @@ Decided in the interview (2026-10-28):
 
 6. **Unit tests** (`tests/integrations/zigbee2mqtt/test_move.py`, `test_stop.py`, `test_xy_writeback.py`), using the
    existing Z2M MQTT mocks:
-   - each payload: up, down to a limit, down to off, color temperature, saturation, the hue rate clamp;
-   - `at_limit`, `off`, `not_in_color_temp_mode`, `fields_dropped` without `color_hs`;
+   - each payload: up, down to a limit, down to off, saturation, the hue rate clamp;
+   - `at_limit`, `off`, `fields_dropped` without `color_hs`, and a refusal for `color_temp`;
    - the start taken from a prediction after a stop;
    - one group publish with per-member predictions;
    - end read-back scheduled, then replaced by a stop;
@@ -226,8 +241,9 @@ Decided in the interview (2026-10-28):
    - In `tests/rig/steps/move.yaml` and `stop.yaml`, mark the Hue-only cases `only: [hue]`. These are the ones
      about the bridge's late reports, the soft-off cut and prediction drops (`late_stop_report`,
      `ha_change_mid_move`, `halts_a_move_to_off`'s cut comment, and others found on reading).
-   - Keep the shared ones (`raise`, `lower_to_off`, `raise_stop_raise`, `warmer_stop_warmer`, `halts_a_move`,
-     `stop_when_idle`, the combined move) for Z2M. `source: device_side` there is a live read.
+   - Keep the shared ones (`raise`, `lower_to_off`, `raise_stop_raise`, `halts_a_move`,
+     `stop_when_idle`) for Z2M; `warmer_stop_warmer` and the combined brightness and color temperature move
+     become `only: [hue]` while the Hue adapter still moves color temperature. `source: device_side` there is a live read.
    - Add `only: [zigbee2mqtt]` cases on `light_color`:
      - `saturation_down_stop` — after the stop, HA's `xy_color` matches a live read within tolerance;
      - `hue_cycle_stop` — the same;
