@@ -1,6 +1,6 @@
 # hue_dimmer tests/RELEASE_CHECKLIST.md §2.5 and §2.6 from the stop side; move.yaml checks the move that follows.
-# Samples after a move read device_side (Hue's prediction, Zigbee2MQTT's live read), in percent: HA shows a fade's
-# end value at once.
+# Samples after a move read device_side (Hue's prediction, Zigbee2MQTT's and ZHA's live reads), in percent: HA shows a
+# fade's end value at once.
 action: stop
 rig_seconds: 320
 tests:
@@ -39,10 +39,11 @@ tests:
       - expect_response: {status: expected}
       - sample: {attribute: brightness, for: 2, expect: steady}
 
-  # Zigbee2MQTT publishes a hue or saturation stop's color in a mode HA drops; xy_writeback brings HA in line.
+  # Zigbee2MQTT publishes a hue or saturation stop's color in a mode HA drops; xy_writeback brings HA in line. ZHA
+  # reads x/y in any color mode, so its refresh after the stop should match a live read with no write-back.
   - name: hue_cycle_stop
     roles: [light_color]
-    only: [zigbee2mqtt]
+    only: [zigbee2mqtt, zha]
     setup:
       - set: {state: on, brightness_pct: 70, hs_color: [30, 90]}
     steps:
@@ -60,7 +61,7 @@ tests:
 
   - name: saturation_down_stop
     roles: [light_color]
-    only: [zigbee2mqtt]
+    only: [zigbee2mqtt, zha]
     setup:
       - set: {state: on, brightness_pct: 70, hs_color: [200, 90]}
     steps:

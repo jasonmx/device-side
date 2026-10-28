@@ -348,8 +348,8 @@ firmware. Most Z2M-supported lights cancel the timer on any state change.
 
 Zigbee devices on the core `zha` integration's own coordinator. Device Side calls ZHA's
 `zha.issue_zigbee_cluster_command` action, which sends a Zigbee command to the device:
-`OnWithTimedOff` for a timer, which then runs on the device, and the `MoveTo…` commands for
-`set_attributes`.
+`OnWithTimedOff` for a timer, which then runs on the device, the `MoveTo…` commands for
+`set_attributes`, and the Level and Color cluster moves and stops for `move` and `stop`.
 
 ### How targets resolve
 
@@ -429,6 +429,54 @@ running timer is returned as `timer`, the shared row, from OnTime, and only whil
 on: a TS011F counts OnTime down while off. A ZHA group expands to its members, one entry each.
 Lights only, as for `turn_on_for`. A light that doesn't answer raises.
 
+### `move` and `stop`
+
+`move` covers `brightness`, `saturation` and `hue`, as on Zigbee2MQTT (above), which also says why no integration
+moves color temperature.
+
+Brightness and saturation are each one command to the end point (the limit, or the end of the range) with a
+transition of `sweep_time` × the fraction of the range left, which the bulb then runs on its own. In one call
+they are two commands, and the bulb runs both.
+
+- **Up** is `MoveToLevelWithOnOff`, which turns the light on. An off bulb keeps its level and would fade up from
+  there, so a light that is off first gets `MoveToLevel` to level 1 with the `ExecuteIfOff` override and no
+  transition: it stays off, then fades in from the bottom.
+- **Down to a limit** is `MoveToLevel`, which a light that is off ignores.
+- **Down to 0 %** is `MoveToLevelWithOnOff` to 0, a soft off that leaves the bulb at level 1. 1 s after the fade
+  should have ended, Device Side reads OnOff, and if the light is off, sends `MoveToLevel` back to the level the
+  move started from, with `ExecuteIfOff` and no transition. The light stays off and comes back at its old level
+  from anything that turns it on, as on Hue and Zigbee2MQTT. A stop or a new move before then cancels it.
+- **Saturation** is `MoveToColor` to the xy of the light's current hue at the end saturation, on lights that are
+  on and in color.
+- **Hue** is `EnhancedMoveHue`, a cycle around the color wheel the bulb keeps running until a stop. Its rate is
+  `65535 / sweep_time` steps of the wheel per second, rounded, so `sweep_time` is one full cycle. ZCL takes 1 to
+  65535 steps per second, so a `sweep_time` under 1 s or over 65535 s is clamped and the result carries
+  `clamped_to`. Hue is dropped, with `fields_dropped`, on a light whose ColorCapabilities attribute lacks
+  enhanced hue (zigpy's cached value, else one live read), and on a group with any such member.
+
+Saturation and hue move only a light that is on, so on a light that is off, as for a move down, the result is
+`unchanged` with `off`. An attribute already at its limit is left out, and a move with nothing left to do is
+`unchanged` with `at_limit`. A transition longer than ZCL's 6553.4 s runs at that, so faster than asked.
+
+`stop` sends Level `Stop` to each light that is on or that a soft off of Device Side's is fading, with
+`StopMoveStep` first where a saturation or hue move of Device Side's runs on a color light. It cancels the
+pending restore, so a stopped soft off leaves the light on where it halted, as on Hue. A light with nothing to
+stop is `unchanged` with `off`.
+
+The bulb reports its brightness during a fade and ZHA applies it, but never a color. So Device Side calls
+`homeassistant.update_entity` on each light 1 s after a fade should have ended, and straight after a stop. Raw
+commands leave ZHA's own transition guard down, so the read is the bulb's. Device Side remembers each move and
+stop for its duration plus 2 seconds, so a move after a stop starts from where the light halted.
+
+**Groups.** Members of a ZHA group get one command to the group (`zha.issue_zigbee_group_command`) per attribute,
+so they fade and halt together, when every light the group holds moves. Otherwise, such as a move down with a
+member off, each moving member gets its own command: a soft off sent to the group would still drop an off
+member's stored level. The bottom level before a move up, and the restore after a soft off, are each member's
+own. A group's start is the mean of its members that are on, and each member's fade is remembered from its own
+start.
+
+Lights only, as for `turn_on_for`.
+
 ### Cancelling
 
 Send `light.turn_off`. Turning the light on again does not cancel the timer on the one bulb tested
@@ -466,11 +514,21 @@ them (`docs/plans/2026-10-27-zigbee-probe.md`). A Sengled E11-G13, firmware `0x0
 `MoveToLevel` while on, but while off, with the override or without, its CurrentLevel jumped to 255
 and it came on at full brightness, so `set_attributes` refuses that model.
 
+For `move` and `stop`, on the LTA004 (`docs/plans/2026-10-28-zha-move-stop.md`): a Level `Stop` 3 s into a 6 s
+soft off from level 200 halted it at 100 with the bulb on, and it held; Home Assistant showed 100 from the bulb's
+own report. A 4 s fade read its end level by 3.9 s, and a 4 s soft off read off, at level 1, by 4.3 s. A group
+`MoveToLevelWithOnOff` and a group `Stop` fade and halt a member as the unicast ones do.
+
 ### Sharp edges
 
 - **Admin only.** `zha.issue_zigbee_cluster_command` and `zha.issue_zigbee_group_command` are
   admin-only actions, and Device Side passes the caller's identity through to them. A call made as a non-admin user is `rejected` with
   detail `admin_required`. Automations run without a user, so they pass.
+- **The Sengled E11-G13 and the soft off.** It drops a level sent while off, so it gets neither the bottom level
+  before a move up nor the restore after a soft off: a move up from off starts at its stored level, and after a
+  soft off it comes back on at level 1.
+- **A restart during a soft off.** The restore is scheduled in Home Assistant, so a restart before the fade ends
+  loses it, and the light comes back on at level 1.
 - **Duration limits.** `on_time` is a uint16 in tenths of a second, so the maximum is 6553.4 s
   (about 1.8 hours). A longer duration is clamped and the result carries `clamped_to`.
 - **A clamp reads the light mid-fade.** `min_brightness` and `max_brightness` clamp the level the

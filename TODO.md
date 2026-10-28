@@ -53,7 +53,7 @@ and Hue (from the A60 move on). The rig lock and the bulb moves are shared.
   ([`2026-10-27-hue-move-color.md`](docs/plans/2026-10-27-hue-move-color.md)).
 - [ ] **Hue A60 run** (13k step 2): `set_attributes` color and gamut clamp, 7c saturation, with no `light_color`
   skips. Hue code freezes. Clears `experimental` on the Hue adapters it proves.
-- [ ] **13f** ZHA `move`/`stop`, after the `Transition` PR. ZHA code freezes.
+- [x] **13f** ZHA `move`/`stop`, after the `Transition` PR. ZHA code freezes.
 - [ ] **Move the A60 to ZHA.**
 - [ ] **ZHA A60 run** (13k step 3): ZHA color suites. Clears `experimental` on the ZHA adapters it proves.
 - [ ] **9d** Rig coverage sweep for the non-color scope (plan in /plan first). 13k covers the color part.
