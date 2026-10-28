@@ -183,12 +183,19 @@ Steps 0–8 and the audit are done and pushed on `wt/z2m-get-attributes`. Step 9
   `reads_while_off[group]` (the ceilings).
 - `reads_while_off` needed a 2 s wait after the set: `set` waits only for on, and the off landed before Z2M's
   separate color temperature command, which a bulb drops while off. With the wait, color temperature reads 2702 K.
-- **Open:** `reads_while_off[light_ct]` (the Hue CT bulb) reads brightness 40.2, then 27.6, then 5.9 in three
-  runs, against 40 set; the ceilings read 40.2 from the same steps. Suspect: Z2M turns a Hue bulb off with a level
-  move (or Hue fades CurrentLevel down on off), so the bulb's CurrentLevel is not the level it comes back on at,
-  which Z2M's cache keeps. Probe first: read `currentLevel` every 0.2 s through an off, and compare with Z2M's
-  published `brightness`. If the bulb's level isn't the restore level, decide with Jason whether brightness
-  while off comes from Z2M's cache, or from the bulb only while on.
+- **Resolved:** `reads_while_off[light_ct]` (the Hue CT bulb) read brightness 40.2, then 27.6, then 5.9 in three
+  runs, against 40 set. Probed, with Jason watching for the light itself:
+  - A plain off (or `brightness: 0`, which HA turns into one) sends no level move. The Hue firmware's own off fade
+    dips CurrentLevel for about a second (102 → 82 → 31), then puts it back to 102. The rig read straight after
+    the off, inside the dip.
+  - An off with a transition (`transition: 2`, or Z2M's `transition: 0`) ends fully dark with CurrentLevel at 1.
+    Z2M keeps the old level in its in-memory `globalStore` and restores it, at once, on the next plain on. Its
+    published state still says `brightness: 102`.
+  - Every CurrentLevel read overwrites Z2M's published `brightness`, so the probe's own reads were what made it
+    say 1.
+  - On the Hue bridge, `dimming.brightness` keeps the pre-off level while off, whatever the transition.
+  - Decision (Jason): an off light's brightness comes from Z2M's state, carried by the `genOnOff` reply, and its
+    CurrentLevel isn't read. A light on reads it as before.
 - Shelly cases pass. Hue's `light_ct` bulb was unavailable in the first run; rerun Hue once it is back.
 - Still to do after that: bench record from a passing Z2M run, PR, `TODO.md` Done row with the PR number,
   `merge-green`, remove the worktree, fast-forward the main checkout.

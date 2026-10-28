@@ -130,6 +130,27 @@ async def test_reports_a_running_timer(hass, broker):
     assert response == {"light.lamp": {**ROW, "timer": timer(27.0)}}
 
 
+async def test_an_off_bulbs_brightness_is_z2ms_and_its_level_is_not_read(hass, broker):
+    # Off with a transition: the bulb holds the minimum level, and Z2M the one it restores on the next on.
+    bulb(hass, broker, genOnOff={"onOff": 0}, genLevelCtrl={"currentLevel": 1})
+    broker.states[IEEE] = {"state": "OFF", "brightness": 152}
+
+    response = await call(hass, "get_attributes", {"entity_id": "light.lamp"})
+
+    assert response == {"light.lamp": ROW}
+    assert [read["cluster"] for _, read in broker.reads()] == ["genOnOff", "lightingColorCtrl"]
+    assert broker.states[IEEE]["brightness"] == 152
+
+
+async def test_an_off_bulb_z2m_has_no_brightness_for_reports_none(hass, broker):
+    bulb(hass, broker, genOnOff={"onOff": 0})
+    broker.states[IEEE] = {"state": "OFF"}
+
+    response = await call(hass, "get_attributes", {"entity_id": "light.lamp"})
+
+    assert response == {"light.lamp": {"color_temp_kelvin": 4000}}
+
+
 async def test_adds_the_read_key_to_filtered_cache_first_keeping_the_users(hass, broker, caplog):
     bulb(hass, broker)
     broker.retained[INFO]["config"]["devices"][IEEE] = {"filtered_cache": ["linkquality"]}
@@ -263,7 +284,7 @@ async def test_group_averages_its_lit_members(hass, broker):
     response = await call(hass, "get_attributes", {"entity_id": "light.room"})
 
     assert response == {"light.room": {"brightness": 100.0, "color_temp_kelvin": 5000}}
-    assert [topic for topic, _ in broker.reads()] == ["zigbee2mqtt/0x01/set"] * 3 + ["zigbee2mqtt/0x02/set"] * 3
+    assert [topic for topic, _ in broker.reads()] == ["zigbee2mqtt/0x01/set"] * 3 + ["zigbee2mqtt/0x02/set"] * 2
     [request] = broker.requests()  # one bridge/info read covers both members; the second already has the key
     assert request["payload"]["id"] == "0x01"
 
@@ -271,9 +292,10 @@ async def test_group_averages_its_lit_members(hass, broker):
 async def test_group_with_every_member_off_averages_them_all(hass, broker):
     group(
         hass, broker,
-        one={"genOnOff": {"onOff": 0}, "genLevelCtrl": {"currentLevel": 254}},
-        two={"genOnOff": {"onOff": 0}, "genLevelCtrl": {"currentLevel": 127}},
+        one={"genOnOff": {"onOff": 0}, "genLevelCtrl": {"currentLevel": 1}},
+        two={"genOnOff": {"onOff": 0}, "genLevelCtrl": {"currentLevel": 1}},
     )
+    broker.states = {"0x01": {"state": "OFF", "brightness": 254}, "0x02": {"state": "OFF", "brightness": 127}}
 
     response = await call(hass, "get_attributes", {"entity_id": "light.room"})
 

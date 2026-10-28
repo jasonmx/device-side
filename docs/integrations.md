@@ -215,13 +215,18 @@ the answer Z2M publishes on the light's state topic:
 
 - `genOnOff` (`onOff`, `onTime`): a running `turn_on_for` timer, as `timer` with `turns: off`. `onTime` is the
   time the bulb has left, in tenths of a second.
-- `genLevelCtrl` (`currentLevel`), when the light dims: `brightness` in percent, as Hue's is.
+- `genLevelCtrl` (`currentLevel`), when the light dims and is on: `brightness` in percent, as Hue's is. An off
+  light's `brightness` is Z2M's instead, from the state the `genOnOff` answer carries: the level the light comes
+  back at. The bulb's own isn't. After an off with a transition it holds the minimum (0.4%) while Z2M keeps the
+  level it restores on the next on, and for about a second after a plain off a Hue bulb's own fade still dims it.
+  Reading it would also overwrite Z2M's `brightness`, which takes every level read. With no `brightness` in Z2M's
+  state, an off light's row has none.
 - `lightingColorCtrl`, when it has a color mode: `colorMode`, plus `colorTemperature` for `color_temp`, `currentX`
   and `currentY` for `xy`, and `currentHue` and `currentSaturation` for `hs`. Only the active mode's color is
   returned, `color_temp_kelvin` or `xy_color`/`hs_color` with the others derived from it. A read that asks for
   one attribute the bulb lacks fails as a whole, so only the light's own color modes' attributes are asked for.
 
-Bulbs keep these while off, so they read then too. Each cluster is one Zigbee round trip, a quarter of a second
+Bulbs keep their color and timer while off, so those read then too. Each cluster is one Zigbee round trip, a quarter of a second
 or less, read one after another: up to three per light per call. A read the bulb doesn't answer raises: at once
 when Z2M logs the failure on `zigbee2mqtt/bridge/logging`, else after 5 s.
 

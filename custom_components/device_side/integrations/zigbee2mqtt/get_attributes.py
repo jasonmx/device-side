@@ -1,4 +1,7 @@
-"""Zigbee2MQTT get_attributes: on/off timer, brightness, color temperature and color, read live from each bulb."""
+"""Zigbee2MQTT get_attributes: on/off timer, brightness, color temperature and color, read live from each bulb.
+
+An off bulb's brightness is Z2M's, the level it comes back at (Reader.read).
+"""
 
 from datetime import datetime
 from typing import ClassVar

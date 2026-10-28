@@ -4,6 +4,9 @@ Z2M publishes a read's result only in the device's state, under the payload's st
 carries Z2M's whole cached state, deep-merged, so a key it caches would ride in every later publish holding a past
 read, and each read itself is preceded by one such publish. The key is therefore kept out of the cache with the
 device's filtered_cache option, which `reader` adds first: then only a read's own reply carries it.
+
+A read also updates the state Z2M keeps from the attributes it reads, as a report would: reading CurrentLevel sets
+Z2M's brightness.
 """
 
 import asyncio
@@ -55,7 +58,7 @@ class Reader:
 
     def __init__(self, hass: HomeAssistant) -> None:
         self.hass = hass
-        self._reply: asyncio.Future[dict] | None = None
+        self._reply: asyncio.Future[tuple[dict, dict]] | None = None
         self._expected: set[str] = set()
         self._failure: tuple[str, ...] = ()  # what Z2M's error line names for the read in flight
 
@@ -79,29 +82,41 @@ class Reader:
         if msg.retain or self._reply is None or self._reply.done():
             return
         try:
-            value = json.loads(msg.payload).get(READ_KEY)
+            state = json.loads(msg.payload)
+            value = state.get(READ_KEY)
         except (ValueError, AttributeError):
             return
         if isinstance(value, dict) and set(value) == self._expected:
-            self._reply.set_result(value)
+            self._reply.set_result((value, state))
 
     async def read(self, target: Target) -> dict:
         """The light's attributes from every cluster `clusters` names, merged, read one cluster after another.
 
+        An off light's CurrentLevel is not read but taken from Z2M's brightness, which the OnOff reply carries: that
+        is the level the light comes back at. The bulb's own isn't. After an off with a transition it holds the
+        minimum, and Z2M restores the level it kept on the next on; just after a plain off, a Hue bulb's own fade
+        still dims it. Reading it would also overwrite Z2M's brightness with it.
+
         Raises when a read fails: at once when Z2M logs the error, else after the timeout.
         """
         attributes: dict = {}
+        state: dict = {}
         # HA's light entity already subscribes to the state topic, so this subscription is live at once.
         unsubscribe = await mqtt.async_subscribe(self.hass, state_topic(target), self._on_state)
         try:
             for cluster, names in clusters(target).items():
+                if cluster == "genLevelCtrl" and not attributes["onOff"]:
+                    if (brightness := state.get("brightness")) is not None:
+                        attributes["currentLevel"] = brightness
+                    continue
                 self._reply, self._expected = self.hass.loop.create_future(), set(names)
                 self._failure = (f"{z2m_address(target.device)}/", f"{cluster}.read(")
                 payload = {"read": {"cluster": cluster, "attributes": names, "state_property": READ_KEY}}
                 await self.hass.services.async_call(
                     "mqtt", "publish", {"topic": topic(target, "set"), "payload": json.dumps(payload)}, blocking=True
                 )
-                attributes |= await wait(self._reply, _REPLY_TIMEOUT_S, f"no {cluster} reply from Zigbee2MQTT")
+                reply, state = await wait(self._reply, _REPLY_TIMEOUT_S, f"no {cluster} reply from Zigbee2MQTT")
+                attributes |= reply
         finally:
             self._reply = None
             unsubscribe()

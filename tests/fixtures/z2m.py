@@ -95,6 +95,7 @@ class Broker:
         self.read_errors: dict[tuple[str, str], str] = {}  # (IEEE, cluster) -> the status Z2M logs for a failed read
         self.before_reply: list[dict] = []  # state payloads published ahead of each read's reply
         self.logs_before_reply: list[str] = []  # bridge/logging payloads published ahead of each read's reply
+        self.states: dict[str, dict] = {}  # the state Z2M keeps for each device, keyed by IEEE, in every publish
 
     async def subscribe(self, hass, topic, msg_callback):
         self.topics.append(topic)
@@ -163,7 +164,10 @@ class Broker:
         for payload in self.before_reply:
             self.deliver(f"zigbee2mqtt/{name}", json.dumps(payload))
         reply = {attribute: clusters[cluster][attribute] for attribute in read["attributes"]}
-        self.deliver(f"zigbee2mqtt/{name}", json.dumps({"state": "ON", read["state_property"]: reply}))
+        state = self.states.setdefault(ieee, {"state": "ON"})
+        if "currentLevel" in reply:
+            state["brightness"] = reply["currentLevel"]
+        self.deliver(f"zigbee2mqtt/{name}", json.dumps({**state, read["state_property"]: reply}))
 
     def reads(self) -> list[tuple[str, dict]]:
         """Each read sent, as (topic, read payload)."""
