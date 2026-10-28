@@ -228,10 +228,10 @@ def test_wait_until_ready_says_why_the_service_is_missing(monkeypatch):
 
     async def config_entries(url, token):
         assert token == "admin"
-        return [{"domain": "device_side", "state": "not_loaded"}, {"domain": "zha", "state": "setup_in_progress"}]
+        return [{"domain": "device_side", "state": "not_loaded"}, {"domain": "mqtt", "state": "setup_in_progress"}]
 
     monkeypatch.setattr(rig, "config_entries", config_entries)
-    with pytest.raises(SystemExit, match="entry is not_loaded; it waits for zha"):
+    with pytest.raises(SystemExit, match="entry is not_loaded; it waits for mqtt"):
         rig.wait_until_ready("http://ha", "token", "admin", timeout=35, sleep=lambda _: None)
 
 
