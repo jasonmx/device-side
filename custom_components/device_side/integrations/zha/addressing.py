@@ -41,5 +41,10 @@ def group_id(unique_id: str) -> int | None:
         return None
 
 
+def unsupported_reason(target: Target) -> str | None:
+    """Why this entity can't be addressed, or None."""
+    return "not_addressable" if address(target.entry.unique_id) is None else None
+
+
 def is_zha_group(hass: HomeAssistant, target: Target) -> bool:
     return _GROUP_MARKER in target.entry.unique_id

@@ -3,17 +3,12 @@
 from typing import ClassVar
 
 from homeassistant.core import HomeAssistant
-from homeassistant.util.color import (
-    color_hs_to_RGB,
-    color_hs_to_xy,
-    color_temperature_mired_to_kelvin,
-    color_xy_to_hs,
-    color_xy_to_RGB,
-)
+from homeassistant.util.color import color_temperature_mired_to_kelvin
 
 from . import zcl
-from .addressing import address
+from .addressing import address, unsupported_reason
 from ...core.adapter import Adapter
+from ...core.color import hs_row, xy_row
 from ...core.models import EntityResult, Request, Status, Target
 from ...core.scope import AdapterScope
 from ...core.timer import timer_row
@@ -55,8 +50,7 @@ def _color(color: dict[int, int]) -> dict:
     if mode == _CT and (mireds := color.get(zcl.COLOR_TEMPERATURE)):
         return {"color_temp_kelvin": color_temperature_mired_to_kelvin(mireds)}
     if mode == _XY and zcl.CURRENT_X in color and zcl.CURRENT_Y in color:
-        xy = (round(color[zcl.CURRENT_X] / 65535, 4), round(color[zcl.CURRENT_Y] / 65535, 4))
-        return {"xy_color": list(xy), "rgb_color": list(color_xy_to_RGB(*xy)), "hs_color": list(color_xy_to_hs(*xy))}
+        return xy_row(round(color[zcl.CURRENT_X] / 65535, 4), round(color[zcl.CURRENT_Y] / 65535, 4))
     if mode == _ENHANCED_HS and zcl.ENHANCED_CURRENT_HUE in color:
         hue = color[zcl.ENHANCED_CURRENT_HUE] * 360 / 65535
     elif mode == _HS and zcl.CURRENT_HUE in color:
@@ -65,8 +59,7 @@ def _color(color: dict[int, int]) -> dict:
         return {}
     if zcl.CURRENT_SATURATION not in color:
         return {}
-    hs = (round(hue, 3), round(color[zcl.CURRENT_SATURATION] * 100 / 254, 3))
-    return {"hs_color": list(hs), "rgb_color": list(color_hs_to_RGB(*hs)), "xy_color": list(color_hs_to_xy(*hs))}
+    return hs_row(round(hue, 3), round(color[zcl.CURRENT_SATURATION] * 100 / 254, 3))
 
 
 class ZHAGetAttributes(Adapter[Request]):
@@ -88,11 +81,7 @@ class ZHAGetAttributes(Adapter[Request]):
     )
 
     def supports(self, hass: HomeAssistant, request: Request, target: Target) -> str | None:
-        if (reason := super().supports(hass, request, target)) is not None:
-            return reason
-        if address(target.entry.unique_id) is None:
-            return "not_addressable"
-        return None
+        return super().supports(hass, request, target) or unsupported_reason(target)
 
     async def execute(self, hass: HomeAssistant, request: Request, targets: list[Target]) -> list[EntityResult]:
         async def read(target: Target) -> EntityResult:
