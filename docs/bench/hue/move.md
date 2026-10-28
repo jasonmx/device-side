@@ -56,3 +56,5 @@
 | `brighter_and_cooler[group] observed` | `light` (group) | not observed |
 
 Tests marked `not observed` had nobody watching.
+
+Its color temperature rows prove a call no longer offered: since 2026-10-28 `move` has no color temperature fields, as every halt of a Hue bulb's color temperature fade jumps visibly (`docs/plans/2026-10-28-z2m-move-stop.md`).

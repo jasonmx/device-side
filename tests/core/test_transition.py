@@ -59,15 +59,15 @@ def test_keys_are_per_resource_and_attribute(cache):
     cache.stopped("light-1", "brightness", 42.0)
 
     assert cache.value("light-2", "brightness", 10.0) == 10.0
-    assert cache.value("light-1", "color_temp", 10.0) == 10.0
+    assert cache.value("light-1", "saturation", 10.0) == 10.0
 
 
 def test_follows_any_attribute_inside_its_window(cache, clock):
     assert not cache.follows("light-1")
     cache.moving("light-1", "brightness", 20.0, 80.0, 10.0)
-    cache.stopped("light-1", "color_temp", 300.0)
+    cache.stopped("light-1", "saturation", 30.0)
 
-    assert cache.attributes("light-1") == ["brightness", "color_temp"]
+    assert cache.attributes("light-1") == ["brightness", "saturation"]
     clock.now += SETTLE_SECONDS + 0.1
     assert cache.attributes("light-1") == ["brightness"]
     clock.now += 10.0
@@ -76,7 +76,7 @@ def test_follows_any_attribute_inside_its_window(cache, clock):
 
 def test_forget_drops_the_resources_transitions_and_restore_puts_them_back(cache):
     cache.moving("light-1", "brightness", 20.0, 80.0, 10.0)
-    cache.moving("light-1", "color_temp", 200.0, 300.0, 10.0)
+    cache.moving("light-1", "saturation", 20.0, 30.0, 10.0)
     cache.stopped("light-2", "brightness", 42.0)
 
     forgotten = cache.forget("light-1")
@@ -85,7 +85,7 @@ def test_forget_drops_the_resources_transitions_and_restore_puts_them_back(cache
     assert cache.value("light-1", "brightness", 13.0) == 13.0
     assert cache.value("light-2", "brightness", 13.0) == 42.0
     cache.restore(forgotten)
-    assert cache.attributes("light-1") == ["brightness", "color_temp"]
+    assert cache.attributes("light-1") == ["brightness", "saturation"]
 
 
 async def test_recording_keeps_what_an_accepted_write_records(cache):

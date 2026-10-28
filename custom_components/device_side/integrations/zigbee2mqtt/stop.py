@@ -32,7 +32,7 @@ class Z2MStop(Adapter[Request]):
     Each stop is its own publish, the color ones first: Z2M reads the light back after a brightness stop before it
     sends the next key of the same message. Z2M's read-back puts HA right for brightness; after a color stop, HA's color
     is brought in line (xy_writeback). A light or group with nothing lit (off, and no soft off of ours fading it) is
-    unchanged with off and nothing is sent. Color temperature isn't stopped: our moves never fade it.
+    unchanged with off and nothing is sent.
     """
 
     action: ClassVar[str] = "stop"

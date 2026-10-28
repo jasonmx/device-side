@@ -90,7 +90,6 @@ class Z2MMove(Adapter[MoveRequest]):
     scope: ClassVar[AdapterScope] = AdapterScope(
         experimental=True,
         domains=frozenset({"light"}),
-        # Color temperature is left out: no command halts a Hue bulb's color temperature fade without a visible jump.
         fields=frozenset({"brightness", "brightness_limit", "saturation", "saturation_limit", "hue"}),
         native_groups=True,
     )

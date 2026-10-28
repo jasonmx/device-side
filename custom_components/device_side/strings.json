@@ -50,7 +50,7 @@
       "message": "Nothing to set. Give a brightness, a color temperature, a color, or a brightness limit."
     },
     "nothing_to_move": {
-      "message": "Nothing to move. Give a direction for brightness, color temperature, saturation or hue."
+      "message": "Nothing to move. Give a direction for brightness, saturation or hue."
     },
     "limit_without_direction": {
       "message": "A limit needs a direction for the same attribute: {limits}."
@@ -63,15 +63,11 @@
     },
     "move": {
       "name": "Move: dim, brighten, warm or cool",
-      "description": "Starts brightness, color temperature or saturation moving at a steady speed until it reaches its range end or a limit. Stop halts it where it is. Built for hold-to-dim buttons.",
+      "description": "Starts brightness or saturation moving at a steady speed until it reaches its range end or a limit, or hue cycling. Stop halts it where it is. Built for hold-to-dim buttons.",
       "fields": {
         "brightness": {
           "name": "Brightness",
           "description": "Direction to move brightness. Moving up turns the light on; moving down to 0% turns it off."
-        },
-        "color_temp": {
-          "name": "Color temperature",
-          "description": "Direction to move color temperature."
         },
         "saturation": {
           "name": "Saturation",
@@ -88,10 +84,6 @@
         "brightness_limit": {
           "name": "Brightness limit",
           "description": "Brightness to stop at instead of the range end, in percent. Moving down to 0% turns the light off."
-        },
-        "color_temp_limit": {
-          "name": "Color temperature limit",
-          "description": "Color temperature to stop at instead of the light's warmest or coolest, in Kelvin."
         },
         "saturation_limit": {
           "name": "Saturation limit",
@@ -196,12 +188,6 @@
       "options": {
         "up": "Brighten",
         "down": "Dim"
-      }
-    },
-    "color_temp_direction": {
-      "options": {
-        "warmer": "Warmer",
-        "cooler": "Cooler"
       }
     },
     "saturation_direction": {

@@ -29,9 +29,11 @@ current then).
 - **Set while off:** sent with the ZCL `ExecuteIfOff` options override. A bulb the probe shows dropping it is
   refused `unsupported`, detail `execute_if_off_unsupported`. We never write the persistent option, and the
   light never flashes on.
-- **Move attributes on Zigbee:** brightness, color temp, saturation, and hue. On ZHA, hue is **EnhancedMoveHue**,
-  only on bulbs whose `ColorCapabilities` report enhanced hue. On Z2M, hue is the native `hue_move`, only on
-  lights whose device definition lists `color_hs` (13i plan). The Hue bridge drops the `hue` field (9f rule).
+- **Move attributes on Zigbee:** brightness, saturation, and hue. Color temperature isn't moved on any
+  integration: every halt of its fade on a Hue bulb jumps visibly (13i;
+  `docs/plans/2026-10-28-drop-color-temp-move.md`). On ZHA, hue is **EnhancedMoveHue**, only on bulbs whose
+  `ColorCapabilities` report enhanced hue. On Z2M, hue is the native `hue_move`, only on lights whose device
+  definition lists `color_hs` (13i plan). The Hue bridge drops the `hue` field (9f rule).
 - **No overlay on HA state on Zigbee; read-back where HA would be stale.** From a code read on 2026-10-27
   (zha 2.3.1, the version HA pins; Z2M `344b6e0` and zhc `c18c32d`):
   - **Z2M** publishes the target at the start of a `brightness`+`transition` write, the same model as the Hue
@@ -50,8 +52,9 @@ current then).
 
 ## Dependencies
 
-- **7c** (Hue `move`): 7c1 (color temp) landed in #95. 7c2 (saturation) needs a color bulb on the bridge, so the
-  A60 moves there first and 7c2 is built against it; Hue freezes after 7c2's rig run.
+- **7c** (Hue `move`): 7c1 (color temp) landed in #95 and was removed when color temperature moves were dropped.
+  7c2 (saturation) needs a color bulb on the bridge, so the A60 moves there first and 7c2 is built against it; Hue
+  freezes after 7c2's rig run.
 - **9f** (core-aligned failure behavior): lands before 13b. Every new adapter is written against the new raise
   rule, and its field-dropping rule is what drops `hue` on the Hue bridge.
 
