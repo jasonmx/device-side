@@ -5,20 +5,23 @@ The rig is the household's own Home Assistant and its in-use lights. Nothing cha
 preflight reads the inventory, the adapter registry and the deployed tree hash, prints what will run, then asks.
 DEVICE_SIDE_RIG_APPROVED=1 answers the gate for a non-interactive caller that already has a human's yes.
 
-One run at a time: a lock in the git common dir, shared by every worktree; a second run waits for it. The tests are the
+One run at a time: a lock in the git common dir, shared by every worktree; a second run waits for it. Each run deploys
+and restarts HA onto its own checkout's tree when HA hasn't loaded it, so a run queued behind another tests its own
+code. Ctrl-C mid-deploy waits for the deploy and HA's restart to finish before releasing the lock. The tests are the
 step files in tests/rig/steps, run by tests/rig/engine.py; a full pass of an adapter rewrites its bench record.
 
 Ctrl-C, SIGTERM and SIGHUP stop a run, putting the devices back; a second one leaves them. What a run changes is
 journaled first (next to the lock), so whatever a killed run leaves changed, the next run puts back before its gate, or
 --recover alone does.
 
-Usage: scripts/rig.py [--dry-run] [--no-deploy] [--no-restart] [--unattended] [--integration KEY ...]
+Usage: scripts/rig.py [--dry-run] [--no-deploy] [--unattended] [--integration KEY ...]
                       [--action NAME ...] [-k TEXT]
        scripts/rig.py --recover
 """
 
 import argparse
 import asyncio
+import contextlib
 import datetime
 import fcntl
 import getpass
@@ -31,7 +34,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
@@ -60,7 +63,9 @@ from tests.rig.journal import Journal  # noqa: E402
 COMPONENT = "custom_components/device_side"
 BENCH_DIR = REPO / "docs" / "bench"
 SERVICE = ("device_side", "turn_on_for")
-READY_TIMEOUT_S = 180
+# HA's bootstrap stage-1 (120 s) and stage-2 (300 s) timeouts, after which a stuck dependency is let go, plus the
+# container's start. A restart behind a hung ZHA took about 350 s.
+READY_TIMEOUT_S = 450
 RESTART_ESTIMATE_S = 90
 LOCK_NAME = "device_side-rig.lock"
 LOCK_POLL_S = 2.0  # how often a waiting run retries the lock
@@ -70,16 +75,22 @@ ABORT_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 REPORT_DIR = Path(tempfile.gettempdir()) / "device_side-rig"
 
 
+class Aborted(Exception):
+    """A signal before the tests start; the run ends on its message."""
+
+
 @dataclass(slots=True)
 class Deploy:
     local_tree: str
-    deployed_tree: str | None
+    synced_tree: str | None  # on disk in HA's config
+    loaded_tree: str | None  # what HA last restarted onto
     branch: str
     blocker: str | None = None
 
     @property
     def needed(self) -> bool:
-        return self.local_tree != self.deployed_tree
+        """Also when only the loaded tree differs: a failed restart leaves the synced tree unloaded."""
+        return not self.local_tree == self.synced_tree == self.loaded_tree
 
 
 def git(*args: str, check: bool = True) -> str:
@@ -126,16 +137,22 @@ def estimate(suites: list[Suite], registry: AdapterRegistry, restarting: bool) -
     return seconds + (RESTART_ESTIMATE_S if restarting else 0)
 
 
-def deployed_tree(status_cmd: str) -> str | None:
-    """The tree hash the deploy sync command last installed, or None if unset or not yet deployed (exit 91)."""
+def deployed_trees(status_cmd: str) -> tuple[str | None, str | None]:
+    """The synced and loaded tree hashes, each None if unknown: RIG_STATUS_CMD unset, never synced (exit 91), or a
+    line missing. It prints `synced <tree>` and `loaded <tree>` lines; a bare hash, from older tooling, counts as both.
+    """
     if not status_cmd:
-        return None
+        return None, None
     result = subprocess.run(status_cmd.split(), capture_output=True, text=True)
     if result.returncode == 91:
-        return None
+        return None, None
     if result.returncode != 0:
         raise SystemExit(f"{status_cmd} failed ({result.returncode}): {result.stderr.strip()}")
-    return result.stdout.strip()
+    output = result.stdout.strip()
+    if output and " " not in output:
+        return output, output
+    trees = dict(line.split(maxsplit=1) for line in output.splitlines() if " " in line.strip())
+    return trees.get("synced"), trees.get("loaded")
 
 
 def deploy_state(status_cmd: str) -> Deploy:
@@ -145,9 +162,11 @@ def deploy_state(status_cmd: str) -> Deploy:
     deploy needs the change pushed.
     """
     branch = git("rev-parse", "--abbrev-ref", "HEAD")
+    synced, loaded = deployed_trees(status_cmd)
     state = Deploy(
         local_tree=git("rev-parse", f"HEAD:{COMPONENT}"),
-        deployed_tree=deployed_tree(status_cmd),
+        synced_tree=synced,
+        loaded_tree=loaded,
         branch=branch,
     )
     if git("status", "--porcelain", "--", COMPONENT):
@@ -163,11 +182,11 @@ def deploy_state(status_cmd: str) -> Deploy:
     return state
 
 
-def check_deploy(env: dict, no_restart: bool, deploy: Deploy) -> None:
+def check_deploy(env: dict, deploy: Deploy) -> None:
     """Raise SystemExit if the deploy cannot proceed: missing commands or a git blocker."""
     if not env.get("RIG_SYNC_CMD"):
         raise SystemExit("RIG_SYNC_CMD must be set in .env.rig to deploy (see tests/rig/env.example)")
-    if not no_restart and not env.get("RIG_RESTART_CMD"):
+    if not env.get("RIG_RESTART_CMD"):
         raise SystemExit("RIG_RESTART_CMD must be set in .env.rig to restart (see tests/rig/env.example)")
     if deploy.blocker:
         raise SystemExit(f"Cannot deploy: {deploy.blocker}.")
@@ -253,35 +272,88 @@ def _get(url: str, token: str) -> Any:
 
 
 def wait_until_ready(
-    url: str, token: str, timeout: float = READY_TIMEOUT_S, sleep: Callable[[float], None] = time.sleep
+    url: str,
+    token: str,
+    admin_token: str | None = None,
+    timeout: float = READY_TIMEOUT_S,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> None:
-    """Until HA reports RUNNING and lists device_side.turn_on_for; exits the runner on timeout."""
+    """Until HA reports RUNNING and lists device_side.turn_on_for; exits the runner on timeout, saying why when HA
+    answers without it, still starting or running."""
     deadline = time.monotonic() + timeout
-    running = False
+    state = None
     while time.monotonic() < deadline:
-        running = False  # only the last poll counts: HA that was RUNNING may have crashed since
+        state = None  # only the last poll counts: HA that was RUNNING may have crashed since
         try:
-            running = _get(f"{url}/api/config", token).get("state") == "RUNNING"
-            if running:
+            state = _get(f"{url}/api/config", token).get("state")
+            if state == "RUNNING":
                 services = {entry["domain"]: entry["services"] for entry in _get(f"{url}/api/services", token)}
                 if SERVICE[1] in services.get(SERVICE[0], {}):
                     return
         except urllib.error.URLError, OSError, ValueError, TypeError, KeyError, AttributeError:
             pass
         sleep(3)
-    if running:
-        raise SystemExit(
-            f"HA is running but has no {'.'.join(SERVICE)}. On a first load, add the integration "
-            "(Settings > Devices & services > Add integration > Device Side), then rerun with --no-deploy."
-        )
+    if state == "RUNNING":
+        raise SystemExit(f"HA is running but has no {'.'.join(SERVICE)}. {diagnose(url, admin_token)}")
+    if state is not None:
+        raise SystemExit(f"HA is still starting after {timeout:.0f}s ({state}). {diagnose(url, admin_token)}")
     raise SystemExit(f"HA did not report RUNNING within {timeout:.0f}s; check HA logs for errors.")
+
+
+def diagnose(url: str, admin_token: str | None) -> str:
+    """Why device_side's actions are missing, from HA's config entries, which only an admin may read."""
+    manifest = json.loads((REPO / COMPONENT / "manifest.json").read_text())
+    waits_for = manifest.get("after_dependencies", [])
+    if not admin_token:
+        return (
+            "Without HA_ADMIN_TOKEN in .env.rig the runner can't read config entries to say why; check device_side "
+            f"and the integrations it waits for ({', '.join(waits_for)}) in Settings > Devices & services."
+        )
+    try:
+        entries = asyncio.run(config_entries(url, admin_token))
+    except Exception as err:  # noqa: BLE001 - the diagnosis is a hint; the run is already stopping
+        return f"Could not read config entries to say why: {err!r}."
+    return explain(entries, waits_for)
+
+
+async def config_entries(url: str, admin_token: str) -> list[dict]:
+    admin = HAClient(url, admin_token)
+    try:
+        await admin.connect()
+        return await admin.command({"type": "config_entries/get"})
+    finally:
+        await admin.close()
+
+
+def explain(entries: list[dict], waits_for: list[str]) -> str:
+    """device_side's entry state and each integration it waits for whose enabled entry isn't loaded: HA sets up
+    device_side only after their entries finish setting up, so one stuck in setup holds it back."""
+    own = [entry["state"] for entry in entries if entry["domain"] == SERVICE[0]]
+    if not own:
+        return (
+            "On a first load, add the integration (Settings > Devices & services > Add integration > Device Side), "
+            "then rerun."
+        )
+    stuck = [
+        f"{entry['domain']} ({entry['state']})"
+        for entry in entries
+        if entry["domain"] in waits_for and entry["state"] != "loaded" and not entry.get("disabled_by")
+    ]
+    why = (
+        f"it waits for {', '.join(stuck)}"
+        if stuck
+        else f"none of the integrations it waits for ({', '.join(waits_for)}) is stuck; check HA's logs"
+    )
+    return (
+        f"device_side's entry is {', '.join(own)}; {why}. "
+        "device_side actions are unavailable in the house until this is fixed."
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--dry-run", action="store_true", help="print the plan and stop before the gate")
     parser.add_argument("--no-deploy", action="store_true", help="test whatever HA already runs")
-    parser.add_argument("--no-restart", action="store_true", help="sync the integration but do not restart HA")
     parser.add_argument("--integration", action="append", help="limit to an integration key (repeatable)")
     parser.add_argument("--action", action="append", help="limit to an action's step files (repeatable)")
     parser.add_argument("-k", dest="keyword", help="run only test cases whose id contains this text")
@@ -290,6 +362,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     _held, journal = hold_rig(args.dry_run)  # the lock is held until exit
+    try:
+        with end_on_signals():
+            return run_held(args, journal)
+    except Aborted as err:
+        print(err)
+        return 1
+
+
+def run_held(args: argparse.Namespace, journal: Journal) -> int:
+    """The run, once the lock is held."""
     env = load_env()
     replay(env, journal, args.dry_run, args.recover)
     if args.recover:
@@ -305,29 +387,79 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("No rig test matches the inventory's integrations.")
     deploy = deploy_state(env.get("RIG_STATUS_CMD", ""))
     deploying = deploy.needed and not args.no_deploy
-    restarting = deploying and not args.no_restart
-    print_plan(inventory, suites, registry, args.keyword, deploy, deploying, restarting)
+    print_plan(inventory, suites, registry, args.keyword, deploy, deploying)
 
     if deploying:
-        check_deploy(env, args.no_restart, deploy)
+        check_deploy(env, deploy)
     if args.dry_run:
         return 0
     if not gate():
         print("Not approved; nothing changed.")
         return 1
 
-    if deploying:
-        command = ["sh", str(REPO / "scripts" / "deploy.sh"), deploy.branch]
-        if args.no_restart:
-            command.append("--no-restart")
-        deploy_env = {
-            **os.environ,
-            "RIG_SYNC_CMD": env["RIG_SYNC_CMD"],
-            "RIG_RESTART_CMD": env.get("RIG_RESTART_CMD", ""),
-        }
-        subprocess.run(command, check=True, env=deploy_env)
-    wait_until_ready(env["HA_URL"].rstrip("/"), env["HA_TOKEN"], READY_TIMEOUT_S if restarting else 15)
+    deploy_and_wait(env, deploy.branch if deploying else None)
     return run_tests(run_rig(env, suites, inventory, registry, args.keyword, args.unattended, journal))
+
+
+def deploy_and_wait(env: dict, branch: str | None) -> None:
+    """Deploy `branch` (None: don't), then wait for HA; a deploy holds off a signal until HA is back."""
+    with finish_first() if branch is not None else contextlib.nullcontext():
+        if branch is not None:
+            deploy_env = {**os.environ, "RIG_SYNC_CMD": env["RIG_SYNC_CMD"], "RIG_RESTART_CMD": env["RIG_RESTART_CMD"]}
+            try:
+                # Its own session, so a Ctrl-C at the terminal reaches only the runner, which holds it.
+                subprocess.run(
+                    ["sh", str(REPO / "scripts" / "deploy.sh"), branch],
+                    check=True,
+                    env=deploy_env,
+                    start_new_session=True,
+                )
+            except subprocess.CalledProcessError as err:
+                raise SystemExit(
+                    f"Deploy failed (exit {err.returncode}); HA may be mid-restart, so check it before the next run."
+                ) from None
+        timeout = READY_TIMEOUT_S if branch is not None else 15
+        wait_until_ready(env["HA_URL"].rstrip("/"), env["HA_TOKEN"], env.get("HA_ADMIN_TOKEN"), timeout)
+
+
+@contextlib.contextmanager
+def end_on_signals() -> Iterator[None]:
+    """Until the tests take over (cancel_on_signals), have Ctrl-C, SIGTERM and SIGHUP end the run on one line rather
+    than a traceback. What a recovery had yet to put back stays in the journal."""
+
+    def abort(_signum: int, _frame: object) -> None:
+        raise Aborted("Aborted.")
+
+    with handling_signals(abort):
+        yield
+
+
+@contextlib.contextmanager
+def finish_first() -> Iterator[None]:
+    """Hold off a signal until the block ends, then stop: the deploy and HA's restart finish under the lock, so the next
+    run doesn't sync into a booting HA. A second signal stops at once."""
+    held: list[int] = []
+
+    def hold(signum: int, _frame: object) -> None:
+        if held:
+            raise Aborted("Aborted mid-deploy; HA may be mid-restart, so check it before the next run.")
+        held.append(signum)
+        print("\nStopping once the deploy and HA's restart finish; again to stop now.")
+
+    with handling_signals(hold):
+        yield
+    if held:
+        raise Aborted("Aborted after the deploy.")
+
+
+@contextlib.contextmanager
+def handling_signals(handler: Callable[[int, object], None]) -> Iterator[None]:
+    previous = {signum: signal.signal(signum, handler) for signum in ABORT_SIGNALS}
+    try:
+        yield
+    finally:
+        for signum, before in previous.items():
+            signal.signal(signum, before)
 
 
 def hold_rig(dry_run: bool) -> tuple[TextIO | None, Journal]:
@@ -392,7 +524,6 @@ def print_plan(
     keyword: str | None,
     deploy: Deploy,
     deploying: bool,
-    restarting: bool,
 ) -> None:
     print(f"Inventory ({INVENTORY}):")
     for integration, entities in inventory.integrations.items():
@@ -401,14 +532,17 @@ def print_plan(
     print("Adapters:")
     for line in plan_lines(suites, inventory, registry, keyword):
         print(f"  {line}")
-    print(f"Integration: local {deploy.local_tree[:12]}, deployed {(deploy.deployed_tree or 'none')[:12]}")
+    print(
+        f"Integration: local {deploy.local_tree[:12]}, synced {(deploy.synced_tree or 'unknown')[:12]}, "
+        f"loaded {(deploy.loaded_tree or 'unknown')[:12]}"
+    )
     if deploying:
-        print(f"Deploy: sync {deploy.branch}" + (", then restart Home Assistant" if restarting else ", no restart"))
+        print(f"Deploy: sync {deploy.branch}, then restart Home Assistant")
     elif deploy.needed:
         print("Deploy: skipped (--no-deploy); the tests exercise the deployed tree, not this checkout")
     else:
         print("Deploy: not needed, no restart")
-    seconds = estimate(suites, registry, restarting)
+    seconds = estimate(suites, registry, deploying)
     print(f"Estimated duration: {seconds} s. These are in-use household devices; they will visibly change state.")
 
 

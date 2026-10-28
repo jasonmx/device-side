@@ -222,14 +222,89 @@ def test_wait_until_ready_reports_a_crash_after_running_as_not_running(monkeypat
         rig.wait_until_ready("http://ha", "token", timeout=35, sleep=lambda _: None)
 
 
-def test_wait_until_ready_points_at_the_missing_entry(monkeypatch):
+def test_wait_until_ready_says_why_the_service_is_missing(monkeypatch):
     fake_clock(monkeypatch)
     fake_ha(monkeypatch, [{"state": "RUNNING"}, []] * 5)
-    with pytest.raises(SystemExit, match="Add integration"):
-        rig.wait_until_ready("http://ha", "token", timeout=35, sleep=lambda _: None)
+
+    async def config_entries(url, token):
+        assert token == "admin"
+        return [{"domain": "device_side", "state": "not_loaded"}, {"domain": "mqtt", "state": "setup_in_progress"}]
+
+    monkeypatch.setattr(rig, "config_entries", config_entries)
+    with pytest.raises(SystemExit, match="entry is not_loaded; it waits for mqtt"):
+        rig.wait_until_ready("http://ha", "token", "admin", timeout=35, sleep=lambda _: None)
 
 
-def fake_git(monkeypatch, *, dirty="", remote="abc refs/heads/b", remote_tree="tree1", deployed="old"):
+def test_wait_until_ready_says_why_ha_is_still_starting(monkeypatch):
+    fake_clock(monkeypatch)
+    fake_ha(monkeypatch, [{"state": "NOT_RUNNING"}] * 5)
+    monkeypatch.setattr(rig, "diagnose", lambda url, admin_token: "zha (setup_in_progress).")
+    with pytest.raises(SystemExit, match=r"still starting after 35s \(NOT_RUNNING\)\. zha \(setup_in_progress\)"):
+        rig.wait_until_ready("http://ha", "token", "admin", timeout=35, sleep=lambda _: None)
+
+
+WAITS_FOR = ["hue", "zha"]
+
+
+@pytest.mark.parametrize(
+    ("entries", "says"),
+    [
+        ([], "On a first load, add the integration"),
+        (
+            [
+                {"domain": "device_side", "state": "not_loaded"},
+                {"domain": "hue", "state": "loaded"},
+                {"domain": "zha", "state": "setup_in_progress"},
+                {"domain": "zha", "state": "not_loaded", "disabled_by": "user"},
+                {"domain": "met", "state": "setup_error"},
+            ],
+            "device_side's entry is not_loaded; it waits for zha (setup_in_progress). "
+            "device_side actions are unavailable in the house until this is fixed.",
+        ),
+        (
+            [{"domain": "device_side", "state": "setup_error"}, {"domain": "hue", "state": "loaded"}],
+            "device_side's entry is setup_error; none of the integrations it waits for (hue, zha) is stuck; "
+            "check HA's logs.",
+        ),
+    ],
+)
+def test_explain_a_missing_service(entries, says):
+    assert says in rig.explain(entries, WAITS_FOR)
+
+
+def test_diagnose_without_an_admin_token_says_what_it_could_not_check():
+    assert "Without HA_ADMIN_TOKEN" in rig.diagnose("http://ha", None)
+
+
+def test_diagnose_says_when_it_cannot_read_the_entries(monkeypatch):
+    async def config_entries(url, token):
+        raise OSError("refused")
+
+    monkeypatch.setattr(rig, "config_entries", config_entries)
+    assert rig.diagnose("http://ha", "admin").startswith("Could not read config entries")
+
+
+@pytest.mark.parametrize(
+    ("output", "code", "trees"),
+    [
+        ("synced aaa\nloaded bbb\n", 0, ("aaa", "bbb")),
+        ("synced aaa\n", 0, ("aaa", None)),
+        ("aaa\n", 0, ("aaa", "aaa")),
+        ("", 91, (None, None)),
+    ],
+)
+def test_deployed_trees_reads_both_formats(tmp_path, output, code, trees):
+    script = write(tmp_path, "status.sh", f"printf '{output}'\nexit {code}\n")
+    assert rig.deployed_trees(f"sh {script}") == trees
+
+
+def test_deployed_trees_stops_on_a_failing_status_command(tmp_path):
+    script = write(tmp_path, "status.sh", "echo boom >&2\nexit 2\n")
+    with pytest.raises(SystemExit, match="failed \\(2\\): boom"):
+        rig.deployed_trees(f"sh {script}")
+
+
+def fake_git(monkeypatch, *, dirty="", remote="abc refs/heads/b", remote_tree="tree1", deployed=("old", "old")):
     replies = {
         "rev-parse --abbrev-ref HEAD": "b",
         f"rev-parse HEAD:{rig.COMPONENT}": "tree1",
@@ -238,14 +313,16 @@ def fake_git(monkeypatch, *, dirty="", remote="abc refs/heads/b", remote_tree="t
         f"rev-parse --quiet --verify abc:{rig.COMPONENT}": remote_tree,
     }
     monkeypatch.setattr(rig, "git", lambda *args, check=True: replies[" ".join(args)])
-    monkeypatch.setattr(rig, "deployed_tree", lambda status_cmd: deployed)
+    monkeypatch.setattr(rig, "deployed_trees", lambda status_cmd: deployed)
 
 
 @pytest.mark.parametrize(
     ("kwargs", "needed", "blocker"),
     [
         ({}, True, None),
-        ({"deployed": "tree1"}, False, None),
+        ({"deployed": ("tree1", "tree1")}, False, None),
+        ({"deployed": ("tree1", "old")}, True, None),  # synced but never loaded: a failed restart
+        ({"deployed": (None, None)}, True, None),
         ({"dirty": " M x.py"}, True, "uncommitted changes"),
         ({"remote": ""}, True, "not on origin"),
         ({"remote_tree": "tree0"}, True, "does not match HEAD"),
@@ -602,3 +679,67 @@ def test_a_stopped_run_ends_on_one_line_not_a_traceback(capsys, error, line):
 
     assert rig.run_tests(stopped()) == 1
     assert capsys.readouterr().out == f"{line}\n"
+
+
+DEPLOY_ENV = {"RIG_SYNC_CMD": "sync", "RIG_RESTART_CMD": "restart", "HA_URL": "http://ha/", "HA_TOKEN": "tok"}
+
+
+def fake_deploy(monkeypatch, signals: int = 0, returncode: int = 0) -> list[str]:
+    """deploy.sh, receiving `signals` SIGTERMs as it runs, and wait_until_ready; returns what ran, in order."""
+    ran = []
+
+    def run(command, check, env, start_new_session):
+        assert start_new_session  # a terminal Ctrl-C must not reach it
+        for _ in range(signals):
+            os.kill(os.getpid(), signal.SIGTERM)
+        ran.append("deploy")
+        if returncode:
+            raise rig.subprocess.CalledProcessError(returncode, command)
+
+    monkeypatch.setattr(rig.subprocess, "run", run)
+    monkeypatch.setattr(rig, "wait_until_ready", lambda url, token, admin_token, timeout: ran.append(f"wait {timeout}"))
+    return ran
+
+
+def test_a_signal_mid_deploy_stops_the_run_once_ha_is_back(monkeypatch, capsys):
+    ran = fake_deploy(monkeypatch, signals=1)
+    before = signal.getsignal(signal.SIGTERM)
+    with pytest.raises(rig.Aborted, match="after the deploy"):
+        rig.deploy_and_wait(DEPLOY_ENV, "b")
+    assert ran == ["deploy", f"wait {rig.READY_TIMEOUT_S}"]
+    assert "Stopping once the deploy and HA's restart finish" in capsys.readouterr().out
+    assert signal.getsignal(signal.SIGTERM) is before
+
+
+def test_a_second_signal_mid_deploy_stops_at_once(monkeypatch):
+    ran = fake_deploy(monkeypatch, signals=2)
+    with pytest.raises(rig.Aborted, match="mid-deploy"):
+        rig.deploy_and_wait(DEPLOY_ENV, "b")
+    assert ran == []
+
+
+def test_a_failed_deploy_ends_on_one_line(monkeypatch):
+    fake_deploy(monkeypatch, returncode=3)
+    with pytest.raises(SystemExit, match=r"^Deploy failed \(exit 3\); HA may be mid-restart"):
+        rig.deploy_and_wait(DEPLOY_ENV, "b")
+
+
+def test_without_a_deploy_it_waits_briefly_and_a_signal_stops_at_once(monkeypatch):
+    ran = fake_deploy(monkeypatch)
+    rig.deploy_and_wait(DEPLOY_ENV, None)
+    assert ran == ["wait 15"]
+
+    def wait(url, token, admin_token, timeout):
+        os.kill(os.getpid(), signal.SIGTERM)
+        pytest.fail("not stopped")
+
+    monkeypatch.setattr(rig, "wait_until_ready", wait)
+    with pytest.raises(rig.Aborted, match="^Aborted.$"), rig.end_on_signals():
+        rig.deploy_and_wait(DEPLOY_ENV, None)
+
+
+def test_a_signal_before_the_tests_ends_the_run_on_one_line():
+    before = signal.getsignal(signal.SIGHUP)
+    with pytest.raises(rig.Aborted, match="^Aborted.$"), rig.end_on_signals():
+        os.kill(os.getpid(), signal.SIGHUP)
+    assert signal.getsignal(signal.SIGHUP) is before
