@@ -208,16 +208,38 @@ can show one, as Z2M exposes the features its members share.
 
 ### `get_attributes`
 
-One `<Component>.GetStatus` per target. A running flip-back timer is returned as `timer`, the shared row: what the
-timer turns the target to (`turns`), `ends_at` and `remaining_s`. The time left is the device's `timer_started_at`
-plus `timer_duration`, against Home Assistant's clock; both clocks are SNTP-synced, and the result is kept between
-0 and the duration, which bounds any skew. With no timer running there is no `timer` key, so a relay with none
-returns an empty entry.
+Reads each light live from the bulb, not from Z2M's or Home Assistant's state: Hue bulbs on Z2M don't report, so
+both can be stale. For each cluster the light has, Device Side publishes Z2M's generic read,
+`{"read": {"cluster", "attributes", "state_property": "device_side_read"}}`, to `zigbee2mqtt/<ieee>/set` and takes
+the answer Z2M publishes on the light's state topic:
 
-An `RGBCCT` bulb also returns `brightness` (the device's percent, as Hue's is), and, for the active mode only,
-`color_temp_kelvin` or `rgb_color` with `hs_color` and `xy_color` derived from it. The bulb keeps these while off,
-so they read then too. The same capabilities as `turn_on_for` are in scope; other light components are refused
-with `capability_not_tested`. A device that doesn't answer raises.
+- `genOnOff` (`onOff`, `onTime`): a running `turn_on_for` timer, as `timer` with `turns: off`. `onTime` is the
+  time the bulb has left, in tenths of a second.
+- `genLevelCtrl` (`currentLevel`), when the light dims: `brightness` in percent, as Hue's is.
+- `lightingColorCtrl`, when it has a color mode: `colorMode`, plus `colorTemperature` for `color_temp`, `currentX`
+  and `currentY` for `xy`, and `currentHue` and `currentSaturation` for `hs`. Only the active mode's color is
+  returned, `color_temp_kelvin` or `xy_color`/`hs_color` with the others derived from it. A read that asks for
+  one attribute the bulb lacks fails as a whole, so only the light's own color modes' attributes are asked for.
+
+Bulbs keep these while off, so they read then too. Each cluster is one Zigbee round trip, a quarter of a second
+or less, read one after another: up to three per light per call. A read the bulb doesn't answer raises: at once
+when Z2M logs the failure on `zigbee2mqtt/bridge/logging`, else after 5 s.
+
+**Z2M's `filtered_cache`.** Z2M deep-merges a read's answer into the device's cached state, and every message it
+publishes for the device carries that whole cache, so a cached answer would ride in every later message and look
+like a fresh one. Before the first read of a device, Device Side adds `device_side_read` to its per-device
+`filtered_cache` option, after any entries of yours, and logs it at info level. Z2M then publishes the answer
+once, in the read's own message, and never caches it. It checks Z2M's settings on every call, and if the option
+can't be set, the call raises rather than read. Removing the entry is harmless; it comes back at the next call.
+
+**Groups.** A group returns one entry, averaged the way the Hue integration averages a room: brightness, color
+temperature and color over the members that are on, or over all of them when every member is off. It has a
+`timer` only when every member that is on runs one, and then it is the one with the most time left. Members come
+from `zigbee2mqtt/bridge/groups` and are read one after another, so a group costs its members' reads. An
+unavailable member is left out, a member that doesn't answer fails the group, and a group with no members is
+skipped.
+
+Lights only, as for `turn_on_for`.
 
 ### Cancelling
 

@@ -246,6 +246,33 @@ tests:
     assert outcomes(result)["reads[switch_plug]"][0] is outcome
 
 
+@pytest.mark.parametrize(
+    ("row", "outcome"),
+    [
+        ({"xy_color": [0.301, 0.499]}, Outcome.PASS),
+        ({"xy_color": [0.4, 0.499]}, Outcome.FAIL),
+        ({"xy_color": [0.301]}, Outcome.FAIL),  # an index past the end reads as absent
+        ({"xy_color": "0.3"}, Outcome.FAIL),
+        ({}, Outcome.FAIL),
+    ],
+)
+async def test_a_dotted_index_reads_a_list_item(tmp_path, row, outcome):
+    ha = FakeHA({"light.lamp": {"state": "off"}}, lambda ha, action, data: {data["entity_id"]: row})
+    text = """
+action: get_attributes
+rig_seconds: 5
+tests:
+  - name: reads
+    roles: [light_color]
+    steps:
+      - call: {}
+      - expect_response: {attributes: {xy_color.0: {min: 0.29, max: 0.31}, xy_color.1: {min: 0.49, max: 0.51}}}
+"""
+    result = await run_one(ha, suite(tmp_path, text, "shelly"), inventory("shelly", light_color="light.lamp"))
+
+    assert outcomes(result)["reads[light_color]"][0] is outcome
+
+
 @pytest.mark.parametrize(("row", "outcome"), [({}, Outcome.PASS), ({"timer": {"turns": "off"}}, Outcome.FAIL)])
 async def test_a_null_expectation_asserts_the_key_is_absent(tmp_path, row, outcome):
     ha = FakeHA({"switch.plug": {"state": "off"}}, lambda ha, action, data: {data["entity_id"]: row})

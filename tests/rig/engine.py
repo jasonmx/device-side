@@ -724,12 +724,15 @@ def _value(state: dict, name: str) -> Any:
 
 
 def _lookup(row: dict, name: str) -> Any:
-    """A response attribute by dotted name (`timer.turns`); None where any part is absent."""
+    """A response attribute by dotted name (`timer.turns`, `xy_color.0`); None where any part is absent."""
     value: Any = row
     for part in name.split("."):
-        if not isinstance(value, dict):
+        if isinstance(value, list) and part.isdigit():
+            value = value[int(part)] if int(part) < len(value) else None
+        elif isinstance(value, dict):
+            value = value.get(part)
+        else:
             return None
-        value = value.get(part)
     return value
 
 
