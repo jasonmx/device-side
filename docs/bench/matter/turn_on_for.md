@@ -4,12 +4,9 @@
 |---|---|
 | Result | pass |
 | Date | 2026-10-27 |
-| Source | rig run (`scripts/rig.py`), commit `be23bb7` |
-| Fingerprint | `fcd9afa933b44bba` (`integrations/matter/turn_on_for.py`) |
+| Source | rig run (`scripts/rig.py`), commit `c149390` |
 | Home Assistant | 2026.10.2 |
 | Device | WiZ Smart Plug (`8979`), firmware `v1.4` |
-| Capabilities | every capability the adapter addresses |
-| Fields | none |
 
 ## Tests
 
@@ -18,5 +15,5 @@
 | `on_then_off[switch_plug]` | `switch` (switch_plug) | pass |
 | `on_then_off[light_onoff]` | light_onoff: none in inventory | skipped |
 | `on_then_off[light_wrapped]` | light_wrapped: none in inventory | skipped |
-| `refuses_brightness_on_a_wrapper[light_wrapped]` | light_wrapped: none in inventory | skipped |
+| `drops_brightness_on_a_wrapper[light_wrapped]` | light_wrapped: none in inventory | skipped |
 | `bulb_on_then_off[light_dimmable]` | light_dimmable: none in inventory | skipped |
