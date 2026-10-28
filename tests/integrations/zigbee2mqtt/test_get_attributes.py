@@ -189,7 +189,7 @@ async def test_unreadable_state_is_not_the_reply(hass, broker):
     assert await call(hass, "get_attributes", {"entity_id": "light.lamp"}) == {"light.lamp": ROW}
 
 
-async def test_a_retained_state_is_not_the_reply(hass, broker, monkeypatch):
+async def test_a_retained_state_is_not_the_reply(hass, broker):
     bulb(hass, broker)
     broker.retained["zigbee2mqtt/lamp"] = {KEY: {"onOff": 0, "onTime": 0}}
     broker.devices.clear()  # Z2M never answers, so only the retained message could
@@ -307,6 +307,18 @@ async def test_group_leaves_out_unavailable_members_and_those_ha_lacks(hass, bro
 
     assert response == {"light.room": ROW | {"color_temp_kelvin": 4000}}
     assert {topic for topic, _ in broker.reads()} == {"zigbee2mqtt/0x01/set"}
+
+
+async def test_a_member_given_the_key_is_logged_when_the_next_one_fails(hass, broker, caplog):
+    group(hass, broker, one={}, two={})
+    broker.refused = {"0x02"}
+
+    with caplog.at_level(logging.INFO, logger=LOGGER), pytest.raises(HomeAssistantError):
+        await call(hass, "get_attributes", {"entity_id": "light.room"})
+
+    assert f"Added {KEY} to Zigbee2MQTT's filtered_cache for light.one" in caplog.text
+    assert "filtered_cache for light.two" not in caplog.text
+    assert broker.reads() == []
 
 
 async def test_member_failure_fails_the_group(hass, broker):

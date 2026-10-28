@@ -49,14 +49,14 @@ class Z2MGetAttributes(Adapter[Request]):
     async def execute(self, hass: HomeAssistant, request: Request, targets: list[Target]) -> list[EntityResult]:
         async def read(target: Target) -> EntityResult:
             if not target.is_group:
-                async with reader(hass, [target]) as device:
-                    return self.result(target, Status.CONFIRMED, data=zcl_row(*await _read(device, target)))
+                async with reader(hass, [target]) as reading:
+                    return self.result(target, Status.CONFIRMED, data=zcl_row(*await _read(reading, target)))
             members = _members(hass, target, await group_members(hass, group_id(target)))
             if not members:
                 return self.result(target, Status.UNSUPPORTED, detail=EMPTY_GROUP)
             # One after another inside the group's own task: gathering them would nest the concurrency limits.
-            async with reader(hass, members) as device:
-                reads = [await _read(device, member) for member in members]
+            async with reader(hass, members) as reading:
+                reads = [await _read(reading, member) for member in members]
             lit = [(attributes, now) for attributes, now in reads if attributes.get("onOff")]
             return self.result(
                 target, Status.CONFIRMED, data=average([zcl_row(*one) for one in lit or reads])
@@ -65,9 +65,9 @@ class Z2MGetAttributes(Adapter[Request]):
         return await self.gather(hass, targets, read)
 
 
-async def _read(device: Reader, target: Target) -> tuple[dict, datetime]:
+async def _read(reading: Reader, target: Target) -> tuple[dict, datetime]:
     """The target's attributes, and when they were read, which a timer's end counts from."""
-    attributes = await device.read(target)
+    attributes = await reading.read(target)
     return attributes, dt_util.utcnow()
 
 

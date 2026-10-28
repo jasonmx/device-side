@@ -28,7 +28,7 @@ If you're OK with that, let's dive in.
 
 ¹ Available now in [Hue Smooth Dimming](https://github.com/jasonmx/hue-smooth-dimming).
 
-Details per integration are in [docs/integrations.md](docs/integrations.md), including the Zigbee2MQTT option Device Side turns on for Hue bulbs timed with a color. Shelly Gen 1, Hue Bridge v1, and Zigbee plugs and switches are unsupported.
+Details per integration are in [docs/integrations.md](docs/integrations.md), including the Zigbee2MQTT options Device Side sets on your devices. Shelly Gen 1, Hue Bridge v1, and Zigbee plugs and switches are unsupported.
 
 During a Hue fade, Home Assistant shows the brightness Device Side predicts, rather than the end value the bridge reports as the fade starts. This is on by default; turn it off in Device Side's options.
 

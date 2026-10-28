@@ -29,12 +29,17 @@ async def group_members(hass: HomeAssistant, group: str) -> list[str]:
 
 
 async def ensure_options(
-    hass: HomeAssistant, kind: Literal["device", "group"], z2m_ids: list[str], wanted: Callable[[dict], dict]
-) -> list[str]:
+    hass: HomeAssistant,
+    kind: Literal["device", "group"],
+    z2m_ids: list[str],
+    wanted: Callable[[dict], dict],
+    changed: Callable[[str], None],
+) -> None:
     """Set each entity's options to what `wanted` returns from its current ones, where that is anything.
 
-    Reads Z2M's settings on every call rather than caching them, so a user who changes an option is seen. Returns
-    the IDs whose options were set; raises when bridge/info or a reply doesn't come, or a reply is an error.
+    Reads Z2M's settings on every call rather than caching them, so a user who changes an option is seen. Calls
+    `changed` with each ID as Z2M confirms its options, so one set before a later failure is still reported; raises
+    when bridge/info or a reply doesn't come, or a reply is an error.
     """
     section = f"{kind}s"
     pending: dict[str, asyncio.Future[dict]] = {}
@@ -56,7 +61,6 @@ async def ensure_options(
         await mqtt.async_subscribe(hass, bridge_topic(f"response/{kind}/options"), on_reply),
         await mqtt.async_subscribe(hass, bridge_topic("info"), first_payload(info)),
     ]
-    changed = []
     try:
         settings = json.loads(await wait(info, _RETAINED_TIMEOUT_S, "no bridge/info from Zigbee2MQTT"))
         for z2m_id in z2m_ids:
@@ -76,11 +80,10 @@ async def ensure_options(
             answer = await wait(pending[transaction], _REPLY_TIMEOUT_S, "no reply from Zigbee2MQTT")
             if answer.get("status") != "ok":
                 raise RuntimeError(answer.get("error") or f"status {answer.get('status')}")
-            changed.append(z2m_id)
+            changed(z2m_id)
     finally:
         for unsubscribe in unsubscribes:
             unsubscribe()
-    return changed
 
 
 def first_payload(future: asyncio.Future[str]) -> Callable[[mqtt.ReceiveMessage], None]:

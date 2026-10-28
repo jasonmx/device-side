@@ -89,6 +89,7 @@ class Broker:
         self.topics: list[str] = []  # every topic ever subscribed
         self.published: list[dict] = []
         self.reply: dict | str | None = {"status": "ok"}  # merged with the transaction; a str is sent as is
+        self.refused: set[str] = set()  # IDs whose options requests Z2M answers with an error
         # Each device's attributes by cluster, keyed by IEEE, with the friendly name its state is published under.
         self.devices: dict[str, tuple[str, dict[str, dict]]] = {}
         self.read_errors: dict[tuple[str, str], str] = {}  # (IEEE, cluster) -> the status Z2M logs for a failed read
@@ -143,7 +144,8 @@ class Broker:
             if isinstance(self.reply, str):
                 self.deliver(response, self.reply)
             else:
-                self.deliver(response, json.dumps({**self.reply, "transaction": payload["transaction"]}))
+                reply = {"status": "error", "error": "refused"} if payload.get("id") in self.refused else self.reply
+                self.deliver(response, json.dumps({**reply, "transaction": payload["transaction"]}))
 
     def _read(self, ieee: str, read: dict) -> None:
         """Z2M's answer to a generic read: the reply in the device's state, or a line on its log."""

@@ -48,11 +48,13 @@ async def _ensure(hass: HomeAssistant, target: Target) -> None:
     else:
         return
 
-    if await ensure_options(hass, kind, [z2m_id], lambda current: {} if current.get(OPTION) else {OPTION: True}):
+    def turned_on(_z2m_id: str) -> None:
         _LOGGER.info(
             "Turned on Zigbee2MQTT's %s for %s, so a timer with a color lights in that color from off",
             OPTION, target.entity_id,
         )
+
+    await ensure_options(hass, kind, [z2m_id], lambda current: {} if current.get(OPTION) else {OPTION: True}, turned_on)
 
 
 async def _has_hue_member(hass: HomeAssistant, group: str) -> bool:

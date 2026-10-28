@@ -271,6 +271,10 @@ firmware. Most Z2M-supported lights cancel the timer on any state change.
   commanded.
 - **Zigbee traffic.** Each call adds up to three Zigbee reads per target, spread over the timer.
   A group read is one groupcast that every member answers.
+- **Large groups on a busy mesh.** `get_attributes` reads a group's members one after another, up to three
+  round trips each, and a call has 30 s for all its targets. A healthy read takes a quarter of a second or less,
+  but a group of many bulbs on a slow mesh can run out the 30 s, and then every target in that call fails with
+  `timeout`. Read a large group's members by area or label instead, which reads them four at a time.
 - **No confirmation.** Z2M's MQTT interface does not synchronously confirm the timer started.
   The result is always `sent`, never `confirmed`, regardless of whether the device accepted the
   command.

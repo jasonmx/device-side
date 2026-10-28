@@ -120,11 +120,14 @@ async def reader(hass: HomeAssistant, devices: list[Target]) -> AsyncIterator[Re
     unsubscribe = await mqtt.async_subscribe(hass, bridge_topic("logging"), reading._on_log)
     try:
         by_address = {z2m_address(device.device): device for device in devices}
-        for address in await ensure_options(hass, "device", list(by_address), _with_read_key):
+
+        def added(address: str) -> None:
             _LOGGER.info(
                 "Added %s to Zigbee2MQTT's %s for %s, so get_attributes reads it live",
                 READ_KEY, _FILTERED_CACHE, by_address[address].entity_id,
             )
+
+        await ensure_options(hass, "device", list(by_address), _with_read_key, added)
         yield reading
     finally:
         unsubscribe()
