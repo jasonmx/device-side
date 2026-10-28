@@ -38,7 +38,11 @@ Slice 13 detail lives in [`2026-10-27-zigbee-parity-timer-state.md`](docs/plans/
 The A60 (the rig's only color bulb) starts on Z2M and moves twice: to the Hue bridge, then to ZHA. Each
 integration's code freezes before its A60 run.
 
-- [ ] **13i** Z2M `move`/`stop`, with the hue/saturation stop probe on the A60. Moves `Transition` into `core/`.
+Three lanes run in parallel, each in order: Z2M (`Transition` PR, 13i, 13j, its A60 run), ZHA (13g, then 13f
+once `Transition` has landed), and Hue (from the A60 move on). The rig lock and the bulb moves are shared.
+
+- [ ] **`Transition` to core**: refactor PR moving `hue/transition_cache.py` into `core/`. Unblocks 13i and 13f.
+- [ ] **13i** Z2M `move`/`stop`, with the hue/saturation stop probe on the A60.
 - [ ] **13j** Z2M `set_attributes` while off. Z2M code freezes.
 - [ ] **Z2M A60 run** (13k step 1): full Z2M suite, bulb in place. Clears `experimental` on the Z2M adapters it
   proves.
@@ -47,8 +51,8 @@ integration's code freezes before its A60 run.
   ([`2026-10-27-hue-move-color.md`](docs/plans/2026-10-27-hue-move-color.md)).
 - [ ] **Hue A60 run** (13k step 2): `set_attributes` color and gamut clamp, 7c saturation, with no `light_color`
   skips. Hue code freezes. Clears `experimental` on the Hue adapters it proves.
-- [ ] **13f** ZHA `move`/`stop`
-- [ ] **13g** ZHA `set_attributes` while off. ZHA code freezes.
+- [ ] **13g** ZHA `set_attributes` while off. Needs no `Transition`, so it can start now.
+- [ ] **13f** ZHA `move`/`stop`, after the `Transition` PR. ZHA code freezes.
 - [ ] **Move the A60 to ZHA.**
 - [ ] **ZHA A60 run** (13k step 3): ZHA color suites. Clears `experimental` on the ZHA adapters it proves.
 - [ ] **9d** Rig coverage sweep for the non-color scope (plan in /plan first). 13k covers the color part.
