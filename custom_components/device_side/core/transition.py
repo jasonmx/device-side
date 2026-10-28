@@ -19,7 +19,6 @@ from homeassistant.core import HomeAssistant
 from .runtime import get_runtime
 
 BRIGHTNESS = "brightness"  # in percent
-COLOR_TEMP = "color_temp"  # in mirek
 SATURATION = "saturation"  # in percent
 
 

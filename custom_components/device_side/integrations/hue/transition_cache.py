@@ -16,8 +16,6 @@ from ...core import transition
 API_SETTLE_SECONDS = 15
 # The dimmest step a Hue light makes (1/254), in percent.
 MIN_BRIGHTNESS_STEP = 0.4
-# The smallest color temperature step the bridge takes, in mirek.
-MIN_MIREK_STEP = 1
 
 
 class HueTransitionCache(transition.TransitionCache):

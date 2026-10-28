@@ -2,13 +2,13 @@
 
 A report key names one value in a light's or grouped_light's event ("on", "brightness"). A write of an attribute makes
 the bridge report the keys that attribute owns, and only those: a brightness move reports on and brightness, never a
-color temperature, and a color temperature move only mirek (Tested behavior in docs/integrations.md).
+color temperature (Tested behavior in docs/integrations.md).
 """
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
-from ...core.transition import BRIGHTNESS, COLOR_TEMP
+from ...core.transition import BRIGHTNESS
 
 # Where each report key sits in an event, as (object, field): every key an attribute owns or could own.
 REPORT_KEYS: dict[str, tuple[str, str]] = {
@@ -34,7 +34,6 @@ def _brightness(value: float) -> dict[str, float | bool]:
 
 ATTRIBUTES: dict[str, Attribute] = {
     BRIGHTNESS: Attribute(frozenset({"on", BRIGHTNESS}), _brightness),
-    COLOR_TEMP: Attribute(frozenset({"mirek"}), None),
 }
 
 
