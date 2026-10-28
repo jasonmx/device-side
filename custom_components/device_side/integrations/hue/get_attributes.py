@@ -9,11 +9,12 @@ from homeassistant.util.color import color_temperature_mired_to_kelvin
 
 from .bridge import bridge_api, resource_id
 from .move import light_mirek, lit
-from .transition_cache import BRIGHTNESS, COLOR_TEMP, TransitionCache, transition_cache
+from .transition_cache import transition_cache
 from ...core.adapter import Adapter
 from ...core.color import xy_row
 from ...core.models import EntityResult, Request, Status, Target
 from ...core.scope import AdapterScope
+from ...core.transition import BRIGHTNESS, COLOR_TEMP, TransitionCache
 
 if TYPE_CHECKING:
     from aiohue.v2.models.light import Light

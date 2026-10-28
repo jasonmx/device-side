@@ -310,6 +310,7 @@ custom_components/device_side/
     dispatcher.py        parse, extract, expand, resolve, run adapters, merge, raise rule, response
     actions.py           register one HA service per Action; _call_if_loaded gate (hue_dimmer pattern)
     runtime.py           DeviceSideData in hass.data[DOMAIN]: registry, dispatcher, semaphores, integration_state
+    transition.py        TransitionCache: a move's predicted value, one cache per integration with its settle window
   actions/
     __init__.py          discover() -> actions sorted by module name
     turn_on_for.py  turn_off_for.py                         (COMMAND)

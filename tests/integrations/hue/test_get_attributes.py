@@ -7,7 +7,8 @@ import pytest
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util.color import color_xy_to_hs, color_xy_to_RGB
 
-from custom_components.device_side.integrations.hue.transition_cache import COLOR_TEMP, transition_cache
+from custom_components.device_side.core.transition import COLOR_TEMP
+from custom_components.device_side.integrations.hue.transition_cache import transition_cache
 
 from ...conftest import call, refusal
 from ...fixtures.hue import add_hue_entity, add_hue_group, hue_entry

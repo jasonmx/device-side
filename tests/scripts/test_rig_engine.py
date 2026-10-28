@@ -1106,7 +1106,11 @@ async def test_expect_z2m_option_fails_when_the_option_stays_off(tmp_path):
 
 
 async def test_z2m_option_steps_do_nothing_in_another_integrations_suite(tmp_path):
-    ha = FakeHA({"light.bulb": {}}, timer_on)
+    # ZHA has get_attributes and set_attributes, so the snapshot reads the off light first; it stores nothing.
+    def respond(ha, action, data):
+        return {} if action == "get_attributes" else timer_on(ha, action, data)
+
+    ha = FakeHA({"light.bulb": {}}, respond)
     result = await run_one(ha, suite(tmp_path, Z2M_COLOR, "zha"), inventory("zha", light_color="light.bulb"), admin=ha)
     assert outcomes(result) == {"color_then_off[light_color]": (Outcome.PASS, "")}
 
