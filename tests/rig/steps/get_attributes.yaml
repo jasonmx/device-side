@@ -7,6 +7,8 @@ tests:
     roles: [light_ct, group]
     steps:
       - set: {state: on, brightness: 102, color_temp_kelvin: 2700}
+      # set waits only for on. Z2M sends color temperature after on, and a bulb drops it if the off lands first.
+      - wait: 2
       - set: {state: off}
       - call: {}
       - expect_response:
@@ -38,7 +40,7 @@ tests:
     only: [zigbee2mqtt]
     steps:
       - set: {state: on, xy_color: [0.3, 0.5]}
-      - wait: 2  # set waits only for on, which a light already on shows at once
+      - wait: 2  # as in reads_while_off
       - set: {state: off}
       - call: {}
       - expect_response:
