@@ -1192,10 +1192,16 @@ class _CaseRun:
         if source == "ha":
             state = await self.ha.get_state(entity_id)
             return state["attributes"].get(attribute) if state else None
-        response = await self.ha.call_service(
-            "device_side", "get_attributes", {"entity_id": entity_id}, return_response=True
+        response = (
+            await self.ha.call_service("device_side", "get_attributes", {"entity_id": entity_id}, return_response=True)
+            or {}
         )
-        return ((response or {}).get(entity_id) or {}).get(attribute)
+        if entity_id in response:
+            return response[entity_id].get(attribute)
+        # A group expanded into its members (ZHA) answers per member: the mean of those that have the attribute, as HA
+        # averages a group's lit lights.
+        values = [value for read in response.values() if isinstance(value := read.get(attribute), int | float)]
+        return sum(values) / len(values) if values else None
 
     async def _do(self, instruction: str, _following: str | None) -> None:
         await self.answer(f"    {instruction} Press Enter when done... ")
