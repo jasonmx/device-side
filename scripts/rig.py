@@ -17,6 +17,7 @@ journaled first (next to the lock), so whatever a killed run leaves changed, the
 Usage: scripts/rig.py [--dry-run] [--no-deploy] [--unattended] [--integration KEY ...]
                       [--action NAME ...] [-k TEXT]
        scripts/rig.py --recover
+       scripts/rig.py --wait-free
 """
 
 import argparse
@@ -81,6 +82,7 @@ class Aborted(Exception):
 
 @dataclass(slots=True)
 class Deploy:
+    commit: str  # HEAD at the plan, whose tree local_tree is
     local_tree: str
     synced_tree: str | None  # on disk in HA's config
     loaded_tree: str | None  # what HA last restarted onto
@@ -162,9 +164,11 @@ def deploy_state(status_cmd: str) -> Deploy:
     deploy needs the change pushed.
     """
     branch = git("rev-parse", "--abbrev-ref", "HEAD")
+    commit = git("rev-parse", "HEAD")
     synced, loaded = deployed_trees(status_cmd)
     state = Deploy(
-        local_tree=git("rev-parse", f"HEAD:{COMPONENT}"),
+        commit=commit,
+        local_tree=git("rev-parse", f"{commit}:{COMPONENT}"),
         synced_tree=synced,
         loaded_tree=loaded,
         branch=branch,
@@ -226,6 +230,23 @@ def lock_holder(entry: str) -> str:
     return f'{held_by}, Claude Code session "{name}" (SendMessage reaches it)'
 
 
+def wait_for_lock(handle: TextIO, operation: int, out: Callable[[str], None]) -> bool:
+    """Take `operation` (LOCK_EX or LOCK_SH) on `handle`, polling while a run holds the lock and saying who holds it,
+    and again whenever that changes. Returns whether it had to wait."""
+    waiting_on = None
+    while True:
+        try:
+            fcntl.flock(handle, operation | fcntl.LOCK_NB)
+            return waiting_on is not None
+        except BlockingIOError:
+            handle.seek(0)
+            held_by = lock_holder(handle.read())
+            if held_by != waiting_on:
+                out(f"Another rig run holds the lock: {held_by}. Waiting for it to finish (Ctrl-C to give up)...")
+                waiting_on = held_by
+            time.sleep(LOCK_POLL_S)
+
+
 def lock_rig(path: Path, holder: str, out: Callable[[str], None] = print) -> TextIO:
     """Hold an exclusive lock on `path` for the process's life, waiting while another run has it.
 
@@ -235,24 +256,23 @@ def lock_rig(path: Path, holder: str, out: Callable[[str], None] = print) -> Tex
     release goes next.
     """
     handle = path.open("a+")
-    waiting_on = None
-    while True:
-        try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            break
-        except BlockingIOError:
-            handle.seek(0)
-            held_by = lock_holder(handle.read())
-            if held_by != waiting_on:
-                out(f"Another rig run holds the lock: {held_by}. Waiting for it to finish (Ctrl-C to give up)...")
-                waiting_on = held_by
-            time.sleep(LOCK_POLL_S)
-    if waiting_on is not None:
+    if wait_for_lock(handle, fcntl.LOCK_EX, out):
         out("Rig lock acquired.")
     handle.truncate(0)
     handle.write(lock_entry(holder))
     handle.flush()
     return handle
+
+
+def wait_free(path: Path, out: Callable[[str], None] = print) -> None:
+    """Return once no run holds the lock on `path`, without taking it: a shared lock, dropped at once.
+
+    It says only that the rig was free at that moment; another run may take the lock before the caller's own run does.
+    """
+    with path.open("a+") as handle:
+        wait_for_lock(handle, fcntl.LOCK_SH, out)
+        fcntl.flock(handle, fcntl.LOCK_UN)
+    out("The rig lock is free.")
 
 
 def gate(prompt: Callable[[str], str] = input) -> bool:
@@ -359,7 +379,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("-k", dest="keyword", help="run only test cases whose id contains this text")
     parser.add_argument("--unattended", action="store_true", help="skip observed tests, reporting them not observed")
     parser.add_argument("--recover", action="store_true", help="put back what an aborted run left changed, then stop")
+    parser.add_argument(
+        "--wait-free",
+        action="store_true",
+        help="wait until no rig run holds the lock, without taking it; another run may take it first",
+    )
     args = parser.parse_args(argv)
+    if args.wait_free:
+        wait_free(common_dir() / LOCK_NAME)
+        return 0
 
     _held, journal = hold_rig(args.dry_run)  # the lock is held until exit
     try:
@@ -398,7 +426,18 @@ def run_held(args: argparse.Namespace, journal: Journal) -> int:
         return 1
 
     deploy_and_wait(env, deploy.branch if deploying else None)
-    return run_tests(run_rig(env, suites, inventory, registry, args.keyword, args.unattended, journal))
+    commit = tested_commit(env.get("RIG_STATUS_CMD", ""), deploy, deploying)
+    return run_tests(run_rig(env, suites, inventory, registry, args.keyword, args.unattended, commit, journal))
+
+
+def tested_commit(status_cmd: str, deploy: Deploy, deploying: bool) -> str | None:
+    """The commit whose integration tree HA loaded for the tests, or None if none can be named: under --no-deploy HA
+    runs whatever it last loaded, and a deploy may install a different tip if origin moved past the plan (trusted when
+    HA can't say what it loaded). Read before the tests, since HEAD moves when the session commits mid-run."""
+    if not deploying:
+        return None if deploy.needed else deploy.commit
+    loaded = deployed_trees(status_cmd)[1]
+    return deploy.commit if loaded in (None, deploy.local_tree) else None
 
 
 def deploy_and_wait(env: dict, branch: str | None) -> None:
@@ -465,9 +504,14 @@ def handling_signals(handler: Callable[[int, object], None]) -> Iterator[None]:
 def hold_rig(dry_run: bool) -> tuple[TextIO | None, Journal]:
     """The rig lock, unless it is a dry run, and the journal, read once the lock is held: whoever last held it has
     exited, so the journal is what it left."""
-    common_dir = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir"))
-    lock = None if dry_run else lock_rig(common_dir / LOCK_NAME, git("rev-parse", "--abbrev-ref", "HEAD"))
-    return lock, Journal(common_dir / JOURNAL_NAME)
+    shared = common_dir()
+    lock = None if dry_run else lock_rig(shared / LOCK_NAME, git("rev-parse", "--abbrev-ref", "HEAD"))
+    return lock, Journal(shared / JOURNAL_NAME)
+
+
+def common_dir() -> Path:
+    """The git common dir, shared by every worktree, where the lock and the journal live."""
+    return Path(git("rev-parse", "--path-format=absolute", "--git-common-dir"))
 
 
 def run_tests(rig_run: Coroutine[Any, Any, int]) -> int:
@@ -539,7 +583,7 @@ def print_plan(
     if deploying:
         print(f"Deploy: sync {deploy.branch}, then restart Home Assistant")
     elif deploy.needed:
-        print("Deploy: skipped (--no-deploy); the tests exercise the deployed tree, not this checkout")
+        print("Deploy: skipped (--no-deploy); tests run the deployed tree, not this checkout, and write no record")
     else:
         print("Deploy: not needed, no restart")
     seconds = estimate(suites, registry, deploying)
@@ -553,9 +597,11 @@ async def run_rig(
     registry: AdapterRegistry,
     keyword: str | None,
     unattended: bool,
+    commit: str | None,
     journal: Journal | None = None,
 ) -> int:
-    """Run the step files, then write a bench record for each adapter whose every test passed."""
+    """Run the step files, then write a bench record for each adapter whose every test passed, citing `commit`; with
+    no commit, none: a record nobody can trace to a commit proves nothing."""
     cancel_on_signals()
     ha, admin = await connect(env)
     bridge = None
@@ -577,10 +623,13 @@ async def run_rig(
         )
         stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         print(f"\nReport: {write_report(result, REPORT_DIR, f'rig run {stamp}')}")
-        source = f"rig run (`scripts/rig.py`), commit `{git('rev-parse', '--short', 'HEAD')}`"
-        today = datetime.date.today().isoformat()
-        for path in await write_records(result, ha, registry, BENCH_DIR, today, source):
-            print(f"Wrote {path.relative_to(REPO)}; review the diff before committing it.")
+        if commit is None:
+            print("No bench records: no commit names the tree HA ran (--no-deploy, or origin moved before the deploy).")
+        else:
+            source = f"rig run (`scripts/rig.py`), commit `{git('rev-parse', '--short', commit)}`"
+            today = datetime.date.today().isoformat()
+            for path in await write_records(result, ha, registry, BENCH_DIR, today, source):
+                print(f"Wrote {path.relative_to(REPO)}; review the diff before committing it.")
     finally:
         await resume(ha, paused, journal)
         if bridge:

@@ -10,7 +10,7 @@ from homeassistant.exceptions import Unauthorized
 from homeassistant.helpers import entity_registry as er
 
 from . import zcl
-from .addressing import Address, address, group_id
+from .addressing import Address, address, group_id, unsupported_reason
 from ...actions.turn_on_for import TurnOnForRequest
 from ...core.adapter import Adapter
 from ...core.models import EntityResult, Status, Target
@@ -61,11 +61,7 @@ class ZHATurnOnFor(Adapter[TurnOnForRequest]):
     )
 
     def supports(self, hass: HomeAssistant, request: TurnOnForRequest, target: Target) -> str | None:
-        if (reason := super().supports(hass, request, target)) is not None:
-            return reason
-        if address(target.entry.unique_id) is None:
-            return "not_addressable"
-        return None
+        return super().supports(hass, request, target) or unsupported_reason(target)
 
     async def execute(
         self, hass: HomeAssistant, request: TurnOnForRequest, targets: list[Target]

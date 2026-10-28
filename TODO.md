@@ -28,6 +28,8 @@ v0.1.0 is the next release.
 | 13a | Zigbee probe findings | #98, #100 |
 | 13b | `get_attributes` contract: switches and timer row | #101 |
 | 13c | Shelly `get_attributes` | #105 |
+| 13d | Matter `get_attributes` | #112 |
+| 13e | ZHA `get_attributes` (experimental until the ZHA A60 run) | #114 |
 
 ## To go, in order
 
@@ -35,7 +37,6 @@ Slice 13 detail lives in [`2026-10-27-zigbee-parity-timer-state.md`](docs/plans/
 The A60 (the rig's only color bulb) starts on Z2M and moves twice: to the Hue bridge, then to ZHA. Each
 integration's code freezes before its A60 run.
 
-- [ ] **13d** Matter `get_attributes` (plug). Needs no bulb, so it can land any time.
 - [ ] **13h** Z2M `get_attributes`
 - [ ] **13i** Z2M `move`/`stop`, with the hue/saturation stop probe on the A60. Moves `Transition` into `core/`.
 - [ ] **13j** Z2M `set_attributes` while off. Z2M code freezes.
@@ -46,7 +47,6 @@ integration's code freezes before its A60 run.
   ([`2026-10-27-hue-move-color.md`](docs/plans/2026-10-27-hue-move-color.md)).
 - [ ] **Hue A60 run** (13k step 2): `set_attributes` color and gamut clamp, 7c saturation, with no `light_color`
   skips. Hue code freezes. Clears `experimental` on the Hue adapters it proves.
-- [ ] **13e** ZHA `get_attributes` (built alongside the Hue steps)
 - [ ] **13f** ZHA `move`/`stop`
 - [ ] **13g** ZHA `set_attributes` while off. ZHA code freezes.
 - [ ] **Move the A60 to ZHA.**

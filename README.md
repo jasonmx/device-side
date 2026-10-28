@@ -21,7 +21,7 @@ If you're OK with that, let's dive in.
 | On With Timed Off      | ✅ switches, color bulbs<br>🙋 other lights |          |   | ✅ switches<br>🙋 lights | ❌ |
 | Off With Timed On      | ✅ switches, color bulbs<br>🙋 other lights |     ❌      | ❌  |   ❌   | ❌ |
 | Smooth Dimming         |                                            |           |   |      | ✅¹ |
-| Read Timer and Color   | ✅ switches, color bulbs<br>🙋 other lights |           |   |      |     |
+| Read Timer and Color   | ✅ switches, color bulbs<br>🙋 other lights |           |   | ✅ switches<br>🙋 lights |     |
 | Set Without Turning On |                                            |           |   |      | ✅¹ |
 
 ✅ Stable · 🙋 Ready for release once a [volunteer tests it](CONTRIBUTING.md) · ❌ Appears not possible

@@ -307,7 +307,8 @@ def test_deployed_trees_stops_on_a_failing_status_command(tmp_path):
 def fake_git(monkeypatch, *, dirty="", remote="abc refs/heads/b", remote_tree="tree1", deployed=("old", "old")):
     replies = {
         "rev-parse --abbrev-ref HEAD": "b",
-        f"rev-parse HEAD:{rig.COMPONENT}": "tree1",
+        "rev-parse HEAD": "c1",
+        f"rev-parse c1:{rig.COMPONENT}": "tree1",
         f"status --porcelain -- {rig.COMPONENT}": dirty,
         "ls-remote origin refs/heads/b": remote,
         f"rev-parse --quiet --verify abc:{rig.COMPONENT}": remote_tree,
@@ -331,9 +332,32 @@ def fake_git(monkeypatch, *, dirty="", remote="abc refs/heads/b", remote_tree="t
 def test_deploy_state(monkeypatch, kwargs, needed, blocker):
     fake_git(monkeypatch, **kwargs)
     state = rig.deploy_state("ssh myhost status")
+    assert (state.commit, state.local_tree) == ("c1", "tree1")
     assert state.needed is needed
     assert (state.blocker is None) if blocker is None else (blocker in state.blocker)
 
+
+
+@pytest.mark.parametrize(
+    ("deployed", "deploying", "loaded_after", "commit"),
+    [
+        (("tree1", "tree1"), False, None, "c1"),  # HA already runs this checkout
+        (("old", "old"), False, None, None),  # --no-deploy: HA runs another tree
+        (("old", "old"), True, "tree1", "c1"),
+        (("old", "old"), True, "tree2", None),  # origin moved between the plan and the deploy
+        (("old", "old"), True, None, "c1"),  # the status command can't say what HA loaded
+    ],
+)
+def test_tested_commit_names_the_tree_ha_loaded(monkeypatch, deployed, deploying, loaded_after, commit):
+    fake_git(monkeypatch, deployed=deployed)
+    deploy = rig.deploy_state("ssh myhost status")
+    monkeypatch.setattr(rig, "deployed_trees", lambda status_cmd: (loaded_after, loaded_after))
+    assert rig.tested_commit("ssh myhost status", deploy, deploying) == commit
+
+
+def test_tested_commit_trusts_a_deploy_without_a_status_command(monkeypatch):
+    fake_git(monkeypatch, deployed=(None, None))
+    assert rig.tested_commit("", rig.deploy_state(""), deploying=True) == "c1"
 
 def run_git(*args: str) -> None:
     rig.subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", *args],
@@ -448,6 +472,42 @@ def test_an_uncontested_lock_says_nothing(tmp_path):
     printed: list[str] = []
     rig.lock_rig(tmp_path / rig.LOCK_NAME, "wt/first", out=printed.append).close()
     assert printed == []
+
+
+def test_wait_free_returns_at_once_when_no_run_holds_the_lock(tmp_path, monkeypatch):
+    def no_sleep(_seconds):
+        raise AssertionError("wait_free polled a free lock")
+
+    monkeypatch.setattr(rig.time, "sleep", no_sleep)
+    printed: list[str] = []
+    rig.wait_free(tmp_path / rig.LOCK_NAME, out=printed.append)
+    assert printed == ["The rig lock is free."]
+
+
+def test_wait_free_names_the_holder_and_returns_once_it_releases_without_taking_the_lock(tmp_path, monkeypatch):
+    path = tmp_path / rig.LOCK_NAME
+    held = rig.lock_rig(path, "wt/first")
+    printed: list[str] = []
+    monkeypatch.setattr(rig.time, "sleep", lambda _seconds: held.close())
+
+    rig.wait_free(path, out=printed.append)
+
+    assert [line.split(" (pid")[0] for line in printed] == [
+        "Another rig run holds the lock: wt/first",
+        "The rig lock is free.",
+    ]
+    rig.lock_rig(path, "wt/second", out=printed.append).close()  # wait_free kept no hold
+    assert printed[-1] == "The rig lock is free."
+
+
+def test_main_wait_free_stops_before_the_journal_and_env(tmp_path, monkeypatch):
+    def untouched(*_args):
+        raise AssertionError("--wait-free went past the lock")
+
+    monkeypatch.setattr(rig, "common_dir", lambda: tmp_path)
+    monkeypatch.setattr(rig, "hold_rig", untouched)
+    monkeypatch.setattr(rig, "load_env", untouched)
+    assert rig.main(["--wait-free"]) == 0
 
 
 def test_check_tokens_stops_a_zha_run_without_an_admin_token():
@@ -601,6 +661,7 @@ async def test_a_signal_mid_case_puts_everything_back_and_leaves_no_journal(tmp_
         fakes.OPTION_REGISTRY,
         None,
         True,
+        "c1",
         journal,
     )
     task = asyncio.create_task(run_rig)
@@ -616,6 +677,31 @@ async def test_a_signal_mid_case_puts_everything_back_and_leaves_no_journal(tmp_
     assert put_back(ha)
     assert not journal.path.exists()
 
+
+
+@pytest.mark.parametrize(("commit", "sources"), [("c1", ["rig run (`scripts/rig.py`), commit `c1short`"]), (None, [])])
+async def test_records_cite_the_commit_ha_loaded_not_head_at_the_end(tmp_path, monkeypatch, capsys, commit, sources):
+    rig_ha(monkeypatch, light="on", opt=True, automation="on")
+    head = {"HEAD": "c1short"}
+    monkeypatch.setattr(rig, "git", lambda *args, check=True: head.get(args[-1], f"{args[-1]}short"))
+
+    async def run(*args, **kwargs):
+        head["HEAD"] = "c2short"  # the session commits mid-run
+        return engine.RunResult([])
+
+    written = []
+
+    async def write_records(result, ha, registry, bench_dir, date, source):
+        written.append(source)
+        return []
+
+    monkeypatch.setattr(rig, "run", run)
+    monkeypatch.setattr(rig, "write_report", lambda result, directory, title: tmp_path / "report.md")
+    monkeypatch.setattr(rig, "write_records", write_records)
+
+    assert await rig.run_rig({}, [], fakes.inventory("shelly"), fakes.OPTION_REGISTRY, None, True, commit) == 0
+    assert written == sources
+    assert ("No bench records" in capsys.readouterr().out) is (commit is None)
 
 def aborted_journal(path: Path) -> Journal:
     """What a run killed mid-case leaves: the light it turned off, the option it saved and the automation it paused."""

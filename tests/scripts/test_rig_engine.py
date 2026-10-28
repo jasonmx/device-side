@@ -249,14 +249,13 @@ tests:
 @pytest.mark.parametrize(
     ("row", "outcome"),
     [
-        ({"xy_color": [0.301, 0.499]}, Outcome.PASS),
-        ({"xy_color": [0.4, 0.499]}, Outcome.FAIL),
-        ({"xy_color": [0.301]}, Outcome.FAIL),  # an index past the end reads as absent
-        ({"xy_color": "0.3"}, Outcome.FAIL),
-        ({}, Outcome.FAIL),
+        ({"hs_color": [30.2, 80.0]}, Outcome.PASS),
+        ({"hs_color": [90.0, 80.0]}, Outcome.FAIL),
+        ({"hs_color": [30.2]}, Outcome.FAIL),  # past the end reads as absent
+        ({"hs_color": 30.2}, Outcome.FAIL),
     ],
 )
-async def test_a_dotted_index_reads_a_list_item(tmp_path, row, outcome):
+async def test_a_numeric_part_indexes_a_list(tmp_path, row, outcome):
     ha = FakeHA({"light.lamp": {"state": "off"}}, lambda ha, action, data: {data["entity_id"]: row})
     text = """
 action: get_attributes
@@ -266,9 +265,9 @@ tests:
     roles: [light_color]
     steps:
       - call: {}
-      - expect_response: {attributes: {xy_color.0: {min: 0.29, max: 0.31}, xy_color.1: {min: 0.49, max: 0.51}}}
+      - expect_response: {attributes: {hs_color.0: {min: 25, max: 35}, hs_color.1: {min: 70, max: 90}}}
 """
-    result = await run_one(ha, suite(tmp_path, text, "shelly"), inventory("shelly", light_color="light.lamp"))
+    result = await run_one(ha, suite(tmp_path, text, "hue"), inventory("hue", light_color="light.lamp"))
 
     assert outcomes(result)["reads[light_color]"][0] is outcome
 
