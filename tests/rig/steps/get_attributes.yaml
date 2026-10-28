@@ -8,6 +8,7 @@ tests:
     steps:
       - set: {state: on, brightness: 102, color_temp_kelvin: 2700}
       - set: {state: off}
+      - wait: 2  # ZHA reads the bulb live, and it fades its level down while turning off
       - call: {}
       - expect_response:
           attributes: {brightness: {min: 39, max: 41}, color_temp_kelvin: {min: 2650, max: 2750}}
@@ -39,6 +40,7 @@ tests:
     steps:
       - set: {state: on, hs_color: [30, 80]}
       - set: {state: off}
+      - wait: 2  # the bulb fades while turning off
       - call: {}
       - expect_response:
           attributes: {hs_color.0: {min: 25, max: 35}, hs_color.1: {min: 75, max: 85}, color_temp_kelvin: null}
@@ -49,7 +51,9 @@ tests:
     roles: [switch_plug, light_onoff, light_wrapped, light_dimmable]
     steps:
       - set: {state: off}
+      - wait: 2  # ZHA ignores a light's "on" report for 1.5 s after light.turn_off
       - call: {action: turn_on_for, duration: 20}
+      - expect_state: {state: on, within: tol}
       - call: {}
       - expect_response: {attributes: {timer.turns: "off", timer.remaining_s: {min: 15, max: 20}}}
       - expect_state: {state: off, within: 20 + 2 * tol}
