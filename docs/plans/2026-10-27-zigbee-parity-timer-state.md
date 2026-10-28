@@ -47,12 +47,14 @@ current then).
 
 ## Dependencies
 
-- **7c** (Hue `move` for color temp and saturation): being built in another session. It has to land before the
-  Hue A60 visit.
+- **7c** (Hue `move`): 7c1 (color temp) landed in #95. 7c2 (saturation) needs a color bulb on the bridge, so the
+  A60 moves there first and 7c2 is built against it; Hue freezes after 7c2's rig run.
 - **9f** (core-aligned failure behavior): lands before 13b. Every new adapter is written against the new raise
   rule, and its field-dropping rule is what drops `hue` on the Hue bridge.
 
 ## Sub-slices
+
+Progress is tracked in [`TODO.md`](../../TODO.md).
 
 | # | Sub-slice | Bulb on | Done when |
 |---|---|---|---|
@@ -66,7 +68,7 @@ current then).
 | 13h | **Z2M get_attributes** (#3, #5) | Z2M | New `zigbee2mqtt/get_attributes.py`. Attributes come from Z2M's device state (the retained state or a `/get`). Timer only if 13a showed the generic `read` works. Groups follow `native_groups` like `turn_on_for`. |
 | 13i | **Z2M move/stop** (#7) | Z2M | New `zigbee2mqtt/move.py`, `stop.py`. Native `brightness_move`/`color_temp_move`/`saturation_move`/`hue_move` and `…: stop`; a limit is the target value plus `transition`. If 13a shows a gap, use the raw `command` payload. Reuse `addressing.py` and the `native_control.py` pattern for Hue bulbs. Moves are recorded in the core `Transition` cache, and 13h's get_attributes reads its prediction. Z2M's own target publish and stop read-back keep HA state right for brightness and colour temperature. **Hue/saturation stop (decided after 13a):** read the bulb's current x/y and write it back with no transition, so Z2M reports xy and HA takes it. Probe first: HA updates, the bulb doesn't visibly change, and a later hue or saturation move still works from xy mode. If any of those fails, HA stays stale after a hue/saturation stop: `get_attributes` predicts, and `docs/integrations.md` lists it as a sharp edge. |
 | 13j | **Z2M set_attributes while off** (#8) | Z2M | New `zigbee2mqtt/set_attributes.py`, via the raw `command` payload with the override (or the Hue native cluster path only if 13a shows it holds values while off and the raw path fails). **Read-back (decided after 13a):** a raw `command` publishes no state, so the write is followed by a `/get` of the written attributes. The rig step checks HA shows the stored values after a plain `light.turn_on`, with the light off in HA when written. **Z2M code freeze.** |
-| 13k | **Sweep and A60 visits** (closes 9d's colour part) | see steps | (1) Once 7c and 9f have landed and Hue is frozen: move the A60 **Z2M → Hue bridge**, then rig-run the Hue colour steps (`set_attributes` colour and gamut clamp, 7c saturation) with no `light_color` skips. (2) After 13g: **Hue → ZHA**, then the ZHA colour suites (`turn_on_for` colour fields, `move` sat/hue, `set_attributes` colour). (3) After 13j: **ZHA → Z2M**, then the full Z2M suite (including the missing `transition` field). Each visit also drops `experimental` from the adapters it proves, in the same PR as their records. The inventory is updated privately after each move. |
+| 13k | **Sweep and A60 visits** (closes 9d's colour part) | see steps | (1) Move the A60 **Z2M → Hue bridge**, build 7c2 against it, then rig-run the Hue colour steps (`set_attributes` colour and gamut clamp, 7c saturation) with no `light_color` skips. Hue freezes after this run. (2) After 13g: **Hue → ZHA**, then the ZHA colour suites (`turn_on_for` colour fields, `move` sat/hue, `set_attributes` colour). (3) After 13j: **ZHA → Z2M**, then the full Z2M suite (including the missing `transition` field). Each visit also drops `experimental` from the adapters it proves, in the same PR as their records. The inventory is updated privately after each move. |
 
 Between visits the A60 is away from Z2M from step (1) until step (3). The Z2M work (13h–j) relies on unit tests
 plus the Z2M CT bulb for non-colour rig steps.
