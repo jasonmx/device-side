@@ -131,8 +131,8 @@ Decided in the interview (2026-10-28):
       `colorMode` 0; publishing its own x/y with `transition: 0` made Z2M publish `color_mode: "xy"`, and HA's
       `xy_color` matched a live read (hue 0.1658, 0.3189; saturation 0.4705, 0.3921). The bulb was left in xy mode.
       A later `hue_move` and saturation move started from where it was: 177° → 195.6° at 0.3 s, and 50 % →
-      46.5 % at 0.3 s, both at the requested rate. The by-eye check (no visible change at the write-back) is
-      pending Jason.
+      46.5 % at 0.3 s, both at the requested rate. By eye (Jason, after a `hue_move: stop` at 172°): no visible
+      change at the write-back.
    c2. After `saturation_move: stop` on a `color` + `transition` fade (native control, so the bulb stays in xy,
       `colorMode` 1), with no read before HA was sampled: Z2M's read-back published `color_mode: "xy"` with the
       **fade's end point** (0.2744, 0.312), its cached x/y, and HA showed that, not the halted color. A
