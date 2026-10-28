@@ -79,15 +79,17 @@ def add_matter_entity(
     endpoint_id: int = 1,
     state: str = "off",
     attributes: dict | None = None,
+    unique_id: str | None = None,
 ) -> str:
     """Register a Matter light or plug entity with a unique_id that the adapter can parse.
 
     Unique_id format: {fab_hex16}-{node_hex16}-MatterNodeDevice-{ep}-{key}-6-0, key MatterLight or
-    MatterPlug (matches what homeassistant/components/matter/entity.py builds for each).
+    MatterPlug (matches what homeassistant/components/matter/entity.py builds for each). Pass unique_id to
+    register one the adapter can't parse.
     """
     domain, object_id = entity_id.split(".")
     key = "MatterPlug" if domain == "switch" else "MatterLight"
-    unique_id = f"{FABRIC_HEX}-{NODE_HEX}-MatterNodeDevice-{endpoint_id}-{key}-6-0"
+    unique_id = unique_id or f"{FABRIC_HEX}-{NODE_HEX}-MatterNodeDevice-{endpoint_id}-{key}-6-0"
     device = dr.async_get(hass).async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(_MATTER_DOMAIN, f"deviceid_{FABRIC_HEX}-{NODE_HEX}-MatterNodeDevice")},

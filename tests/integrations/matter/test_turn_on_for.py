@@ -182,17 +182,6 @@ async def test_duration_beyond_limit_is_clamped(setup_matter, hass):
 async def test_not_addressable_when_unique_id_unparseable(setup_matter, hass):
     """An entity whose unique_id doesn't match the expected format returns not_addressable."""
     entry, send_cmd, _ = matter_device(hass, endpoint_id=EP, feature_map=0x0001)
-    # Supply an entity whose unique_id has too few parts to parse.
-    from homeassistant.helpers import device_registry as dr
-    from homeassistant.helpers import entity_registry as er
-
-    device = dr.async_get(hass).async_get_or_create(
-        config_entry_id=entry.entry_id,
-        identifiers={("matter", "deviceid_bad")},
-    )
-    er.async_get(hass).async_get_or_create(
-        "switch", "matter", "bad-uid", suggested_object_id="broken", config_entry=entry, device_id=device.id
-    )
-    hass.states.async_set("switch.broken", "off", {})
+    add_matter_entity(hass, entry, "switch.broken", unique_id="bad-uid")
 
     assert await refusal(hass, "turn_on_for", {"entity_id": "switch.broken", "duration": 5}) == "not_addressable"
