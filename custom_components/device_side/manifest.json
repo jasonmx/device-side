@@ -1,7 +1,7 @@
 {
   "domain": "device_side",
   "name": "Device Side",
-  "after_dependencies": ["hue", "matter", "mqtt", "shelly", "zha"],
+  "after_dependencies": ["mqtt"],
   "codeowners": ["@jasonmx"],
   "config_flow": true,
   "documentation": "https://github.com/jasonmx/device-side",

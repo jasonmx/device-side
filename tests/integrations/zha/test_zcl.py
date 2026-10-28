@@ -20,15 +20,14 @@ def cluster():
 
 
 @pytest.fixture
-def gateway(monkeypatch, cluster):
-    """Fake helpers.get_zha_gateway and zigpy.types.EUI64; EUI64.convert passes the IEEE through."""
+def gateway(hass, monkeypatch, cluster):
+    """Fake zha's hass.data and zigpy.types.EUI64; EUI64.convert passes the IEEE through."""
     device = MagicMock()
     device.async_get_cluster.return_value = cluster
     gw = MagicMock()
     gw.get_device.return_value = device
-    helpers = SimpleNamespace(get_zha_gateway=lambda hass: gw)
     types = SimpleNamespace(EUI64=SimpleNamespace(convert=lambda ieee: ieee))
-    monkeypatch.setitem(sys.modules, "homeassistant.components.zha.helpers", helpers)
+    monkeypatch.setitem(hass.data, "zha", SimpleNamespace(gateway_proxy=SimpleNamespace(gateway=gw)))
     monkeypatch.setitem(sys.modules, "zigpy.types", types)
     return gw
 
@@ -58,10 +57,22 @@ async def test_missing_device_raises(hass, gateway):
 
 
 async def test_without_zha_installed_raises_import_error(hass, monkeypatch):
-    monkeypatch.setitem(sys.modules, "homeassistant.components.zha.helpers", None)
+    monkeypatch.setitem(sys.modules, "zigpy.types", None)
 
     with pytest.raises(ImportError):
         await zcl.read_attributes(hass, ADDR, zcl.ON_OFF_CLUSTER, (zcl.ON_TIME,))
+
+
+@pytest.mark.parametrize("data", [None, SimpleNamespace(gateway_proxy=None)])
+async def test_without_a_zha_gateway_raises_value_error(hass, monkeypatch, data):
+    """ZHA not set up, or set up without a gateway yet: get_zha_gateway's error, without importing zha."""
+    if data is None:
+        monkeypatch.delitem(hass.data, "zha", raising=False)
+    else:
+        monkeypatch.setitem(hass.data, "zha", data)
+
+    with pytest.raises(ValueError, match="No ZHA gateway"):
+        zcl.gateway(hass)
 
 
 async def test_optional_attribute_rides_the_request_and_is_left_out_when_missing(hass, gateway, cluster):
