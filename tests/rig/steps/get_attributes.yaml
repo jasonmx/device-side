@@ -41,12 +41,26 @@ tests:
       - call: {action: turn_on_for, duration: 20}
       - call: {}
       - expect_response: {attributes: {timer.turns: "off", timer.remaining_s: {min: 15, max: 20}}}
-      - expect_state: {state: off, within: 20 + 2 * tol}
+      - wait: 5  # the device counts down, rather than echoing the duration
+      - call: {}
+      - expect_response: {attributes: {timer.remaining_s: {min: 10, max: 16}}}
+      - expect_state: {state: off, within: 15 + 2 * tol}
+      - call: {}
+      - expect_response: {attributes: {timer: null}}
+
+  # A turn_off cancels the timer, so the row must not report one left over on a plug that is off.
+  - name: reads_no_timer_after_a_turn_off
+    roles: [switch_plug]
+    steps:
+      - set: {state: off}
+      - call: {action: turn_on_for, duration: 20}
+      - set: {state: off}
       - call: {}
       - expect_response: {attributes: {timer: null}}
 
   - name: reads_a_turn_off_for_timer
     roles: [switch_plug]
+    only: [shelly]  # Matter has no OffWithTimedOn
     steps:
       - set: {state: on}
       - call: {action: turn_off_for, duration: 20}

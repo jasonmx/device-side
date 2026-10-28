@@ -228,6 +228,8 @@ get_attributes:
         integration: hue
       - domain: [light, switch]
         integration: shelly
+      - domain: switch
+        integration: matter
 
 set_scene:
   target:
