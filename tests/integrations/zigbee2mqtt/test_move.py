@@ -130,12 +130,6 @@ async def test_a_group_with_a_member_without_color_hs_drops_hue(hass, broker):
     assert commands(broker) == []
 
 
-async def test_color_temperature_is_refused(hass, broker):
-    entity_id = light(hass, broker)
-
-    assert await refusal(hass, "move", {"entity_id": entity_id, "color_temp": "warmer"}) == "fields_not_tested"
-
-
 @pytest.mark.parametrize("action", [{"service": "move", "brightness": "up"}, {"service": "stop"}])
 async def test_a_group_on_another_base_topic_is_refused(hass, broker, action):
     entry = z2m_entry(hass)

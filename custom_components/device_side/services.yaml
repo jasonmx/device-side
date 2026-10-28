@@ -160,13 +160,6 @@ move:
         select:
           options: [up, down]
           translation_key: brightness_direction
-    color_temp:
-      example: warmer
-      filter: *color_temp
-      selector:
-        select:
-          options: [warmer, cooler]
-          translation_key: color_temp_direction
     saturation:
       example: up
       filter: *color_modes
@@ -202,14 +195,6 @@ move:
               max: 100
               step: 0.2
               unit_of_measurement: "%"
-        color_temp_limit:
-          example: 2700
-          filter: *color_temp
-          selector:
-            color_temp:
-              unit: "kelvin"
-              min: 2000
-              max: 6500
         saturation_limit:
           example: 50
           filter: *color_modes

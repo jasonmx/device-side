@@ -29,9 +29,11 @@ current then).
 - **Set while off:** sent with the ZCL `ExecuteIfOff` options override. A bulb the probe shows dropping it is
   refused `unsupported`, detail `execute_if_off_unsupported`. We never write the persistent option, and the
   light never flashes on.
-- **Move attributes on Zigbee:** brightness, color temp, saturation, and hue. On ZHA, hue is **EnhancedMoveHue**,
-  only on bulbs whose `ColorCapabilities` report enhanced hue. On Z2M, hue is the native `hue_move`, only on
-  lights whose device definition lists `color_hs` (13i plan). The Hue bridge drops the `hue` field (9f rule).
+- **Move attributes on Zigbee:** brightness, saturation, and hue. Color temperature isn't moved on any
+  integration: every halt of its fade on a Hue bulb jumps visibly (13i;
+  `docs/plans/2026-10-28-drop-color-temp-move.md`). On ZHA, hue is **EnhancedMoveHue**, only on bulbs whose
+  `ColorCapabilities` report enhanced hue. On Z2M, hue is the native `hue_move`, only on lights whose device
+  definition lists `color_hs` (13i plan). The Hue bridge drops the `hue` field (9f rule).
 - **No overlay on HA state on Zigbee; read-back where HA would be stale.** From a code read on 2026-10-27
   (zha 2.3.1, the version HA pins; Z2M `344b6e0` and zhc `c18c32d`):
   - **Z2M** publishes the target at the start of a `brightness`+`transition` write, the same model as the Hue
@@ -50,8 +52,9 @@ current then).
 
 ## Dependencies
 
-- **7c** (Hue `move`): 7c1 (color temp) landed in #95. 7c2 (saturation) needs a color bulb on the bridge, so the
-  A60 moves there first and 7c2 is built against it; Hue freezes after 7c2's rig run.
+- **7c** (Hue `move`): 7c1 (color temp) landed in #95 and was removed when color temperature moves were dropped.
+  7c2 (saturation) needs a color bulb on the bridge, so the A60 moves there first and 7c2 is built against it; Hue
+  freezes after 7c2's rig run.
 - **9f** (core-aligned failure behavior): lands before 13b. Every new adapter is written against the new raise
   rule, and its field-dropping rule is what drops `hue` on the Hue bridge.
 
@@ -70,7 +73,7 @@ Progress is tracked in [`TODO.md`](../../TODO.md).
 | 13j | **Z2M set_attributes while off** (#8) | Z2M | New `zigbee2mqtt/set_attributes.py`, via the raw `command` payload with the override (or the Hue native cluster path only if 13a shows it holds values while off and the raw path fails). **Read-back (decided after 13a):** a raw `command` publishes no state, so the write is followed by a `/get` of the written attributes. The rig step checks HA shows the stored values after a plain `light.turn_on`, with the light off in HA when written. **Z2M code freeze.** |
 | 13e | **ZHA get_attributes** (#2, #3) | Hue bridge | New `integrations/zha/get_attributes.py`, `light` only (as ZHA `turn_on_for`). Brightness, CT, colour and on/off are always live-read through `zha/zcl.py:read_attributes`, never zigpy's cache, which goes stale after a raw command (13a); a live read mid-transition is the bulb's actual value, so there is no `Transition` dependency. Timer from `OnTime` while on. Brightness in percent, matching Hue. A ZHA group expands to its members (9e). Plan: `docs/plans/2026-10-28-zha-get-attributes.md`. |
 | 13g | **ZHA set_attributes while off** (#8) | — | New `zha/set_attributes.py`: `MoveTo…` (not `WithOnOff`) with the `ExecuteIfOff` override, and the same fields as Hue's (`brightness`, `color_temp_kelvin`, `hs/rgb/xy_color`, `min/max_brightness`). Bulbs refused per the probe's support rule: the Sengled E11-G13 is (it jumps to full level on a `MoveToLevel` while off). A ZHA group expands to its members (9e). **Decided at build:** built before 13f, since it needs no `Transition`; no read-back, so a unicast that returns is `sent`, as on Hue; a 0.4 s transition, the Hue bridge's default. Plan: `docs/plans/2026-10-28-zha-set-attributes.md`. |
-| 13f | **ZHA move/stop** (#6) | — | New `zha/move.py`, `zha/stop.py`. A limit is a `MoveTo…` with the transition worked out from the rate. Hue is `EnhancedMoveHue`. Stop is Level `Stop` plus `StopMoveStep`. Commands go through the same `issue_zigbee_cluster_command` path as `zha/turn_on_for.py`, and `zcl.py` gains the command helpers. Members expanded from one ZHA group get one `issue_zigbee_group_command` for move and one for stop, as `zha/turn_on_for.py` batches them by `via_group` (9e: unicast members ramp visibly apart). `update_entity` after a stop and at the limit. Moves are recorded in the core `Transition` cache (moved there by the refactor PR). **ZHA code freeze.** |
+| 13f | **ZHA move/stop** (#6) | — | New `zha/move.py`, `zha/stop.py`, for brightness, saturation and hue (no color temperature). A limit is a `MoveTo…` with the transition worked out from the rate. Hue is `EnhancedMoveHue`. Stop is Level `Stop` plus `StopMoveStep`. Commands go through the same `issue_zigbee_cluster_command` path as `zha/turn_on_for.py`, and `zcl.py` gains the command helpers. Members expanded from one ZHA group get one `issue_zigbee_group_command` for move and one for stop, as `zha/turn_on_for.py` batches them by `via_group` (9e: unicast members ramp visibly apart). `update_entity` after a stop and at the limit. Moves are recorded in the core `Transition` cache (moved there by the refactor PR). **ZHA code freeze.** |
 | 13k | **Sweep and A60 visits** (closes 9d's colour part) | see steps | (1) After 13j, with the A60 still on **Z2M**: the full Z2M suite (including the missing `transition` field). (2) Move the A60 **Z2M → Hue bridge**, build 7c2 against it, then rig-run the Hue colour steps (`set_attributes` colour and gamut clamp, 7c saturation) with no `light_color` skips. Hue freezes after this run. (3) After 13f: **Hue → ZHA**, then the ZHA colour suites (`turn_on_for` colour fields, `move` sat/hue, `set_attributes` colour). Each visit also drops `experimental` from the adapters it proves, in the same PR as their records. The inventory is updated privately after each move. |
 
 The ZHA work (13e–g) is built while the A60 is on the Hue bridge, on unit tests and the ZHA bulbs for
