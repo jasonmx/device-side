@@ -108,6 +108,12 @@ async def ensure_options(
             unsubscribe()
 
 
+async def publish(hass: HomeAssistant, mqtt_topic: str, payload: dict) -> None:
+    await hass.services.async_call(
+        "mqtt", "publish", {"topic": mqtt_topic, "payload": json.dumps(payload)}, blocking=True
+    )
+
+
 def first_payload(future: asyncio.Future[str]) -> Callable[[mqtt.ReceiveMessage], None]:
     """A subscription callback that resolves future with the first message's payload."""
 

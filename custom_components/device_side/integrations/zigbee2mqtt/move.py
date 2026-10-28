@@ -1,6 +1,5 @@
 """Zigbee2MQTT move: brightness and saturation published as an end point with a transition, hue as a rate move."""
 
-import json
 import logging
 from dataclasses import dataclass
 from statistics import mean
@@ -9,7 +8,7 @@ from typing import ClassVar
 from homeassistant.core import HomeAssistant
 
 from .addressing import topic, z2m_address
-from .bridge import has_feature
+from .bridge import has_feature, publish
 from .members import member_lights
 from .xy_writeback import write_back_xy
 from ...actions.move import UP, MoveRequest
@@ -75,12 +74,6 @@ def lit(cache: TransitionCache, lights: list[Target]) -> list[Target]:
 
 def hs_color(light: Target) -> tuple[float, float] | None:
     return light.state.attributes.get("hs_color") if light.state else None
-
-
-async def publish(hass: HomeAssistant, mqtt_topic: str, payload: dict) -> None:
-    await hass.services.async_call(
-        "mqtt", "publish", {"topic": mqtt_topic, "payload": json.dumps(payload)}, blocking=True
-    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +172,8 @@ async def start(
     reads: list[tuple[float, Job]] = []
     for outcome in made:
         if isinstance(outcome, Fade):
+            if outcome.attribute == SATURATION:
+                hue_moves(hass).difference_update(outcome.starts)  # a color write ends the bulb's hue cycle
             async with cache.recording((light_id, outcome.attribute) for light_id in outcome.starts):
                 for light_id, begin in outcome.starts.items():
                     cache.moving(light_id, outcome.attribute, begin, outcome.ends[light_id], outcome.duration)

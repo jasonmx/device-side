@@ -5,7 +5,8 @@ from typing import ClassVar
 from homeassistant.core import HomeAssistant
 
 from .addressing import topic
-from .move import hs_color, hue_moves, light_brightness, lights_of, lit, publish, read_back_key, transition_cache
+from .bridge import publish
+from .move import hs_color, hue_moves, light_brightness, lights_of, lit, read_back_key, transition_cache
 from .xy_writeback import DELAY_S, write_back_xy
 from ...core.adapter import Adapter
 from ...core.dispatcher import EMPTY_GROUP

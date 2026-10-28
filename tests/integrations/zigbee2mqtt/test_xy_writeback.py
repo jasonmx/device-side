@@ -115,7 +115,7 @@ async def test_a_failed_write_is_logged(hass, broker, caplog, monkeypatch):
     async def refuse(hass, mqtt_topic, payload):
         raise RuntimeError("broker gone")
 
-    monkeypatch.setattr(xy_writeback, "_publish", refuse)
+    monkeypatch.setattr(xy_writeback, "publish", refuse)
     with caplog.at_level(logging.WARNING, logger=LOGGER):
         await stop_after(hass, broker, entity_id, {"hue": "up"})
 

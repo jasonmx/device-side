@@ -11,7 +11,6 @@ and so does a light announced with hs after one of those, or reached through a g
 its first member only.
 """
 
-import json
 import logging
 from collections.abc import Awaitable
 
@@ -19,6 +18,7 @@ from homeassistant.components.light import ColorMode
 from homeassistant.core import HomeAssistant
 
 from .addressing import topic
+from .bridge import publish
 from .members import member_lights
 from .read import Reader, reader
 from ...core.models import Target
@@ -77,14 +77,8 @@ async def _write_back(hass: HomeAssistant, reading: Reader, light: Target) -> No
         await _get_color(hass, light)
         return
     xy = {"x": round(color["currentX"] / _XY_SCALE, 4), "y": round(color["currentY"] / _XY_SCALE, 4)}
-    await _publish(hass, topic(light, "set"), {"color": xy, "transition": 0})
+    await publish(hass, topic(light, "set"), {"color": xy, "transition": 0})
 
 
 async def _get_color(hass: HomeAssistant, light: Target) -> None:
-    await _publish(hass, topic(light, "get"), {"color": ""})
-
-
-async def _publish(hass: HomeAssistant, mqtt_topic: str, payload: dict) -> None:
-    await hass.services.async_call(
-        "mqtt", "publish", {"topic": mqtt_topic, "payload": json.dumps(payload)}, blocking=True
-    )
+    await publish(hass, topic(light, "get"), {"color": ""})

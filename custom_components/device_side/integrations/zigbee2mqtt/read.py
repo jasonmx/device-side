@@ -20,7 +20,7 @@ from homeassistant.components.light import ColorMode, brightness_supported
 from homeassistant.core import HomeAssistant, callback
 
 from .addressing import bridge_topic, state_topic, topic, z2m_address
-from .bridge import ensure_options, wait
+from .bridge import ensure_options, publish, wait
 from ...core.models import Target
 
 _LOGGER = logging.getLogger(__name__)
@@ -130,9 +130,7 @@ class Reader:
         self._failure = (f"{z2m_address(target.device)}/", f"{cluster}.read(")
         payload = {"read": {"cluster": cluster, "attributes": names, "state_property": READ_KEY}}
         try:
-            await self.hass.services.async_call(
-                "mqtt", "publish", {"topic": topic(target, "set"), "payload": json.dumps(payload)}, blocking=True
-            )
+            await publish(self.hass, topic(target, "set"), payload)
             return await wait(self._reply, _REPLY_TIMEOUT_S, f"no {cluster} reply from Zigbee2MQTT")
         finally:
             self._reply = None

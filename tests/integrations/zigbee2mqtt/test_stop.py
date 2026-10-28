@@ -91,6 +91,18 @@ async def test_a_stop_ends_the_hue_cycle(hass, broker):
     assert entity_id not in hue_moves(hass)
 
 
+async def test_a_saturation_move_ends_the_hue_cycle(hass, broker):
+    # The color write halts the bulb's hue cycle, so the next stop has no hue_move to stop.
+    entity_id = light(hass, broker)
+    await call(hass, "move", {"entity_id": entity_id, "hue": "up"})
+    await call(hass, "move", {"entity_id": entity_id, "saturation": "up"})
+
+    await call(hass, "stop", {"entity_id": entity_id})
+
+    assert (SET, {"hue_move": "stop"}) not in commands(broker)
+    assert entity_id not in hue_moves(hass)
+
+
 async def test_the_halts_are_recorded_at_their_predictions(hass, broker, clock):
     entity_id = light(hass, broker)
     await call(hass, "move", {"entity_id": entity_id, "brightness": "up", "saturation": "down"})

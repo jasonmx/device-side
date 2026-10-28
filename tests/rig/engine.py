@@ -138,8 +138,8 @@ class Observe:
 
 
 # How far a steady sample may spread, in its source's units: a Zigbee bulb can settle one level step (1/254) after a
-# stop. HA's brightness is 0-255, device_side's in percent.
-STEADY_SPREAD = {("brightness", "ha"): 255 / 254 + 1e-9, ("brightness", "device_side"): 100 / 254 + 1e-9}
+# stop. HA's brightness is 0-255; device_side's is in percent, rounded to 0.1, which can widen the step by 0.1.
+STEADY_SPREAD = {("brightness", "ha"): 255 / 254 + 1e-9, ("brightness", "device_side"): 100 / 254 + 0.1 + 1e-9}
 
 # Steps that check something; an observed run turns them into the waits they imply.
 CHECKS = frozenset({"expect_response", "expect_error", "expect_state", "expect_matches_read", "sample"})
@@ -267,7 +267,9 @@ def _parse_expect_matches_read(args: Any) -> dict:
 
 
 def _parse_sample(args: Any) -> dict:
-    args = _mapping(args, required=["attribute", "for"], allowed=["target", "every", "expect", "min", "max", "source"])
+    args = _mapping(
+        args, required=["attribute", "for"], allowed=["target", "every", "expect", "min", "max", "source"]
+    )
     args["for"] = Expr.parse(args["for"])
     args["every"] = Expr.parse(args.get("every", 0.5))
     if args.get("expect", "rising") not in ("rising", "falling", "steady"):
@@ -495,9 +497,8 @@ def cases(suite: Suite, inventory: Inventory, keyword: str | None = None) -> lis
                 else:
                     members = inventory.members(suite.integration, entities["group"]) if "group" in entities else ()
                     # A group case that also targets a light means one of the group's: where the inventory lists them.
-                    outside = [
-                        n for n, e in entities.items() if n.startswith("light_") and members and e not in members
-                    ]
+                    lights = [name for name in entities if name.startswith("light_")]
+                    outside = [name for name in lights if members and entities[name] not in members]
                     skip = f"{outside[0]} is not one of the group's members" if outside else None
                     case = Case(suite, test, role, entities, skip, observed, members)
                 result.append(case)
@@ -1266,16 +1267,8 @@ async def run(
         for suite, adapter, *_ in planned
     }
     rig_run = _Run(
-        registry,
-        tolerance,
-        settle,
-        inventory.power(),
-        ask,
-        out,
-        options,
-        EntryOptions(admin, journal=journal) if admin else None,
-        bridge=bridge,
-        journal=journal,
+        registry, tolerance, settle, inventory.power(), ask, out, options,
+        EntryOptions(admin, journal=journal) if admin else None, bridge=bridge, journal=journal,
     )
     try:
         waiting = [
