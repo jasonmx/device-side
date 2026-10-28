@@ -7,7 +7,7 @@ color modes. Not an action, so it has no suite of its own; its rig cases ride in
 
 | | |
 |---|---|
-| Result | pass, except the watched check of Home Assistant's own color commands (not yet run) |
+| Result | pass |
 | Date | 2026-10-28 |
 | Source | rig run (`scripts/rig.py --integration zigbee2mqtt --action get_attributes`), commit `7711910`; probe script |
 | Home Assistant | 2026.10.2 |
@@ -30,4 +30,4 @@ color modes. Not an action, so it has no suite of its own; its rig cases ride in
 | After `hue_move` and `hue_move: stop`, HA takes Z2M's `hs` state, with no "Invalid color mode" in HA's log | pass |
 | The override on a group re-announces the group with both modes | pass |
 | Removing the override through Z2M's options API | not possible: a null under `homeassistant` is kept, so opting out writes Z2M's own modes back |
-| HA's `hs_color`, `xy_color`, `rgb_color` and `color_temp_kelvin` each land on the bulb (watched) | not yet run |
+| HA's `hs_color`, `xy_color`, `rgb_color` and `color_temp_kelvin` each land on the bulb, Hue native control on (watched by eye) | pass: blue, red, green, 2700 K, each on cue with no flicker; HA sent `color: {h, s}` for hs and RGB, `{x, y}` for xy, `color_temp` for 2700 K, and logged no color-mode warning |

@@ -84,7 +84,10 @@ Decided in the interview (2026-10-28):
    c. After `hue_move: 10` and `hue_move: stop`, Z2M published `color_mode: "hs"` (232°, 94 %) and HA took it, with
       no "Invalid color mode" entry in HA's log. A `{"color": ""}` get then made Z2M publish xy, which HA also
       took. The bulb's hs and xy disagree (13i's finding), so HA's color moves when Z2M switches between them.
-   d. Watched: not yet run (needs Jason's go).
+   d. Watched by Jason, level 200, Hue native control on: `hs_color` [240, 100], `xy_color` [0.6915, 0.3083],
+      `rgb_color` [0, 255, 0] and `color_temp_kelvin` 2700 each landed on cue, blue, red, green and warm white,
+      with no flicker. HA now sends hs (`color: {h, s}`) for `hs_color` and for `rgb_color`, xy for `xy_color`;
+      Z2M's native control turns hs into an xy command, so HA then shows `color_mode: xy`. No color-mode warning.
    e. On a temporary group holding only the A60: Z2M announced it with `xy`, `color_temp`; the same override on the
       group's options re-announced it with `xy`, `hs`, `color_temp` at once, and HA's group entity showed all
       three. Removing the group cleared its discovery message.
