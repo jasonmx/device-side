@@ -108,19 +108,18 @@ requires it.
     every feature): fields describe what the light should do in human terms, never how the
     device does it.** No rates, steps, mireds or cluster vocabulary; the adapter converts.
     `move` fields, all optional but at least one direction required:
-    - `brightness: up | down`, `color_temp: warmer | cooler`, `saturation: up | down`,
-      `hue: up | down` (`up` = the hue angle increases, red → yellow → green, wrapping at
-      360°). One field per attribute, each with its own direction, so "brighter and cooler" is
-      one call with no ambiguity. Rule: `up | down` wherever the direction is unambiguous;
-      color temperature is the exception (Kelvin up is cooler, mireds up is warmer). Why, and
-      why not `brighter | dimmer`: `docs/plans/2026-10-25-hue-port.md`, Decisions.
+    - `brightness: up | down`, `saturation: up | down`, `hue: up | down` (`up` = the hue
+      angle increases, red → yellow → green, wrapping at 360°). One field per attribute, each
+      with its own direction, so "brighter and more saturated" is one call with no ambiguity.
+      Why not `brighter | dimmer`: `docs/plans/2026-10-25-hue-port.md`, Decisions. Color
+      temperature isn't moved (dropped 2026-10-28): every halt of a Hue bulb's color
+      temperature fade jumps visibly (`docs/plans/2026-10-28-z2m-move-stop.md`).
     - `sweep_time` (seconds; hue_dimmer's existing field): how long a **full-range sweep**
-      takes, 0 → 100 % brightness, coolest → warmest of this light's range, 0 → 100 %
-      saturation, 360° of hue. Speed is therefore constant whatever the start point, which is
+      takes, 0 → 100 % brightness, 0 → 100 % saturation, 360° of hue. Speed is therefore constant whatever the start point, which is
       what hold-to-dim needs, and one number covers every attribute in the call. Default from
       hue_dimmer.
     - Limits in a collapsed "Limits" section (`services.yaml` sections): `brightness_limit`
-      (%), `color_temp_limit` (K), `saturation_limit` (%). A limit is "stop here instead of
+      (%), `saturation_limit` (%). A limit is "stop here instead of
       the range end". A move already at or past its limit (or range end) in its direction does
       nothing and returns `unchanged` with `detail: at_limit`: `down` to 30 % from 20 % never
       brightens (decided 2026-10-26). Hue has no limit: a wrapping hue range was considered and
@@ -128,7 +127,7 @@ requires it.
     `stop` takes no fields and halts every move in flight on the target. (Per-attribute
     direction words and the reserved `hue` field confirmed by Jason, 2026-10-23.)
     Hue implementation: target = limit or range end, `dynamics.duration` = sweep_time ×
-    fraction of range still to travel; brightness and color_temp each as one write;
+    fraction of range still to travel; brightness as one write;
     saturation as one `color.xy` write along the line toward the white point or the gamut
     edge (straight in xy, so native); `hue` is **unsupported on Hue** in v1 because a hue
     rotation is not a straight line in xy and chaining segments from HA would violate the
@@ -457,11 +456,10 @@ class Adapter[RequestT](ABC):
 - **Hue port** (hue_dimmer module -> adapter): `bridge.py` resolve/controllers/writes ->
   `integrations/hue/bridge.py` taking a `Target` (drop `_iter_targets`; `_write_light` raises so the
   adapter emits SENT/REJECTED); `transitions.py` `_brightness_cache` -> `TransitionCache` instance in
-  `runtime.integration_state["hue"]`, keyed by (resource_id, attribute) so brightness, color_temp,
+  `runtime.integration_state["hue"]`, keyed by (resource_id, attribute) so brightness
   and saturation moves are tracked alike (start value, target, duration, started_at;
   interpolate on read); `_start_transition` -> `move.py` (per-attribute direction + sweep_time
-  + limits; raise/lower partials go; color_temp writes `color_temperature.mirek`, saturation
-  computes the xy end point via `colors.py`; `hue` -> `unsupported`); `_stop_transition` ->
+  + limits; raise/lower partials go; saturation computes the xy end point via `colors.py`; `hue` -> `unsupported`); `_stop_transition` ->
   `stop.py` (all attributes in the cache for the light);
   `attributes.py` -> `colors.py`;
   `_handle_set_attributes` -> `set_attributes.py` ("nothing to set" becomes a

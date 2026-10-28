@@ -29,6 +29,10 @@ build it in a fresh session (worktree `wt/hue-move-color-temp` off `release/v0.0
 
 ## 7c1: color temp
 
+> **Superseded 2026-10-28.** Color temperature moves were dropped on every integration, as every halt of a Hue
+> bulb's color temperature fade jumps visibly (`docs/plans/2026-10-28-z2m-move-stop.md`). The code below was
+> removed by `docs/plans/2026-10-28-drop-color-temp-move.md`; this section is kept as history.
+
 ### Rig first: answer open item 12
 
 Before writing the adapter, a rig probe on `light_ct` and `group` (pre-authorized on 2026-10-27/28, per memory)
