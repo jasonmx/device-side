@@ -33,7 +33,7 @@ section-order = ["future", "standard-library", "third-party", "first-party", "lo
 known-first-party = []
 
 [tool.codespell]
-ignore-words-list = "hass"
+ignore-words-list = "hass,currenty"
 
 [dependency-groups]
 dev = [

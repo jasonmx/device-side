@@ -10,6 +10,19 @@ ON_OFF_CLUSTER = 0x0006
 ON_OFF = 0x0000
 ON_TIME = 0x4001
 
+LEVEL_CLUSTER = 0x0008
+CURRENT_LEVEL = 0x0000
+
+COLOR_CLUSTER = 0x0300
+CURRENT_HUE = 0x0000
+CURRENT_SATURATION = 0x0001
+CURRENT_X = 0x0003
+CURRENT_Y = 0x0004
+COLOR_TEMPERATURE = 0x0007
+COLOR_MODE = 0x0008
+ENHANCED_CURRENT_HUE = 0x4000
+ENHANCED_COLOR_MODE = 0x4001
+
 
 def gateway(hass: HomeAssistant) -> Any:
     """The zha library's gateway. The zha library is installed only where ZHA runs, hence the import here."""
@@ -25,7 +38,8 @@ async def read_attributes(
     websocket_read_zigbee_cluster_attributes does.
 
     That websocket command is the only public route, and it is admin-only; this reaches the same gateway through
-    zha's internals. Callers read only after an admin-checked command succeeded, so the read grants no extra rights.
+    zha's internals. Callers read only OnOff, Level and Color values, which HA already shows any user in the light's
+    state, so the read grants no extra rights.
     Raises when the device is unknown or any of `attributes` comes back in the failure dict, so callers handle one
     failure path. `optional` ones ride the same request and are left out of the result when the device lacks them.
     The zha library is installed only where ZHA runs, hence the imports here.
