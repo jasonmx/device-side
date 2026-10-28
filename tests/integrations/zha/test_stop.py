@@ -1,8 +1,6 @@
 """ZHA stop: level Stop to each lit light, StopMoveStep where a color move of ours runs, the halt recorded, and a
 refresh at once."""
 
-from unittest.mock import AsyncMock
-
 import probatio
 import pytest
 from homeassistant.core import Context, ServiceCall
@@ -12,7 +10,6 @@ from pytest_homeassistant_custom_component.common import async_mock_service
 
 from custom_components.device_side.const import DOMAIN
 from custom_components.device_side.core.transition import BRIGHTNESS, SATURATION
-from custom_components.device_side.integrations.zha import zcl
 from custom_components.device_side.integrations.zha.move import hue_moves, transition_cache
 
 from .conftest import SENT, A, B, bulb, sent, unchanged
@@ -30,9 +27,8 @@ def commands(hass):
 
 
 @pytest.fixture(autouse=True)
-def zcl_reads(monkeypatch):
-    monkeypatch.setattr(zcl, "read_attributes", AsyncMock(return_value={zcl.ON_OFF: False}))
-    monkeypatch.setattr(zcl, "enhanced_hue", AsyncMock(return_value=True))
+def zcl_reads(bulbs):
+    return bulbs
 
 
 async def test_a_lit_light_gets_level_stop_and_a_refresh_at_once(hass, commands, refreshes):

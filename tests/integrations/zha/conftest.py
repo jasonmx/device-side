@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
@@ -101,3 +102,28 @@ def two_light_group(hass, zha_groups):
     add_zha_entity(hass, entry, "light.zha_group", unique_id="light_zha_group_0x0002")
     zha_groups[2] = zha_group((A, 11), (B, 11))
     return entry
+
+
+class Bulbs:
+    """zcl.read_attributes for move and stop: OnOff reads off (a soft off has run), and CurrentLevel answers only
+    where a test sets `levels`, so a move's ramp is fitted to a read only then."""
+
+    def __init__(self) -> None:
+        self.on = False
+        self.levels: dict[str, int] = {}
+        self.read = AsyncMock(side_effect=self._read)
+
+    async def _read(self, hass, addr, cluster_id, attributes, optional=()):
+        if cluster_id == zcl.ON_OFF_CLUSTER:
+            return {zcl.ON_OFF: self.on}
+        if addr.ieee not in self.levels:
+            raise LookupError("no answer")
+        return {zcl.CURRENT_LEVEL: self.levels[addr.ieee]}
+
+
+@pytest.fixture
+def bulbs(monkeypatch) -> Bulbs:
+    fake = Bulbs()
+    monkeypatch.setattr(zcl, "read_attributes", fake.read)
+    monkeypatch.setattr(zcl, "enhanced_hue", AsyncMock(return_value=True))
+    return fake

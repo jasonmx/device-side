@@ -117,9 +117,13 @@ class TransitionCache:
         start: float,
         target: float,
         duration: float,
-    ) -> None:
-        """Record before the write is sent, as the device starts the fade once it has it."""
-        self._transitions[(resource_id, attribute)] = Transition(start, target, duration, self.clock())
+        started_at: float | None = None,
+    ) -> Transition:
+        """Record before the write is sent, as the device starts the fade once it has it; started_at re-records one
+        already running."""
+        transition = Transition(start, target, duration, self.clock() if started_at is None else started_at)
+        self._transitions[(resource_id, attribute)] = transition
+        return transition
 
     def stopped(self, resource_id: str, attribute: str, value: float) -> None:
         self.moving(resource_id, attribute, value, value, 0.0)

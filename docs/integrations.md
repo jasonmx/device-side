@@ -468,6 +468,14 @@ The bulb reports its brightness during a fade and ZHA applies it, but never a co
 commands leave ZHA's own transition guard down, so the read is the bulb's. Device Side remembers each move and
 stop for its duration plus 2 seconds, so a move after a stop starts from where the light halted.
 
+ZHA can't tell a brightness change made elsewhere (Home Assistant, an app, a remote) from the bulb's own reports
+during a fade, so the remembered value can go stale. To keep hold-to-dim instant, a move is sent first and each
+light's CurrentLevel read just after. The read is timed at the middle of its round trip and lies on the bulb's ramp
+to the end point, so Device Side fits the ramp's real start to it and remembers that: the next move, a stop and the
+soft off's restore start from where the bulb really is. The one move sent from a stale value runs at the speed
+worked out from it. A move that the remembered value says has nothing to do (`at_limit` or `off`) is planned again
+from Home Assistant's state, which ZHA keeps from the bulb's reports.
+
 **Groups.** Members of a ZHA group get one command to the group (`zha.issue_zigbee_group_command`) per attribute,
 so they fade and halt together, when every light the group holds moves. Otherwise, such as a move down with a
 member off, each moving member gets its own command: a soft off sent to the group would still drop an off

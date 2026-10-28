@@ -1,8 +1,6 @@
 """ZHA move: an end point with a transition per attribute, hue as an EnhancedMoveHue rate, the soft off's restore and
 the end refresh."""
 
-from unittest.mock import AsyncMock
-
 import probatio
 import pytest
 from homeassistant.core import Context, ServiceCall
@@ -31,18 +29,18 @@ def commands(hass):
 
 
 @pytest.fixture(autouse=True)
-def on_off_read(monkeypatch):
-    """zcl.read_attributes, reading the light off: its soft off has run."""
-    read = AsyncMock(return_value={zcl.ON_OFF: False})
-    monkeypatch.setattr(zcl, "read_attributes", read)
-    return read
+def on_off_read(bulbs):
+    return bulbs.read
 
 
-@pytest.fixture(autouse=True)
-def enhanced_hue(monkeypatch):
-    check = AsyncMock(return_value=True)
-    monkeypatch.setattr(zcl, "enhanced_hue", check)
-    return check
+def on_off_reads(read) -> list:
+    """The OnOff reads among the reads, leaving out the Level reads each move fits its ramp to."""
+    return [call for call in read.await_args_list if call.args[2] == zcl.ON_OFF_CLUSTER]
+
+
+@pytest.fixture
+def enhanced_hue():
+    return zcl.enhanced_hue
 
 
 def xy(hue: float, saturation: float) -> dict:
@@ -140,8 +138,8 @@ async def test_soft_off_restores_the_start_level_once_the_light_reads_off(hass, 
     assert [refresh.data for refresh in refreshes] == [{"entity_id": "light.bulb"}]
 
 
-async def test_no_restore_when_the_light_still_reads_on(hass, commands, refreshes, on_off_read):
-    on_off_read.return_value = {zcl.ON_OFF: True}
+async def test_no_restore_when_the_light_still_reads_on(hass, commands, refreshes, bulbs):
+    bulbs.on = True
     bulb(hass)
     start = wall_clock_now()
 
@@ -172,7 +170,7 @@ async def test_no_restore_on_a_model_that_drops_levels_while_off(hass, commands,
     await advance(hass, start, 4.5)
 
     assert len(commands) == 1
-    on_off_read.assert_not_awaited()
+    assert not on_off_reads(on_off_read)
 
 
 async def test_a_new_move_cancels_the_restore(hass, commands, on_off_read, clock):
@@ -185,7 +183,7 @@ async def test_a_new_move_cancels_the_restore(hass, commands, on_off_read, clock
     await advance(hass, start, 10)
 
     assert [command[:2] for command in sent(commands)] == [(0x0008, 0x04), (0x0008, 0x04)]
-    on_off_read.assert_not_awaited()
+    assert not on_off_reads(on_off_read)
 
 
 async def test_end_refresh_once_the_fade_has_run(hass, commands, refreshes):
@@ -400,3 +398,65 @@ async def test_a_later_failure_keeps_the_restore_of_a_soft_off_already_sent(hass
     assert [command[:2] for command in sent(sent_commands)] == [(0x0008, 0x04), (0x0008, 0x00)]
     assert transition_cache(hass).tracks("light.bulb", BRIGHTNESS)
     assert not transition_cache(hass).tracks("light.bulb", SATURATION)
+
+
+def read_takes(bulbs, clock, seconds: float) -> None:
+    """Each Level read takes `seconds` on the cache's clock."""
+    answer = bulbs.read.side_effect
+
+    async def slow(*args, **kwargs):
+        clock.now += seconds
+        return await answer(*args, **kwargs)
+
+    bulbs.read.side_effect = slow
+
+
+async def test_the_ramp_is_fitted_to_a_read_at_the_point_it_had_reached(hass, commands, bulbs, clock):
+    """HA shows 60 %, but the bulb was set to 80 % elsewhere. The read 0.1 s into a 3 s soft off sees 77.2 %, which is
+    on the ramp from 79.8 % to 0, not its start: the restore puts back 79.8 %."""
+    bulb(hass)
+    bulbs.levels[IEEE] = 196  # 77.2 %
+    read_takes(bulbs, clock, 0.2)  # timed at its middle: 0.1 s in
+    start = wall_clock_now()
+
+    await call(hass, "move", {"entity_id": "light.bulb", "brightness": "down"})
+    await hass.async_block_till_done()
+    clock.now -= 0.1  # back to the read's middle, where the ramp passes through what it saw
+    assert transition_cache(hass).value("light.bulb", BRIGHTNESS, 0) == pytest.approx(196 * 100 / 254)
+    await advance(hass, start, 4.5)
+
+    restore = (0x0008, 0x00, {"level": 203, "transition_time": 0, "options_mask": 1, "options_override": 1})
+    assert sent(commands)[-1] == restore
+
+
+@pytest.mark.parametrize("stopped", [False, True], ids=["read_after_the_fade_ended", "read_after_a_stop"])
+async def test_a_read_too_late_to_fit_changes_nothing(hass, commands, bulbs, clock, stopped):
+    bulb(hass)
+    bulbs.levels[IEEE] = 10
+    read_takes(bulbs, clock, 1 if stopped else 10)
+    if stopped:
+        original = bulbs.read.side_effect
+
+        async def stop_first(*args, **kwargs):
+            transition_cache(hass).stopped("light.bulb", BRIGHTNESS, 55.0)
+            return await original(*args, **kwargs)
+
+        bulbs.read.side_effect = stop_first
+
+    await call(hass, "move", {"entity_id": "light.bulb", "brightness": "down"})
+    await hass.async_block_till_done()
+
+    assert transition_cache(hass).value("light.bulb", BRIGHTNESS, -1) == (55.0 if stopped else -1)
+
+
+async def test_nothing_to_do_by_a_stale_prediction_plans_again_from_has_state(hass, commands):
+    """A soft off, then the light turned back on at 100 % from HA within the prediction's window: a move down runs."""
+    bulb(hass)
+    await call(hass, "move", {"entity_id": "light.bulb", "brightness": "down"})
+    transition_cache(hass).clock.now += 5  # predicted at 0 for 2 s more
+    bulb(hass, brightness=255)
+
+    response = await call(hass, "move", {"entity_id": "light.bulb", "brightness": "down"})
+
+    assert response == {"light.bulb": SENT}
+    assert sent(commands)[-1] == (0x0008, 0x04, {"level": 0, "transition_time": 50})

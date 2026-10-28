@@ -51,6 +51,17 @@ A scratchpad script on the LTA004 and the ZHA group, raw commands through `zha.i
   fade + 1 s (`END_REFRESH_S`).
 - **(b) Restore after a soft off** and **(c) a move up from off starts at the bottom**: watched; results below.
 
+## Rig finding and decision (2026-10-28)
+
+The first rig run showed the core cache going stale on ZHA: a brightness change from HA during a move, or within
+2 s of its end, left the next move starting from the prediction. A soft off then restored the predicted level (the
+bulb came back at 94 % rather than 60 %). Hue's report filter ends a prediction on a change made elsewhere; ZHA has
+no such hook, as the bulb's own reports mid-fade look the same. Decided with Jason: hold-to-dim latency comes first,
+so a move is sent first and each light's CurrentLevel read after; the ramp's real start is fitted to the read at the
+point the ramp had reached (timed at the middle of the read's round trip), and re-recorded. A move the prediction
+says has nothing to do is planned again from HA's state. A live read before every move (about 0.2 s) was rejected
+for its latency.
+
 ## 1. `zha/zcl.py` helpers
 
 Add the constants: `MOVE_TO_LEVEL_WITH_ON_OFF = 0x04`, `STOP = 0x03`, `ENHANCED_MOVE_HUE = 0x41`,

@@ -113,7 +113,7 @@ class Fade:
     ends: dict[str, float]
     duration: float
     presets: list[Target] = field(default_factory=list)
-    restores: dict[str, int] = field(default_factory=dict)
+    restores: frozenset[str] = frozenset()  # the soft-off lights whose start level goes back, from starts
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,6 +176,16 @@ class ZHAMove(Adapter[MoveRequest]):
         if move.nothing_to_do():
             return each(Status.UNCHANGED, detail="fields_dropped")
         outcomes = plan(cache, move, lights)
+        if (
+            isinstance(outcomes[0], str)
+            and move.brightness
+            and any(cache.tracks(light.entity_id, BRIGHTNESS) for light in lights)
+        ):
+            # Nothing to do by the prediction, which a change made elsewhere can leave stale: ZHA applies the bulb's
+            # brightness reports, so its state is right then. Plan again from it.
+            for light in lights:
+                cache.forget(light.entity_id)
+            outcomes = plan(cache, move, lights)
         if not (made := [outcome for outcome in outcomes if not isinstance(outcome, str)]):
             # A light that's off explains a move having nothing to do, whatever else is at its limit.
             return each(Status.UNCHANGED, detail="off" if "off" in outcomes else outcomes[0])
@@ -233,8 +243,10 @@ async def start(
             if outcome.attribute == SATURATION:
                 hue_moves(hass).difference_update(outcome.starts)  # a color write ends the bulb's hue cycle
             async with cache.recording((light_id, outcome.attribute) for light_id in outcome.starts):
-                for light_id, begin in outcome.starts.items():
-                    cache.moving(light_id, outcome.attribute, begin, outcome.ends[light_id], outcome.duration)
+                recorded = {
+                    light_id: cache.moving(light_id, outcome.attribute, begin, outcome.ends[light_id], outcome.duration)
+                    for light_id, begin in outcome.starts.items()
+                }
                 # Unicast: each concerns one light's own stored level.
                 for light in outcome.presets:
                     bottom = {"level": 1, **zcl.execute_if_off(0)}
@@ -242,8 +254,12 @@ async def start(
                         hass, address(light.entry.unique_id), zcl.LEVEL_CLUSTER, zcl.MOVE_TO_LEVEL, bottom, context
                     )
                 await send(hass, gid, outcome.movers, outcome.command, context)
+            if outcome.attribute == BRIGHTNESS:
+                for light in outcome.movers:
+                    hass.async_create_task(sync_to_bulb(hass, cache, light, outcome, recorded[light.entity_id]))
             for light in outcome.movers:
-                job = end_job(hass, light, outcome.restores.get(light.entity_id), context)
+                restore = outcome.starts if light.entity_id in outcome.restores else None
+                job = end_job(hass, light, restore, context)
                 jobs.setdefault(light.entity_id, (light, []))[1].append((outcome.duration + END_REFRESH_S, job))
     finally:
         # A new move replaces the light's pending refresh and restore, a hue move's included.
@@ -289,16 +305,14 @@ def brightness_fade(cache: TransitionCache, request: MoveRequest, lights: list[T
     duration = fade_seconds(abs(limit - current), request.sweep_time)
     tenths = transition_tenths(duration)
     presets: list[Target] = []
-    restores: dict[str, int] = {}
+    restores: frozenset[str] = frozenset()
     if up:
         command_id, level = zcl.MOVE_TO_LEVEL_WITH_ON_OFF, zcl.level(limit)
         lit_ids = {light.entity_id for light in lit_lights}
         presets = [light for light in lights if light.entity_id not in lit_ids and not drops_while_off(light)]
     elif limit == 0:
         command_id, level = zcl.MOVE_TO_LEVEL_WITH_ON_OFF, 0
-        restores = {
-            light.entity_id: zcl.level(starts[light.entity_id]) for light in movers if not drops_while_off(light)
-        }
+        restores = frozenset(light.entity_id for light in movers if not drops_while_off(light))
     else:
         command_id, level = zcl.MOVE_TO_LEVEL, zcl.level(limit)
     command = (zcl.LEVEL_CLUSTER, command_id, {"level": level, "transition_time": tenths})
@@ -339,8 +353,37 @@ def hue_move(request: MoveRequest, movers: list[Target]) -> HueMove:
     return HueMove(command, movers, cycle if cycle != request.sweep_time else None)
 
 
-def end_job(hass: HomeAssistant, light: Target, restore: int | None, context: Context | None) -> Job:
-    """Once a fade has run: a soft off's restore, if the light reads off, then a refresh."""
+async def sync_to_bulb(
+    hass: HomeAssistant, cache: TransitionCache, light: Target, fade: Fade, recorded: transition.Transition
+) -> None:
+    """Fit the recorded ramp to a CurrentLevel read taken just after the fade was sent.
+
+    The bulb fades from its real level, which a change made elsewhere (one ZHA can't tell from the bulb's own reports)
+    leaves the prediction blind to. The read is timed at the middle of its round trip and lies on the bulb's ramp, which
+    ends at the sent end point at the sent end time, so the ramp's real start is solved for and the fade re-recorded
+    from it: the next move, a stop and the soft off's restore then start from where the bulb really is. Sent first and
+    read after, so a move starts with no added latency; a read after the fade's end, or after a newer move or a stop
+    took over, changes nothing.
+    """
+    try:
+        before = cache.clock()
+        read = await zcl.read_attributes(hass, address(light.entry.unique_id), zcl.LEVEL_CLUSTER, (zcl.CURRENT_LEVEL,))
+        at = (before + cache.clock()) / 2
+        level = read[zcl.CURRENT_LEVEL] * 100 / 254
+    except Exception as err:  # noqa: BLE001 - the prediction stands, as on the other integrations
+        _LOGGER.debug("Level read after a move failed for %s: %s", light.entity_id, err)
+        return
+    elapsed = (at - recorded.started_at) / recorded.duration if recorded.duration > 0 else 1.0
+    if elapsed >= 1 or cache.live(light.entity_id, BRIGHTNESS) is not recorded:
+        return
+    start = min(max((level - recorded.target * elapsed) / (1 - elapsed), 0.0), 100.0)
+    fade.starts[light.entity_id] = start
+    cache.moving(light.entity_id, BRIGHTNESS, start, recorded.target, recorded.duration, started_at=recorded.started_at)
+
+
+def end_job(hass: HomeAssistant, light: Target, restore: dict[str, float] | None, context: Context | None) -> Job:
+    """Once a fade has run: a soft off's restore of the light's start level (in restore, as last fitted), if the light
+    reads off, then a refresh."""
 
     async def run() -> None:
         if restore is not None:
@@ -348,7 +391,7 @@ def end_job(hass: HomeAssistant, light: Target, restore: int | None, context: Co
                 addr = address(light.entry.unique_id)
                 read = await zcl.read_attributes(hass, addr, zcl.ON_OFF_CLUSTER, (zcl.ON_OFF,))
                 if not read[zcl.ON_OFF]:
-                    params = {"level": restore, **zcl.execute_if_off(0)}
+                    params = {"level": zcl.level(restore[light.entity_id]), **zcl.execute_if_off(0)}
                     await zcl.command(hass, addr, zcl.LEVEL_CLUSTER, zcl.MOVE_TO_LEVEL, params, context)
             except Exception as err:  # noqa: BLE001 - the light stays off, and comes back on dim
                 _LOGGER.warning("Restoring %s's level after a soft off failed: %s", light.entity_id, err)
