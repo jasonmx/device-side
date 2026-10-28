@@ -11,13 +11,9 @@ from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import async_mock_service
 
 from custom_components.device_side.core.runtime import get_runtime
+from custom_components.device_side.core.transition import BRIGHTNESS, COLOR_TEMP
 from custom_components.device_side.integrations.hue.report_filter import Report, applies_later, classify
-from custom_components.device_side.integrations.hue.transition_cache import (
-    API_SETTLE_SECONDS,
-    BRIGHTNESS,
-    COLOR_TEMP,
-    transition_cache,
-)
+from custom_components.device_side.integrations.hue.transition_cache import API_SETTLE_SECONDS, transition_cache
 
 from .conftest import light_event, setup_room
 from ...conftest import call
