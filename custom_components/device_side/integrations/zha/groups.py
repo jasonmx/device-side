@@ -1,6 +1,7 @@
 """A ZHA group's members, for the dispatcher to expand a group entity into."""
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 
 from . import zcl
 from .addressing import group_id
@@ -21,3 +22,14 @@ def expand_group(hass: HomeAssistant, target: Target) -> list[Target]:
         return []
     unique_ids = (f"{member.device.ieee}-{member.endpoint_id}" for member in group.members)
     return resolve_members(hass, get_runtime(hass).registry, target, "zha", unique_ids)
+
+
+def light_members(hass: HomeAssistant, gid: int) -> frozenset[str]:
+    """The entity IDs of the group's member lights, whether or not a call targets them: a groupcast reaches them all."""
+    if (group := zcl.gateway(hass).get_group(gid)) is None:
+        return frozenset()
+    registry = er.async_get(hass)
+    unique_ids = (f"{member.device.ieee}-{member.endpoint_id}" for member in group.members)
+    return frozenset(
+        entity_id for uid in unique_ids if (entity_id := registry.async_get_entity_id("light", "zha", uid)) is not None
+    )

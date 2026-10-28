@@ -7,10 +7,9 @@ from typing import ClassVar
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import Unauthorized
-from homeassistant.helpers import entity_registry as er
 
 from . import zcl
-from .addressing import Address, address, group_id, unsupported_reason
+from .addressing import Address, address, unsupported_reason, via_zha_group
 from ...actions.turn_on_for import TurnOnForRequest
 from ...core.adapter import Adapter
 from ...core.models import EntityResult, Status, Target
@@ -70,7 +69,7 @@ class ZHATurnOnFor(Adapter[TurnOnForRequest]):
         groups: dict[tuple[str, int], list[Target]] = {}
         singles: list[Target] = []
         for target in targets:
-            if (gid := _via_zha_group(hass, target)) is not None:
+            if (gid := via_zha_group(hass, target)) is not None:
                 groups.setdefault((target.via_group, gid), []).append(target)
             else:
                 singles.append(target)
@@ -116,18 +115,9 @@ class ZHATurnOnFor(Adapter[TurnOnForRequest]):
             async with integration_limit, adapter_limit:
                 if request.light.present():
                     await self._turn_on(hass, request, group_entity)
-                await hass.services.async_call(
-                    "zha",
-                    "issue_zigbee_group_command",
-                    {
-                        "group": gid,
-                        "cluster_id": zcl.ON_OFF_CLUSTER,
-                        "command": _ON_WITH_TIMED_OFF,
-                        # Positional only: on/off control, on time, off wait time.
-                        "args": [0, on_time, 0],
-                    },
-                    blocking=True,
-                    context=request.context,
+                # Positional only: on/off control, on time, off wait time.
+                await zcl.group_command(
+                    hass, gid, zcl.ON_OFF_CLUSTER, _ON_WITH_TIMED_OFF, [0, on_time, 0], request.context
                 )
         except Unauthorized:
             return [self.result(target, Status.REJECTED, detail="admin_required") for target in members]
@@ -169,10 +159,3 @@ class ZHATurnOnFor(Adapter[TurnOnForRequest]):
         if running:
             return self.result(target, Status.CONFIRMED)
         return self.result(target, Status.SENT, detail="timer_not_reported")
-
-
-def _via_zha_group(hass: HomeAssistant, target: Target) -> int | None:
-    """The Zigbee group ID of the ZHA group the target was expanded from, or None."""
-    if target.via_group is None or (entry := er.async_get(hass).async_get(target.via_group)) is None:
-        return None
-    return group_id(entry.unique_id) if entry.platform == "zha" else None

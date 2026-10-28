@@ -22,34 +22,24 @@ from ...core.models import EntityResult, Status, Target
 from ...core.scope import AdapterScope
 
 # 0.4 s, the Hue bridge's default write fade, so a call looks alike on both; a light that is off doesn't fade.
-# The override sets ExecuteIfOff for this command only, so the light takes it while off; Options stays untouched.
-_EXECUTE_IF_OFF = {"transition_time": 4, "options_mask": 1, "options_override": 1}
-
-# Models that don't store a MoveToLevel while off: the Sengled E11-G13 jumps CurrentLevel to 255 with or without the
-# override and comes on at full (docs/integrations.md, ZHA tested behavior).
-_DROPS_WHILE_OFF = frozenset({"E11-G13"})
+_EXECUTE_IF_OFF = zcl.execute_if_off(4)
 
 _COLOR_MODES = frozenset({"xy", "hs"})
 
 Command = tuple[int, int, dict[str, Any]]
 
 
-def _level(percent: float) -> int:
-    """CurrentLevel for a brightness percent; 0 is the lowest level, 1, as Hue sets its lowest."""
-    return max(1, round(percent * 254 / 100))
-
-
 def _brightness(request: SetAttributesRequest, current_level: int | None) -> Command | None:
     """The MoveToLevel for the request: its brightness, or the current level clamped to min/max; None if unchanged."""
     if request.brightness is not None:
-        level = _level(request.brightness)
+        level = zcl.level(request.brightness)
     else:
         percent = current_level * 100 / 254
         if request.min_brightness is not None:
             percent = max(request.min_brightness, percent)
         if request.max_brightness is not None:
             percent = min(request.max_brightness, percent)
-        if (level := _level(percent)) == current_level:
+        if (level := zcl.level(percent)) == current_level:
             return None
     return zcl.LEVEL_CLUSTER, zcl.MOVE_TO_LEVEL, {"level": level, **_EXECUTE_IF_OFF}
 
@@ -143,7 +133,7 @@ class ZHASetAttributes(Adapter[SetAttributesRequest]):
     def supports(self, hass: HomeAssistant, request: SetAttributesRequest, target: Target) -> str | None:
         if reason := super().supports(hass, request, target) or unsupported_reason(target):
             return reason
-        if target.device is not None and target.device.model in _DROPS_WHILE_OFF:
+        if target.device is not None and target.device.model in zcl.DROPS_WHILE_OFF:
             return "execute_if_off_unsupported"
         return None
 

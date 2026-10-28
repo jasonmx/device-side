@@ -18,7 +18,7 @@ from ...core.dispatcher import EMPTY_GROUP
 from ...core.models import EntityResult, Status, Target
 from ...core.runtime import Job, get_runtime
 from ...core.scope import AdapterScope
-from ...core.transition import BRIGHTNESS, SATURATION, TransitionCache
+from ...core.transition import BRIGHTNESS, SATURATION, TransitionCache, hs_color, light_brightness, lit
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,29 +51,6 @@ def read_back_key(target: Target) -> str:
 
 async def lights_of(hass: HomeAssistant, target: Target) -> list[Target]:
     return await member_lights(hass, target) if target.is_group else [target]
-
-
-def reported_brightness(light: Target) -> float:
-    """HA's brightness in percent, 0 while off: a move from off starts at the bottom."""
-    brightness = light.state.attributes.get("brightness") if light.state and light.state.state == "on" else None
-    return brightness / 255 * 100 if brightness is not None else 0.0
-
-
-def light_brightness(cache: TransitionCache, light: Target) -> float:
-    return cache.value(light.entity_id, BRIGHTNESS, reported_brightness(light))
-
-
-def lit(cache: TransitionCache, lights: list[Target]) -> list[Target]:
-    """The lights that are on, or predicted above 0 %: Z2M publishes off at the start of a soft off."""
-    return [
-        light
-        for light in lights
-        if (light.state and light.state.state == "on") or cache.value(light.entity_id, BRIGHTNESS, 0.0) > 0
-    ]
-
-
-def hs_color(light: Target) -> tuple[float, float] | None:
-    return light.state.attributes.get("hs_color") if light.state else None
 
 
 @dataclass(frozen=True, slots=True)

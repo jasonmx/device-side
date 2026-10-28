@@ -3,6 +3,7 @@
 from typing import NamedTuple
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 
 from ...core.models import Target
 
@@ -39,6 +40,13 @@ def group_id(unique_id: str) -> int | None:
         return int(hex_id, 16) if marker else None
     except ValueError:
         return None
+
+
+def via_zha_group(hass: HomeAssistant, target: Target) -> int | None:
+    """The Zigbee group ID of the ZHA group the target was expanded from, or None."""
+    if target.via_group is None or (entry := er.async_get(hass).async_get(target.via_group)) is None:
+        return None
+    return group_id(entry.unique_id) if entry.platform == "zha" else None
 
 
 def unsupported_reason(target: Target) -> str | None:

@@ -14,6 +14,8 @@ ON_TIME = 0x4001
 LEVEL_CLUSTER = 0x0008
 CURRENT_LEVEL = 0x0000
 MOVE_TO_LEVEL = 0x00
+STOP = 0x03
+MOVE_TO_LEVEL_WITH_ON_OFF = 0x04
 
 COLOR_CLUSTER = 0x0300
 CURRENT_HUE = 0x0000
@@ -24,9 +26,28 @@ COLOR_TEMPERATURE = 0x0007
 COLOR_MODE = 0x0008
 ENHANCED_CURRENT_HUE = 0x4000
 ENHANCED_COLOR_MODE = 0x4001
+COLOR_CAPABILITIES = 0x400A
+ENHANCED_HUE = 0x02  # ColorCapabilities bit 1
 MOVE_TO_HUE_AND_SATURATION = 0x06
 MOVE_TO_COLOR = 0x07
 MOVE_TO_COLOR_TEMP = 0x0A
+ENHANCED_MOVE_HUE = 0x41
+STOP_MOVE_STEP = 0x47
+
+# Models that don't store a MoveToLevel while off: the Sengled E11-G13 jumps CurrentLevel to 255 with or without the
+# override and comes on at full (docs/integrations.md, ZHA tested behavior).
+DROPS_WHILE_OFF = frozenset({"E11-G13"})
+
+
+def level(percent: float) -> int:
+    """CurrentLevel for a brightness percent; 0 is the lowest level, 1, as Hue sets its lowest."""
+    return max(1, round(percent * 254 / 100))
+
+
+def execute_if_off(transition_tenths: int) -> dict[str, int]:
+    """A MoveTo command's transition and the ExecuteIfOff override, which makes a light that is off store the value
+    and stay off. It applies to this command only; the light's Options attribute stays untouched."""
+    return {"transition_time": transition_tenths, "options_mask": 1, "options_override": 1}
 
 
 async def command(
@@ -55,6 +76,23 @@ async def command(
             "command_type": "server",
             "params": params,
         },
+        blocking=True,
+        context=context,
+    )
+
+
+async def group_command(
+    hass: HomeAssistant, gid: int, cluster_id: int, command_id: int, args: list[Any], context: Context | None
+) -> None:
+    """Groupcast a server command to a Zigbee group through zha.issue_zigbee_group_command; args are positional.
+
+    Admin-only, like command(), so it carries the caller's context. A groupcast returns at once with no delivery
+    feedback: a member that can't run the command drops it silently.
+    """
+    await hass.services.async_call(
+        "zha",
+        "issue_zigbee_group_command",
+        {"group": gid, "cluster_id": cluster_id, "command": command_id, "args": args},
         blocking=True,
         context=context,
     )

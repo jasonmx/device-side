@@ -15,7 +15,7 @@ Facts this builds on:
   - Level `Stop` and `StopMoveStep` halt a `MoveTo…` fade part-way, and the halt holds.
   - The bulb reports brightness mid-fade, and ZHA applies it. Color is never applied without `update_entity`.
   - ExecuteIfOff (`options_mask: 1, options_override: 1`) stores a level while off; the E11-G13 drops it
-    (`zha/set_attributes.py:_DROPS_WHILE_OFF`).
+    (`zha/zcl.py:DROPS_WHILE_OFF`).
 - zha 2.3.1, the version HA pins (`zha/application/platforms/light/__init__.py`):
   - HA's ZHA lights are xy-only. `async_update` reads `current_x`/`current_y` in any non-CT color mode, so an
     hs-mode bulb still reads back as xy. No write-back like 13i's is needed, as long as the bulb keeps x/y current
@@ -29,7 +29,7 @@ Facts this builds on:
 - **Soft off on ZHA (down to 0 %):** a raw `MoveToLevelWithOnOff` to 0, which leaves the bulb at level 1. When
   the fade ends, if OnOff reads off, `MoveToLevel` back to the move's start level with ExecuteIfOff and no
   transition. The bulb stays off and comes back at its old level from any source (HA, a bound remote), as on Hue
-  and Z2M. A stop or a new move cancels the restore. It's skipped on `_DROPS_WHILE_OFF` models, which come on dim.
+  and Z2M. A stop or a new move cancels the restore. It's skipped on `DROPS_WHILE_OFF` models, which come on dim.
   An HA restart mid-fade loses the restore, so the bulb comes on dim (a documented sharp edge).
 - **Saturation:** `MoveToColor`, an xy fade to the current hue at the end saturation, with a transition. It's
   halted by `StopMoveStep`, which in 13i looked dead smooth toward deep color and overshot slightly toward white.
@@ -69,11 +69,11 @@ Add the constants: `MOVE_TO_LEVEL_WITH_ON_OFF = 0x04`, `STOP = 0x03`, `ENHANCED_
   the group mean start, recording before each send), so each detail means the same on both integrations.
 - **Brightness:**
   - Up sends `MoveToLevelWithOnOff(limit, t)`. Before it, each member that is off gets `MoveToLevel(1)` with
-    ExecuteIfOff and t 0, unicast, so the move starts at the bottom. This is skipped on `_DROPS_WHILE_OFF`, which
+    ExecuteIfOff and t 0, unicast, so the move starts at the bottom. This is skipped on `DROPS_WHILE_OFF`, which
     is documented.
   - Down to a limit is `MoveToLevel(limit, t)`, on lit lights only.
   - Down to 0 is `MoveToLevelWithOnOff(0, t)`, then a scheduled restore per light at `t + 1 s`: read OnOff, and if
-    it's off, `MoveToLevel(start level)` with ExecuteIfOff and t 0. Skipped on `_DROPS_WHILE_OFF`.
+    it's off, `MoveToLevel(start level)` with ExecuteIfOff and t 0. Skipped on `DROPS_WHILE_OFF`.
   - Down on a light that's off is `unchanged`, `off`.
 - **Saturation:** lit lights in a color mode. The start is `cache.value(entity, SATURATION, hs_color[1])`, and
   the end xy is `color_hs_to_xy(current hue, limit)`, sent as `MoveToColor` with t. Dropped on lights whose

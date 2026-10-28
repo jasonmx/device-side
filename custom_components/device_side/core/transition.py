@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 from homeassistant.core import HomeAssistant
 
+from .models import Target
 from .runtime import get_runtime
 
 BRIGHTNESS = "brightness"  # in percent
@@ -132,3 +133,26 @@ def transition_cache[C: TransitionCache](hass: HomeAssistant, integration: str, 
     if (cache := state.get(key)) is None:
         cache = state[key] = make()
     return cache
+
+
+def reported_brightness(light: Target) -> float:
+    """HA's brightness in percent, 0 while off: a move from off starts at the bottom."""
+    brightness = light.state.attributes.get("brightness") if light.state and light.state.state == "on" else None
+    return brightness / 255 * 100 if brightness is not None else 0.0
+
+
+def light_brightness(cache: TransitionCache, light: Target) -> float:
+    return cache.value(light.entity_id, BRIGHTNESS, reported_brightness(light))
+
+
+def lit(cache: TransitionCache, lights: list[Target]) -> list[Target]:
+    """The lights that are on, or predicted above 0 %: a soft off may report off before its fade has run."""
+    return [
+        light
+        for light in lights
+        if (light.state and light.state.state == "on") or cache.value(light.entity_id, BRIGHTNESS, 0.0) > 0
+    ]
+
+
+def hs_color(light: Target) -> tuple[float, float] | None:
+    return light.state.attributes.get("hs_color") if light.state else None
