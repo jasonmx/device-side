@@ -1,4 +1,4 @@
-"""Zigbee2MQTT's bridge: its groups and entity options, read from retained topics, and options requests."""
+"""Zigbee2MQTT's bridge: its groups, device features and entity options from retained topics, and options requests."""
 
 import asyncio
 import json
@@ -26,6 +26,26 @@ async def group_members(hass: HomeAssistant, group: str) -> list[str]:
         unsubscribe()
     members = next((g.get("members", []) for g in groups if str(g.get("id")) == group), [])
     return [member["ieee_address"] for member in members if member.get("ieee_address")]
+
+
+async def has_feature(hass: HomeAssistant, ieees: list[str], name: str) -> bool:
+    """Whether any of these devices' Z2M definitions exposes a feature by this name, from bridge/devices."""
+    payload: asyncio.Future[str] = hass.loop.create_future()
+    unsubscribe = await mqtt.async_subscribe(hass, bridge_topic("devices"), first_payload(payload))
+    try:
+        devices = json.loads(await wait(payload, _RETAINED_TIMEOUT_S, "no bridge/devices from Zigbee2MQTT"))
+    finally:
+        unsubscribe()
+    return any(
+        _exposes(name, (device.get("definition") or {}).get("exposes", []))
+        for device in devices
+        if device.get("ieee_address") in ieees
+    )
+
+
+def _exposes(name: str, features: list[dict]) -> bool:
+    """Whether the feature is in this exposes list, or nested in one of its composites (a light's features)."""
+    return any(feature.get("name") == name or _exposes(name, feature.get("features", [])) for feature in features)
 
 
 async def ensure_options(

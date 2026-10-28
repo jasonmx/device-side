@@ -109,18 +109,33 @@ class Reader:
                     if (brightness := state.get("brightness")) is not None:
                         attributes["currentLevel"] = brightness
                     continue
-                self._reply, self._expected = self.hass.loop.create_future(), set(names)
-                self._failure = (f"{z2m_address(target.device)}/", f"{cluster}.read(")
-                payload = {"read": {"cluster": cluster, "attributes": names, "state_property": READ_KEY}}
-                await self.hass.services.async_call(
-                    "mqtt", "publish", {"topic": topic(target, "set"), "payload": json.dumps(payload)}, blocking=True
-                )
-                reply, state = await wait(self._reply, _REPLY_TIMEOUT_S, f"no {cluster} reply from Zigbee2MQTT")
+                reply, state = await self._read(target, cluster, names)
                 attributes |= reply
         finally:
-            self._reply = None
             unsubscribe()
         return attributes
+
+    async def read_cluster(self, target: Target, cluster: str, names: list[str]) -> dict:
+        """These attributes of one cluster; raises when the read fails, as read does."""
+        unsubscribe = await mqtt.async_subscribe(self.hass, state_topic(target), self._on_state)
+        try:
+            reply, _state = await self._read(target, cluster, names)
+        finally:
+            unsubscribe()
+        return reply
+
+    async def _read(self, target: Target, cluster: str, names: list[str]) -> tuple[dict, dict]:
+        """The cluster's reply and the state Z2M published it in, over a subscription to the state topic."""
+        self._reply, self._expected = self.hass.loop.create_future(), set(names)
+        self._failure = (f"{z2m_address(target.device)}/", f"{cluster}.read(")
+        payload = {"read": {"cluster": cluster, "attributes": names, "state_property": READ_KEY}}
+        try:
+            await self.hass.services.async_call(
+                "mqtt", "publish", {"topic": topic(target, "set"), "payload": json.dumps(payload)}, blocking=True
+            )
+            return await wait(self._reply, _REPLY_TIMEOUT_S, f"no {cluster} reply from Zigbee2MQTT")
+        finally:
+            self._reply = None
 
 
 @asynccontextmanager
@@ -138,7 +153,7 @@ async def reader(hass: HomeAssistant, devices: list[Target]) -> AsyncIterator[Re
 
         def added(address: str) -> None:
             _LOGGER.info(
-                "Added %s to Zigbee2MQTT's %s for %s, so get_attributes reads it live",
+                "Added %s to Zigbee2MQTT's %s for %s, so device_side reads it live",
                 READ_KEY, _FILTERED_CACHE, by_address[address].entity_id,
             )
 
