@@ -40,6 +40,9 @@ Decided in the interview (2026-10-28):
   - This departs from the slice's EnhancedMoveHue decision for Z2M only; ZHA (13f) keeps EnhancedMoveHue.
   - What we give up: very slow cycles, and rate rounding (6% off at a 60 s cycle). Those belong to Z2M's
     `colorloop` effect anyway.
+- **Superseded by slice 14** (`2026-10-28-z2m-color-modes.md`): device_side now announces full-color lights with both
+  color modes, so HA takes Z2M's hs. The write-back below was backed out there; only the color get after a
+  saturation stop, a saturation move's end and a group stop stays, in `color_refresh.py`.
 - **HA's hs drop is fixed with an xy write-back to the bulb** (amended 2026-10-28, after probe (a)).
   - Only for a light whose HA `supported_color_modes` lack `hs`: a light announced as `hs` takes Z2M's own
     read-back, and gets nothing extra.

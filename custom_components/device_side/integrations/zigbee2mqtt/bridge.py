@@ -18,12 +18,7 @@ _REPLY_TIMEOUT_S = 5.0
 
 async def group_members(hass: HomeAssistant, group: str) -> list[str]:
     """The IEEE addresses of a Z2M group's members, from bridge/groups; none for a group it doesn't list."""
-    payload: asyncio.Future[str] = hass.loop.create_future()
-    unsubscribe = await mqtt.async_subscribe(hass, bridge_topic("groups"), first_payload(payload))
-    try:
-        groups = json.loads(await wait(payload, _RETAINED_TIMEOUT_S, "no bridge/groups from Zigbee2MQTT"))
-    finally:
-        unsubscribe()
+    groups = await retained(hass, "groups")
     members = next((g.get("members", []) for g in groups if str(g.get("id")) == group), [])
     return [member["ieee_address"] for member in members if member.get("ieee_address")]
 
@@ -31,12 +26,7 @@ async def group_members(hass: HomeAssistant, group: str) -> list[str]:
 async def has_feature(hass: HomeAssistant, ieees: list[str], name: str) -> bool:
     """Whether every one of these devices' Z2M definitions exposes a feature by this name, from bridge/devices: Z2M
     gives a group only the features its members share."""
-    payload: asyncio.Future[str] = hass.loop.create_future()
-    unsubscribe = await mqtt.async_subscribe(hass, bridge_topic("devices"), first_payload(payload))
-    try:
-        devices = json.loads(await wait(payload, _RETAINED_TIMEOUT_S, "no bridge/devices from Zigbee2MQTT"))
-    finally:
-        unsubscribe()
+    devices = await retained(hass, "devices")
     exposing = {
         device.get("ieee_address")
         for device in devices
@@ -48,6 +38,16 @@ async def has_feature(hass: HomeAssistant, ieees: list[str], name: str) -> bool:
 def _exposes(name: str, features: list[dict]) -> bool:
     """Whether the feature is in this exposes list, or nested in one of its composites (a light's features)."""
     return any(feature.get("name") == name or _exposes(name, feature.get("features", [])) for feature in features)
+
+
+async def retained(hass: HomeAssistant, suffix: str) -> Any:
+    """The parsed retained message on bridge/<suffix>; raises TimeoutError when Z2M hasn't published one."""
+    payload: asyncio.Future[str] = hass.loop.create_future()
+    unsubscribe = await mqtt.async_subscribe(hass, bridge_topic(suffix), first_payload(payload))
+    try:
+        return json.loads(await wait(payload, _RETAINED_TIMEOUT_S, f"no bridge/{suffix} from Zigbee2MQTT"))
+    finally:
+        unsubscribe()
 
 
 async def ensure_options(

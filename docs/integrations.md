@@ -133,6 +133,39 @@ which matches the IEEE-keyed `devices` map before `friendly_name`). A group's ID
 survives a rename: `resolveEntity` falls back to `getGroup`, which matches the ID-keyed `groups` map
 before `friendly_name`.
 
+### What Device Side changes in Zigbee2MQTT
+
+Device Side sets three of Z2M's per-device and per-group options, each logged at info level when it changes:
+
+- **`hue_native_control`**, on a Hue bulb or a group with one, before a timer with a color, so the light comes
+  on in that color rather than its last one (see `turn_on_for`).
+- **`filtered_cache`**, before the first `get_attributes` read of a device, so a read's answer isn't cached and
+  resent in every later message (see `get_attributes`).
+- **`homeassistant.light.supported_color_modes`**, on every full-color light and group, so Home Assistant shows
+  the light's color in either color mode (below).
+
+**Color modes.** A light whose Z2M definition exposes both `color_xy` and `color_hs` can be in either mode, but
+Z2M announces only one of them to Home Assistant, usually `xy`. When the bulb is in the other (after a hue or
+saturation move, a Hue gradient scene, a remote's binding, or a power cut), Z2M reports `color_mode: "hs"`, and
+Home Assistant rejects a mode it wasn't announced: it keeps showing the old color, even as Z2M resends the state
+every few minutes ([Koenkk/zigbee2mqtt#28757](https://github.com/Koenkk/zigbee2mqtt/issues/28757)). Z2M declined
+to announce both modes by default, as some lights handle mixed modes badly
+([#33025](https://github.com/Koenkk/zigbee2mqtt/issues/33025)).
+
+So Device Side sets the light's Home Assistant override in Z2M to `xy`, `hs`, and `color_temp` where the light
+has it. Z2M applies the override to its discovery message at once, Home Assistant keeps the entity, and from
+then on accepts every state Z2M sends. The bulb itself is never touched. A group is changed when every member
+qualifies. Lights exposing one color model, and lights on an endpoint (`light_l1`), are left alone. Device Side
+does this at setup and again whenever Z2M announces a device or group change (a device joining, being
+interviewed, coming back after a power cut, a group's members changing), reading Z2M's settings each time. An
+override of your own is never changed, and a light you excluded from discovery is left alone.
+
+**Opting out.** Turn off "Fix colors of full-color Zigbee2MQTT lights" in Device Side's options, or delete Device
+Side. Z2M's settings can't delete an override (a `null` there strips the setting from Home Assistant's
+announcement instead), so Device Side writes back the modes Z2M announces by itself, wherever the value is still
+the one it set, and Home Assistant goes back to Z2M's single mode. Turning the option back on replaces those
+again.
+
 ### `turn_on_for`
 
 For **light entities without fields**: publishes `{"state":"ON","on_time":<seconds>}` to the
@@ -282,16 +315,16 @@ the light halted. Once a fade has run, the light's state and brightness are read
 ""}` on its get topic), so Home Assistant ends right even if a `get_attributes` read mid-fade overwrote the end
 value. A new move or a stop replaces the pending read.
 
-**Color after a stop.** Z2M announces a color light to Home Assistant with `xy` or `hs`, never both, and after a
-hue or saturation command publishes the color as `hs`, which Home Assistant drops for a light announced with `xy`
-([Koenkk/zigbee2mqtt#28757](https://github.com/Koenkk/zigbee2mqtt/issues/28757)). So 1 s after a hue or saturation
-stop, and at the end of a saturation move, Device Side reads such a light's `colorMode`, `currentX` and `currentY`
-(as `get_attributes` reads them). If the bulb is in hs mode, it writes the bulb's own x/y back with `transition: 0`:
-the bulb doesn't change, Z2M then publishes `xy`, and the bulb stays in xy mode. Otherwise it asks Z2M for the
-color (`{"color": ""}` on the get topic): after a stop of an xy fade, Z2M's own read-back carries the fade's end
-point. A light announced with `hs` gets the color get after a saturation stop only, which Z2M doesn't read back.
-A read or write that fails is logged as a warning and leaves Home Assistant's color stale; the result is still
+**Color after a stop.** A saturation stop is a raw command, which Z2M doesn't read back, and after a stop of an
+xy fade Z2M's own read-back carries its cached x/y, the fade's end point. So 1 s after a saturation stop, and at the
+end of a saturation move, Device Side asks Z2M for the color (`{"color": ""}` on the get topic), and Z2M publishes
+what it reads. A get that fails is logged as a warning and leaves Home Assistant's color stale; the result is still
 `sent`.
+
+After a hue or saturation command the bulb is in hs mode, and Z2M publishes the color as `hs`. Home Assistant takes
+it because Device Side announces the light with both color modes (see [What Device Side changes in
+Zigbee2MQTT](#what-device-side-changes-in-zigbee2mqtt)). With that option off, it drops the color and keeps showing
+the old one until the bulb is next in xy mode.
 
 **Groups.** A group gets one publish per attribute to its group topic, so its members fade together. Its start is
 the mean of its members that are on, and each member's fade is remembered from its own start. Z2M reads a group's

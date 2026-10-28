@@ -10,3 +10,7 @@ ADAPTER_TIMEOUT_S = 30
 # Hue fades: hide the bridge's end-value and late reports from HA and show device_side's predictions instead.
 CONF_PREDICTED_STATE = "predicted_state"
 PREDICTED_STATE_DEFAULT = True
+
+# Zigbee2MQTT: announce full-color lights to HA with both color modes, so HA takes the bulb's state in either.
+CONF_Z2M_COLOR_MODES = "z2m_color_modes"
+Z2M_COLOR_MODES_DEFAULT = True

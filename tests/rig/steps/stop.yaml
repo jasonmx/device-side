@@ -39,7 +39,7 @@ tests:
       - expect_response: {status: expected}
       - sample: {attribute: brightness, for: 2, expect: steady}
 
-  # Zigbee2MQTT publishes a hue or saturation stop's color in a mode HA drops; xy_writeback brings HA in line.
+  # Zigbee2MQTT publishes a hue stop's color as hs, which HA takes only with z2m_color_modes on (the default).
   - name: hue_cycle_stop
     roles: [light_color]
     only: [zigbee2mqtt]
@@ -55,7 +55,7 @@ tests:
       - expect_matches_read: {attributes: [xy_color.0, xy_color.1], tolerance: 0.01}
     observe:
       see: 'The light at hue 30° (orange), 90 % saturation, turning through yellow at 18° a second, stopped after 3 s near 84°.'
-      watch: 'The stop and the 1 s after it: no jump, and no second change when Home Assistant''s color is brought in line.'
+      watch: 'The stop and the 1 s after it: no jump, and and no second change a second later.'
       ask: Did it stop where it was and hold, with no jump at the stop or a second later?
 
   - name: saturation_down_stop
