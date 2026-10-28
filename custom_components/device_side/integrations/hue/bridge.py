@@ -5,10 +5,10 @@ from typing import TYPE_CHECKING
 
 from homeassistant.core import HomeAssistant
 
-from .transition_cache import BRIGHTNESS, COLOR_TEMP
 from ...core.models import Target
 from ...core.resolver import resolve_members
 from ...core.runtime import get_runtime
+from ...core.transition import BRIGHTNESS, COLOR_TEMP
 
 if TYPE_CHECKING:
     from aiohue.v2 import HueBridgeV2

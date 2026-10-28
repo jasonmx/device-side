@@ -8,7 +8,7 @@ color temperature, and a color temperature move only mirek (Tested behavior in d
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
-from .transition_cache import BRIGHTNESS, COLOR_TEMP
+from ...core.transition import BRIGHTNESS, COLOR_TEMP
 
 # Where each report key sits in an event, as (object, field): every key an attribute owns or could own.
 REPORT_KEYS: dict[str, tuple[str, str]] = {

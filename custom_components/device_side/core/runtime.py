@@ -24,7 +24,7 @@ class DeviceSideData:
     dispatcher: Dispatcher
     # Created lazily so each semaphore binds to the running loop, not the import executor's thread.
     semaphores: dict[str, asyncio.Semaphore] = field(default_factory=dict)
-    # Per-integration scratch state that outlives one call (the Hue transition cache).
+    # Per-integration scratch state that outlives one call (the transition caches, the Hue report filters).
     integration_state: dict[str, Any] = field(default_factory=dict)
     # Delayed jobs not yet run, by the caller's key (the Z2M read-backs after a timer).
     pending: dict[str, list[CALLBACK_TYPE]] = field(default_factory=dict)
