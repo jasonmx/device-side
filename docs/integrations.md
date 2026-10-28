@@ -289,8 +289,9 @@ firmware. Most Z2M-supported lights cancel the timer on any state change.
 ### What it talks to
 
 Zigbee devices on the core `zha` integration's own coordinator. Device Side calls ZHA's
-`zha.issue_zigbee_cluster_command` action, which sends the Zigbee `OnWithTimedOff` command to the
-device. The timer runs on the device.
+`zha.issue_zigbee_cluster_command` action, which sends a Zigbee command to the device:
+`OnWithTimedOff` for a timer, which then runs on the device, and the `MoveTo…` commands for
+`set_attributes`.
 
 ### How targets resolve
 
@@ -329,6 +330,30 @@ off and reports `not_on`, then comes on and stays on. The measurements are in `d
 Lights only, with `brightness` and `color_temp_kelvin` as the fields, until more are tested on
 hardware. Zigbee plugs and switches are unsupported, as on Zigbee2MQTT: the one tested, a Tuya
 TS011F, stores OnTime as its own countdown and never switches on, so it reads back `not_on`.
+
+### `set_attributes`
+
+Sends each light the Level and Color cluster `MoveTo…` commands, one after another, never the
+`…WithOnOff` ones, so a light that is off stays off and comes on with the new settings. Each
+command carries the ZCL `ExecuteIfOff` override (`options_mask: 1, options_override: 1`), which
+makes a light that is off take it, and a 0.4 s transition, the Hue bridge's default, so a light
+that is on fades as it would on Hue. Then Device Side calls `homeassistant.update_entity` on the
+light, since ZHA never applies a color temperature report.
+
+The fields, units and names are Hue's (below). `brightness` is a percent of level 254, and `0`
+sends level 1, the lowest; `min_brightness` and `max_brightness` read the light's CurrentLevel
+live and clamp it, so they work while off, and a light already inside them is `unchanged` with
+`within_limits`. `color_temp_kelvin` goes as mireds, clamped to the light's range. A color goes as
+xy (`MoveToColor`), or as hue and saturation (`MoveToHueAndSaturation`) on a light without xy;
+the light clamps it to its own gamut. Given a color and a color temperature, only the color is
+sent, as both set the light's color; a color light without color temperature takes it as a color,
+as core's `light.turn_on` does. A field the light can't take is dropped, as on Hue.
+
+A light whose commands return is `sent`: ZHA raises when one can't be delivered or fails, and that
+light is `rejected`. Nothing is read back, so a bulb that ignores the override reports `sent` too.
+A model shown to mishandle a write while off (tested behavior, below) is refused with
+`execute_if_off_unsupported`. A ZHA group expands to its members, written one at a time. Lights
+only.
 
 ### `get_attributes`
 
@@ -377,6 +402,12 @@ devices may differ.
   the bulb turned off 10 s later.
 - **With no timer running, writing `OnTime` = 0 changes nothing,** whether the bulb is on or off.
 
+For `set_attributes`, the LTA004 stores `MoveToLevel` and `MoveToColorTemp` with the
+`ExecuteIfOff` override while off, stays off and comes on at them; without the override it drops
+them (`docs/plans/2026-10-27-zigbee-probe.md`). A Sengled E11-G13, firmware `0x00000009`, takes
+`MoveToLevel` while on, but while off, with the override or without, its CurrentLevel jumped to 255
+and it came on at full brightness, so `set_attributes` refuses that model.
+
 ### Sharp edges
 
 - **Admin only.** `zha.issue_zigbee_cluster_command` and `zha.issue_zigbee_group_command` are
@@ -384,6 +415,11 @@ devices may differ.
   detail `admin_required`. Automations run without a user, so they pass.
 - **Duration limits.** `on_time` is a uint16 in tenths of a second, so the maximum is 6553.4 s
   (about 1.8 hours). A longer duration is clamped and the result carries `clamped_to`.
+- **A clamp reads the light mid-fade.** `min_brightness` and `max_brightness` clamp the level the
+  light is at, read live. Within about 0.5 s of a brightness change it is still fading, and the
+  clamp's `MoveToLevel` replaces the fade's end: a light turned on at 70 % and clamped to at least
+  50 % at once can end at 50 %. Home Assistant shows a ZHA group's new brightness on its members
+  straight away, before the bulbs get there.
 - **Turning the light on keeps the timer.** On the tested bulb, someone who turns the light on or
   changes its brightness during a timer still sees it switch off when the timer ends.
 - **Home Assistant can show the wrong state.** For 1.5 s after `light.turn_off`, ZHA ignores a

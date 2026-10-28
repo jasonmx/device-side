@@ -2,7 +2,7 @@
 # A room is written light by light, so on the group role the response and expect_state cover every member.
 # Color steps run on the light_color role only.
 action: set_attributes
-rig_seconds: 80
+rig_seconds: 85
 tests:
   - name: sets_while_off  # §3.1
     roles: [light_ct, group]
@@ -33,6 +33,7 @@ tests:
     roles: [light_ct, group]
     steps:
       - set: {state: on, brightness_pct: 20}
+      - wait: 1  # ZHA shows a group's brightness at once; let the fade end before the clamp reads it
       - call: {min_brightness: 50}
       - expect_state: {brightness: {min: 126, max: 130}, within: tol}
 
@@ -40,6 +41,7 @@ tests:
     roles: [light_ct, group]
     steps:
       - set: {state: on, brightness_pct: 70}
+      - wait: 1
       - call: {min_brightness: 50}
       - expect_response: {status: unchanged, detail: within_limits}
       - wait: tol
@@ -49,5 +51,6 @@ tests:
     roles: [light_ct, group]
     steps:
       - set: {state: on, brightness_pct: 80}
+      - wait: 1
       - call: {max_brightness: 30}
       - expect_state: {brightness: {min: 75, max: 79}, within: tol}

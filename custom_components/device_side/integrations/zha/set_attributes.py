@@ -168,7 +168,8 @@ class ZHASetAttributes(Adapter[SetAttributesRequest]):
                     await zcl.command(hass, addr, cluster_id, command_id, params, request.context)
             except Unauthorized:
                 return self.result(target, Status.REJECTED, detail="admin_required")
-            await self._refresh(hass, request, target.entity_id)
+            finally:  # a later command failing still leaves the earlier ones landed
+                await self._refresh(hass, request, target.entity_id)
             return self.result(target, Status.SENT, detail=detail)
 
         return await self.gather(hass, targets, send)

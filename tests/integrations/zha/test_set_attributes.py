@@ -206,6 +206,7 @@ async def test_a_command_error_rejects_that_light(hass, refreshes):
 
     assert raised.value.translation_key == "targets_failed"
     assert raised.value.translation_placeholders["summary"] == "light.gone: error"
+    assert sorted(refresh.data["entity_id"] for refresh in refreshes) == ["light.bulb", "light.gone"]
 
 
 async def test_a_failed_level_read_rejects_that_light(hass, commands, level_read):
@@ -241,7 +242,6 @@ async def test_non_admin_caller_is_refused_by_zha(hass, refreshes, hass_read_onl
 
     assert raised.value.translation_placeholders["summary"] == "light.bulb: admin_required"
     assert not calls
-    assert not refreshes
 
 
 async def test_entity_without_a_light_unique_id_is_not_addressable(hass, commands):
