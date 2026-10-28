@@ -174,3 +174,21 @@ Decided in the interview (2026-10-28):
   - the A60 reads xy while off;
   - the dimmable bulb and the group each read a live timer, which is gone once it ends;
   - the Hue and Shelly cases still pass.
+
+## Status at handoff (2026-10-28)
+
+Steps 0–8 and the audit are done and pushed on `wt/z2m-get-attributes`. Step 9 is blocked on one rig case:
+
+- Passing on Z2M: `reads_xy_while_off` (A60), `reads_a_group_timer`, `reads_a_running_timer[light_dimmable]`,
+  `reads_while_off[group]` (the ceilings).
+- `reads_while_off` needed a 2 s wait after the set: `set` waits only for on, and the off landed before Z2M's
+  separate color temperature command, which a bulb drops while off. With the wait, color temperature reads 2702 K.
+- **Open:** `reads_while_off[light_ct]` (the Hue CT bulb) reads brightness 40.2, then 27.6, then 5.9 in three
+  runs, against 40 set; the ceilings read 40.2 from the same steps. Suspect: Z2M turns a Hue bulb off with a level
+  move (or Hue fades CurrentLevel down on off), so the bulb's CurrentLevel is not the level it comes back on at,
+  which Z2M's cache keeps. Probe first: read `currentLevel` every 0.2 s through an off, and compare with Z2M's
+  published `brightness`. If the bulb's level isn't the restore level, decide with Jason whether brightness
+  while off comes from Z2M's cache, or from the bulb only while on.
+- Shelly cases pass. Hue's `light_ct` bulb was unavailable in the first run; rerun Hue once it is back.
+- Still to do after that: bench record from a passing Z2M run, PR, `TODO.md` Done row with the PR number,
+  `merge-green`, remove the worktree, fast-forward the main checkout.
