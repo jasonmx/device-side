@@ -39,8 +39,9 @@ puts back what it left before its gate; `--recover` does only that.
 
 Runs take a lock shared by every worktree; a second run waits for it. Each run deploys your committed, pushed
 checkout and restarts Home Assistant whenever HA hasn't loaded that tree, so queue behind the lock: your run
-redeploys. `--no-deploy` tests whatever HA runs. A signal during the deploy stops the run only once HA's restart
-finishes, so the next run never meets HA mid-restart.
+redeploys. A record cites the commit HA loaded, read before the tests, so committing mid-run is safe.
+`--no-deploy` tests whatever HA runs and, unless that is your checkout's tree, writes no record. A signal during
+the deploy stops the run only once HA's restart finishes, so the next run never meets HA mid-restart.
 
 ### Token
 

@@ -82,6 +82,7 @@ class Aborted(Exception):
 
 @dataclass(slots=True)
 class Deploy:
+    commit: str  # HEAD at the plan, whose tree local_tree is
     local_tree: str
     synced_tree: str | None  # on disk in HA's config
     loaded_tree: str | None  # what HA last restarted onto
@@ -163,9 +164,11 @@ def deploy_state(status_cmd: str) -> Deploy:
     deploy needs the change pushed.
     """
     branch = git("rev-parse", "--abbrev-ref", "HEAD")
+    commit = git("rev-parse", "HEAD")
     synced, loaded = deployed_trees(status_cmd)
     state = Deploy(
-        local_tree=git("rev-parse", f"HEAD:{COMPONENT}"),
+        commit=commit,
+        local_tree=git("rev-parse", f"{commit}:{COMPONENT}"),
         synced_tree=synced,
         loaded_tree=loaded,
         branch=branch,
@@ -423,7 +426,18 @@ def run_held(args: argparse.Namespace, journal: Journal) -> int:
         return 1
 
     deploy_and_wait(env, deploy.branch if deploying else None)
-    return run_tests(run_rig(env, suites, inventory, registry, args.keyword, args.unattended, journal))
+    commit = tested_commit(env.get("RIG_STATUS_CMD", ""), deploy, deploying)
+    return run_tests(run_rig(env, suites, inventory, registry, args.keyword, args.unattended, commit, journal))
+
+
+def tested_commit(status_cmd: str, deploy: Deploy, deploying: bool) -> str | None:
+    """The commit whose integration tree HA loaded for the tests, or None if none can be named: under --no-deploy HA
+    runs whatever it last loaded, and a deploy may install a different tip if origin moved past the plan (trusted when
+    HA can't say what it loaded). Read before the tests, since HEAD moves when the session commits mid-run."""
+    if not deploying:
+        return None if deploy.needed else deploy.commit
+    loaded = deployed_trees(status_cmd)[1]
+    return deploy.commit if loaded in (None, deploy.local_tree) else None
 
 
 def deploy_and_wait(env: dict, branch: str | None) -> None:
@@ -569,7 +583,7 @@ def print_plan(
     if deploying:
         print(f"Deploy: sync {deploy.branch}, then restart Home Assistant")
     elif deploy.needed:
-        print("Deploy: skipped (--no-deploy); the tests exercise the deployed tree, not this checkout")
+        print("Deploy: skipped (--no-deploy); tests run the deployed tree, not this checkout, and write no record")
     else:
         print("Deploy: not needed, no restart")
     seconds = estimate(suites, registry, deploying)
@@ -583,9 +597,11 @@ async def run_rig(
     registry: AdapterRegistry,
     keyword: str | None,
     unattended: bool,
+    commit: str | None,
     journal: Journal | None = None,
 ) -> int:
-    """Run the step files, then write a bench record for each adapter whose every test passed."""
+    """Run the step files, then write a bench record for each adapter whose every test passed, citing `commit`; with
+    no commit, none: a record nobody can trace to a commit proves nothing."""
     cancel_on_signals()
     ha, admin = await connect(env)
     bridge = None
@@ -607,10 +623,13 @@ async def run_rig(
         )
         stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         print(f"\nReport: {write_report(result, REPORT_DIR, f'rig run {stamp}')}")
-        source = f"rig run (`scripts/rig.py`), commit `{git('rev-parse', '--short', 'HEAD')}`"
-        today = datetime.date.today().isoformat()
-        for path in await write_records(result, ha, registry, BENCH_DIR, today, source):
-            print(f"Wrote {path.relative_to(REPO)}; review the diff before committing it.")
+        if commit is None:
+            print("No bench records: no commit names the tree HA ran (--no-deploy, or origin moved before the deploy).")
+        else:
+            source = f"rig run (`scripts/rig.py`), commit `{git('rev-parse', '--short', commit)}`"
+            today = datetime.date.today().isoformat()
+            for path in await write_records(result, ha, registry, BENCH_DIR, today, source):
+                print(f"Wrote {path.relative_to(REPO)}; review the diff before committing it.")
     finally:
         await resume(ha, paused, journal)
         if bridge:
