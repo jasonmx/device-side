@@ -299,6 +299,22 @@ Lights only, with `brightness` and `color_temp_kelvin` as the fields, until more
 hardware. Zigbee plugs and switches are unsupported, as on Zigbee2MQTT: the one tested, a Tuya
 TS011F, stores OnTime as its own countdown and never switches on, so it reads back `not_on`.
 
+### `get_attributes`
+
+Reads each light live, never from zigpy's attribute cache: ZHA doesn't apply color temperature
+reports, so the cache goes stale after a raw command or a bound remote. One uncached request per
+cluster per light, one after another: OnOff and OnTime always, Level when the light's
+`supported_color_modes` go beyond on/off, and Color when they include a color mode. That is slower
+than reading Home Assistant's state, but right mid-transition and after commands HA didn't send.
+The bulb keeps these values while off, so they read then too.
+
+`brightness` is a percent (CurrentLevel / 254), as Hue's is, so a read can be written back. Color
+is the active mode only (EnhancedColorMode where the light has it, else ColorMode):
+`color_temp_kelvin`, or `xy_color` or `hs_color` with the other two color keys derived from it. A
+running timer is returned as `timer`, the shared row, from OnTime, and only while the light reads
+on: a TS011F counts OnTime down while off. A ZHA group expands to its members, one entry each.
+Lights only, as for `turn_on_for`. A light that doesn't answer raises.
+
 ### Cancelling
 
 Send `light.turn_off`. Turning the light on again does not cancel the timer on the one bulb tested
