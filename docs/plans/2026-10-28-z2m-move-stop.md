@@ -152,10 +152,19 @@ Decided in the interview (2026-10-28):
    | the same, native control on | `color_temp: 191` (where a fade linear in kelvin would be), `transition: 0` | jump, maybe smaller |
    | `brightness` + `color_temp` in one publish | `brightness_move: stop` | brightness froze; color carried on to 454, then a flash toward cold and back to warm |
    | `brightness` 20 → 254 | `brightness_move: stop` | **clean freeze** |
+   | A60: `hue_move: 40` (56.7°/s), 30° → 204° | `hue_move: stop` | froze |
+   | A60: `hue_move: 10` (14.2°/s), 30° → 116° | `hue_move: stop` | **super smooth** |
+   | A60: `saturation_move: -30` (rate, hs mode) | `saturation_move: stop` | small jump |
+   | A60: `color` + `transition` toward white (xy fade) | `saturation_move: stop` | overshoot; the xy kept drifting toward pink for 3 s |
+   | A60: the same | raw `stopMoveStep` | slight overshoot; xy held from the first read |
+   | A60: `color` + `transition` toward deep color (xy fade) | raw `stopMoveStep` | **dead smooth**; the other way's overshoot is acceptable |
 
    So a Hue bulb's color temperature output departs from its `colorTemperature` attribute during a fade, and
    every halt snaps it back, the bridge's own included. A color temperature fade that looks warmer also looks
    brighter (at a fixed level 199, 4115 K looked brighter than 6535 K). Brightness stops are clean.
+   **Decided:** hue keeps `hue_move` and `hue_move: stop`; saturation keeps the `color` + `transition` xy fade
+   but is halted with a raw `stopMoveStep` (Z2M's `saturation_move: stop` halts only the saturation attribute and
+   lets the xy drift), followed by the `{"color": ""}` get (finding c2), since a raw command publishes nothing.
 
 2. **Shared Z2M helpers.**
    - `bridge.py`: `has_feature(hass, ieee, name)`, read from the retained `bridge/devices` (same retained-read
@@ -204,7 +213,9 @@ Decided in the interview (2026-10-28):
    - Scope: `experimental=True`, `domains={"light"}`, `native_groups=True`.
    - Send `brightness_move: stop` to every lit target, and to a target the cache shows fading to off (HA already
      shows it off).
-   - Send `hue_move: stop` / `saturation_move: stop` where a move of ours is tracking hue or saturation. No
+   - Send `hue_move: stop` where a move of ours is tracking hue, and a raw `stopMoveStep` (`{"command":
+     {"cluster": "lightingColorCtrl", "command": "stopMoveStep", ...}}`) where one is tracking saturation,
+     followed by the `{"color": ""}` get (watched tests). No
      color temperature stop: our moves never fade it. If probe (b) or (c) shows a native stop
      doesn't halt our fades, use the raw `stopMoveStep` plus a `/get`.
    - Record each halt at its predicted value (`cache.stopped`), which covers the gap until Z2M's read-back.
