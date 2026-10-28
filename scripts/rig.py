@@ -246,7 +246,7 @@ def lock_holder(entry: str) -> str:
         return held_by
     try:
         name = json.loads(Path(session_file).read_text())["name"]
-    except (OSError, ValueError, KeyError, TypeError):
+    except OSError, ValueError, KeyError, TypeError:
         return held_by
     return f'{held_by}, Claude Code session "{name}" (SendMessage reaches it)'
 

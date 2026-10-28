@@ -62,9 +62,7 @@ class Move(Action[MoveRequest]):
             probatio.Coerce(float), probatio.Range(min=0.1)
         ),
         probatio.Optional("brightness_limit"): _PERCENT,
-        probatio.Optional("color_temp_limit"): probatio.All(
-            probatio.Coerce(int), probatio.Range(min=1000, max=10000)
-        ),
+        probatio.Optional("color_temp_limit"): probatio.All(probatio.Coerce(int), probatio.Range(min=1000, max=10000)),
         probatio.Optional("saturation_limit"): _PERCENT,
     }
 

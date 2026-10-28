@@ -100,9 +100,7 @@ def test_inventory_rejects_members_without_the_group_role(tmp_path):
 
 
 def test_inventory_rejects_members_given_as_one_string(tmp_path):
-    path = write(
-        tmp_path, "inventory.yaml", "zha:\n  - entity_id: light.g\n    roles: [group]\n    members: light.a\n"
-    )
+    path = write(tmp_path, "inventory.yaml", "zha:\n  - entity_id: light.g\n    roles: [group]\n    members: light.a\n")
     with pytest.raises(ValueError, match="members must be a list of entity IDs"):
         Inventory.load(path)
 
@@ -142,7 +140,10 @@ def test_select_plan_lines_and_estimate(inventory):
     step_files = [step_file for step_file in load_step_files() if step_file.action in ("turn_off_for", "turn_on_for")]
     suites = rig.select(step_files, inventory, None)
     assert [(suite.integration, suite.action) for suite in suites] == [
-        ("shelly", "turn_off_for"), ("hue", "turn_off_for"), ("shelly", "turn_on_for"), ("hue", "turn_on_for"),
+        ("shelly", "turn_off_for"),
+        ("hue", "turn_off_for"),
+        ("shelly", "turn_on_for"),
+        ("hue", "turn_on_for"),
     ]
     assert [suite.integration for suite in rig.select(step_files, inventory, ["hue"])] == ["hue", "hue"]
     narrowed = rig.select(step_files, inventory, ["hue"], ["turn_on_for"])
@@ -346,7 +347,6 @@ def test_deploy_state(monkeypatch, kwargs, needed, blocker):
     assert (state.blocker is None) if blocker is None else (blocker in state.blocker)
 
 
-
 @pytest.mark.parametrize(
     ("deployed", "deploying", "loaded_after", "commit"),
     [
@@ -368,9 +368,13 @@ def test_tested_commit_trusts_a_deploy_without_a_status_command(monkeypatch):
     fake_git(monkeypatch, deployed=(None, None))
     assert rig.tested_commit("", rig.deploy_state(""), deploying=True) == "c1"
 
+
 def run_git(*args: str) -> None:
-    rig.subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", *args],
-                       check=True, capture_output=True)
+    rig.subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", *args],
+        check=True,
+        capture_output=True,
+    )
 
 
 def test_main_checkout_from_a_linked_worktree(tmp_path, monkeypatch):
@@ -774,7 +778,6 @@ async def test_a_signal_mid_case_puts_everything_back_and_leaves_no_journal(tmp_
     assert not journal.path.exists()
 
 
-
 @pytest.mark.parametrize(("commit", "sources"), [("c1", ["rig run (`scripts/rig.py`), commit `c1short`"]), (None, [])])
 async def test_records_cite_the_commit_ha_loaded_not_head_at_the_end(tmp_path, monkeypatch, capsys, commit, sources):
     rig_ha(monkeypatch, light="on", opt=True, automation="on")
@@ -798,6 +801,7 @@ async def test_records_cite_the_commit_ha_loaded_not_head_at_the_end(tmp_path, m
     assert await rig.run_rig({}, [], fakes.inventory("shelly"), fakes.OPTION_REGISTRY, None, True, commit) == 0
     assert written == sources
     assert ("No bench records" in capsys.readouterr().out) is (commit is None)
+
 
 def aborted_journal(path: Path) -> Journal:
     """What a run killed mid-case leaves: the light it turned off, the option it saved and the automation it paused."""

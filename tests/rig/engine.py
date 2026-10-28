@@ -255,9 +255,7 @@ def _parse_expect_state(args: Any) -> dict:
 
 
 def _parse_sample(args: Any) -> dict:
-    args = _mapping(
-        args, required=["attribute", "for"], allowed=["target", "every", "expect", "min", "max", "source"]
-    )
+    args = _mapping(args, required=["attribute", "for"], allowed=["target", "every", "expect", "min", "max", "source"])
     args["for"] = Expr.parse(args["for"])
     args["every"] = Expr.parse(args.get("every", 0.5))
     if args.get("expect", "rising") not in ("rising", "falling", "steady"):
@@ -1217,8 +1215,16 @@ async def run(
         for suite, adapter, *_ in planned
     }
     rig_run = _Run(
-        registry, tolerance, settle, inventory.power(), ask, out, options,
-        EntryOptions(admin, journal=journal) if admin else None, bridge=bridge, journal=journal,
+        registry,
+        tolerance,
+        settle,
+        inventory.power(),
+        ask,
+        out,
+        options,
+        EntryOptions(admin, journal=journal) if admin else None,
+        bridge=bridge,
+        journal=journal,
     )
     try:
         waiting = [

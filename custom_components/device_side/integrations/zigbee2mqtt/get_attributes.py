@@ -61,9 +61,7 @@ class Z2MGetAttributes(Adapter[Request]):
             async with reader(hass, members) as reading:
                 reads = [await _read(reading, member) for member in members]
             lit = [(attributes, now) for attributes, now in reads if attributes.get("onOff")]
-            return self.result(
-                target, Status.CONFIRMED, data=average([zcl_row(*one) for one in lit or reads])
-            )
+            return self.result(target, Status.CONFIRMED, data=average([zcl_row(*one) for one in lit or reads]))
 
         return await self.gather(hass, targets, read)
 

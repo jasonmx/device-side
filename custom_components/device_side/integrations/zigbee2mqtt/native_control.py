@@ -34,7 +34,9 @@ async def ensure_native_control(hass: HomeAssistant, target: Target) -> None:
     except Exception as err:  # noqa: BLE001 - the timer still goes out; only the first moment's color is at stake
         _LOGGER.warning(
             "Couldn't turn on Zigbee2MQTT's %s for %s, so it may light at its last color first: %s",
-            OPTION, target.entity_id, err,
+            OPTION,
+            target.entity_id,
+            err,
         )
 
 
@@ -51,7 +53,8 @@ async def _ensure(hass: HomeAssistant, target: Target) -> None:
     def turned_on(_z2m_id: str) -> None:
         _LOGGER.info(
             "Turned on Zigbee2MQTT's %s for %s, so a timer with a color lights in that color from off",
-            OPTION, target.entity_id,
+            OPTION,
+            target.entity_id,
         )
 
     await ensure_options(hass, kind, [z2m_id], lambda current: {} if current.get(OPTION) else {OPTION: True}, turned_on)
