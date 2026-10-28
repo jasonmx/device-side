@@ -32,22 +32,25 @@ v0.1.0 is the next release.
 ## To go, in order
 
 Slice 13 detail lives in [`2026-10-27-zigbee-parity-timer-state.md`](docs/plans/2026-10-27-zigbee-parity-timer-state.md).
-The Hue A60 visits each network once, after that integration's code freezes.
+The A60 (the rig's only color bulb) starts on Z2M and moves twice: to the Hue bridge, then to ZHA. Each
+integration's code freezes before its A60 run.
 
 - [ ] **13d** Matter `get_attributes` (plug). Needs no bulb, so it can land any time.
-- [ ] **A60 to the Hue bridge** (13k step 1), so the rig has a `light_color` on Hue.
-- [ ] **7c2** Hue `move`/`stop` for saturation, rig-run on the A60
+- [ ] **13h** Z2M `get_attributes`
+- [ ] **13i** Z2M `move`/`stop`, with the hue/saturation stop probe on the A60. Moves `Transition` into `core/`.
+- [ ] **13j** Z2M `set_attributes` while off. Z2M code freezes.
+- [ ] **Z2M A60 run** (13k step 1): full Z2M suite, bulb in place. Clears `experimental` on the Z2M adapters it
+  proves.
+- [ ] **Move the A60 to the Hue bridge.**
+- [ ] **7c2** Hue `move`/`stop` for saturation, built against the A60
   ([`2026-10-27-hue-move-color.md`](docs/plans/2026-10-27-hue-move-color.md)).
-- [ ] **Hue color rig run and freeze** (13k step 1): `set_attributes` color and gamut clamp, 7c saturation, with no
-  `light_color` skips. Clears `experimental` on the Hue adapters it proves.
-- [ ] **13e** ZHA `get_attributes`
+- [ ] **Hue A60 run** (13k step 2): `set_attributes` color and gamut clamp, 7c saturation, with no `light_color`
+  skips. Hue code freezes. Clears `experimental` on the Hue adapters it proves.
+- [ ] **13e** ZHA `get_attributes` (built alongside the Hue steps)
 - [ ] **13f** ZHA `move`/`stop`
 - [ ] **13g** ZHA `set_attributes` while off. ZHA code freezes.
-- [ ] **A60 to ZHA** (13k step 2): ZHA color suites. Clears `experimental` on the ZHA adapters it proves.
-- [ ] **13h** Z2M `get_attributes`
-- [ ] **13i** Z2M `move`/`stop`
-- [ ] **13j** Z2M `set_attributes` while off. Z2M code freezes.
-- [ ] **A60 back to Z2M** (13k step 3): full Z2M suite. Clears `experimental` on the Z2M adapters it proves.
+- [ ] **Move the A60 to ZHA.**
+- [ ] **ZHA A60 run** (13k step 3): ZHA color suites. Clears `experimental` on the ZHA adapters it proves.
 - [ ] **9d** Rig coverage sweep for the non-color scope (plan in /plan first). 13k covers the color part.
 - [ ] **12** v0.1.0: no adapter left `experimental` (`scripts/check_release.py --release`); README feature table
   current; release checklist adapted from hue_dimmer; `predicted_state` default reviewed against the rig runs and
