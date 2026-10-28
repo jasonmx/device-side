@@ -1,7 +1,7 @@
 # device_side
 
-Design and delivery plan: `docs/plans/2026-10-23-device-side-repo-plan.md`. Progress to v0.1.0: `TODO.md`; tick items off in the PR that finishes them. Use its glossary's terms in code
-and docs; "platform", "backing" and "claim" are retired.
+Design and delivery plan: `docs/plans/2026-10-23-device-side-repo-plan.md`; use its glossary's terms in code
+and docs; "platform", "backing" and "claim" are retired. Progress to v0.1.0: `TODO.md`; tick items off in the PR that finishes them.
 
 When an action should raise, skip a target, or what its response holds: match core, per `docs/action-behavior.md`.
 
