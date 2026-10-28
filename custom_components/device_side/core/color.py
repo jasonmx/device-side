@@ -1,4 +1,5 @@
-"""The color entries of a get_attributes row, shared so every integration reports a color alike.
+"""Colors shared so every integration reads and writes them alike: a requested color as xy, and the color entries
+of a get_attributes row.
 
 A light reports color in one native form; the row carries it with the other two of `rgb_color`, `hs_color` and
 `xy_color` derived from it, as core's light state does.
@@ -12,6 +13,19 @@ from homeassistant.util.color import (
     color_xy_to_hs,
     color_xy_to_RGB,
 )
+
+from .models import LightFields
+
+
+def color_xy(fields: LightFields) -> tuple[float, float] | None:
+    """The requested color as CIE xy: rgb_color first, then hs_color, then xy_color, as hue_dimmer chose."""
+    if fields.rgb_color is not None:
+        return color_RGB_to_xy(*fields.rgb_color)
+    if fields.hs_color is not None:
+        return color_hs_to_xy(*fields.hs_color)
+    if fields.xy_color is not None:
+        return (float(fields.xy_color[0]), float(fields.xy_color[1]))
+    return None
 
 
 def xy_row(x: float, y: float) -> dict:
