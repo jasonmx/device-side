@@ -9,6 +9,8 @@ helper function (make_on_with_timed_off).
 
 from homeassistant.core import HomeAssistant
 
+from ...core.models import Target
+
 _MATTER_DOMAIN = "matter"
 
 # OnOff cluster constants (Matter spec, cluster 0x0006)
@@ -86,6 +88,31 @@ def lt_feature(node, endpoint_id: int) -> bool:
     """
     feature_map = node.node_data.attributes.get(_onoff_attr_path(endpoint_id, _FEATUREMAP_ATTR_ID))
     return isinstance(feature_map, int) and bool(feature_map & _LT_FEATURE_BIT)
+
+
+def unsupported_reason(hass: HomeAssistant, target: Target) -> str | None:
+    """Why this entity can't run an OnOff timer, or None: it needs a reachable node whose endpoint has LT."""
+    node_id = node_id_from_unique_id(target.entry.unique_id)
+    ep_id = endpoint_id_from_unique_id(target.entry.unique_id)
+    if node_id is None or ep_id is None:
+        return "not_addressable"
+
+    client = matter_client(hass, target.entry.config_entry_id)
+    if client is None:
+        return "not_addressable"
+
+    try:
+        node = client.get_node(node_id)
+    except Exception:  # noqa: BLE001 - node lookup can raise if the node no longer exists
+        return "not_addressable"
+
+    if node is None:
+        return "not_addressable"
+
+    if not lt_feature(node, ep_id):
+        return "no_lt_feature"
+
+    return None
 
 
 def ontime_attr_path(endpoint_id: int) -> str:

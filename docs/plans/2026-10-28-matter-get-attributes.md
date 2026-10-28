@@ -110,3 +110,28 @@ Decided in the interview (2026-10-28):
 - Probe: the sample table in the plan doc, which shows the source rule's outcome.
 - Rig: a passing `get_attributes` run in which the Matter plug reads a live timer that counts down and then
   clears, and the Shelly cases still pass with the new countdown check.
+
+## Findings
+
+**Step 1 probe (2026-10-28), WiZ plug, `switch`.** Port 5580 isn't reachable from the LAN, so the cache side came
+from HA's device diagnostics (python-matter-server's `node_data.attributes`), sampled once a second. The live side
+stands on `turn_on_for`'s read-back, which reads a non-zero `OnTime` mid-timer; "expected" below is the countdown
+from the send.
+
+**Outcome: read live.** The cached `"{ep}/6/16385"` read 0 at every sample, before, during and after the timer: the
+plug never reports `OnTime` on its subscription, so the cache can't answer at all.
+
+Run A, a 20 s timer left alone (every sample from 0.1 s to 20.0 s matched the first row's shape):
+
+| t (s) | expected (tenths) | cached OnTime | HA state |
+|---|---|---|---|
+| 0.1 | 199 | 0 | on |
+| 10.0 | 100 | 0 | on |
+| 20.0 | 0 | 0 | on |
+| 21.0 | 0 | 0 | off |
+| 26.0 | 0 | 0 | off |
+
+Run C, a 20 s timer with a plain `switch.turn_on` at 5.1 s: the plug stayed on and turned off between 20 and 21 s,
+as in run A. **A plain `On` doesn't cancel the timer**, so the doc's "Cancelling" text is wrong. Run B sent
+`switch.turn_off` at 11.1 s; the plug went off and stayed off. The cache can't show whether `Off` zeroed `OnTime`;
+the spec says it does.

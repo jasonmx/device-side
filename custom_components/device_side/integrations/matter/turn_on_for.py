@@ -7,11 +7,11 @@ from homeassistant.core import HomeAssistant
 
 from .addressing import (
     endpoint_id_from_unique_id,
-    lt_feature,
     make_on_with_timed_off,
     matter_client,
     node_id_from_unique_id,
     ontime_attr_path,
+    unsupported_reason,
 )
 from ...actions.turn_on_for import TurnOnForRequest
 from ...core.adapter import Adapter
@@ -40,31 +40,7 @@ class MatterTurnOnFor(Adapter[TurnOnForRequest]):
     )
 
     def supports(self, hass: HomeAssistant, request: TurnOnForRequest, target: Target) -> str | None:
-        reason = super().supports(hass, request, target)
-        if reason:
-            return reason
-
-        node_id = node_id_from_unique_id(target.entry.unique_id)
-        ep_id = endpoint_id_from_unique_id(target.entry.unique_id)
-        if node_id is None or ep_id is None:
-            return "not_addressable"
-
-        client = matter_client(hass, target.entry.config_entry_id)
-        if client is None:
-            return "not_addressable"
-
-        try:
-            node = client.get_node(node_id)
-        except Exception:  # noqa: BLE001 - node lookup can raise if the node no longer exists
-            return "not_addressable"
-
-        if node is None:
-            return "not_addressable"
-
-        if not lt_feature(node, ep_id):
-            return "no_lt_feature"
-
-        return None
+        return super().supports(hass, request, target) or unsupported_reason(hass, target)
 
     async def execute(
         self, hass: HomeAssistant, request: TurnOnForRequest, targets: list[Target]

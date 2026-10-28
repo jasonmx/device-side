@@ -206,19 +206,6 @@ Device Side turns `hue_native_control` on as an option of the group itself when 
 bulb (members read from `zigbee2mqtt/bridge/groups`). A group takes a color only when every member
 can show one, as Z2M exposes the features its members share.
 
-### `get_attributes`
-
-One `<Component>.GetStatus` per target. A running flip-back timer is returned as `timer`, the shared row: what the
-timer turns the target to (`turns`), `ends_at` and `remaining_s`. The time left is the device's `timer_started_at`
-plus `timer_duration`, against Home Assistant's clock; both clocks are SNTP-synced, and the result is kept between
-0 and the duration, which bounds any skew. With no timer running there is no `timer` key, so a relay with none
-returns an empty entry.
-
-An `RGBCCT` bulb also returns `brightness` (the device's percent, as Hue's is), and, for the active mode only,
-`color_temp_kelvin` or `rgb_color` with `hs_color` and `xy_color` derived from it. The bulb keeps these while off,
-so they read then too. The same capabilities as `turn_on_for` are in scope; other light components are refused
-with `capability_not_tested`. A device that doesn't answer raises.
-
 ### Cancelling
 
 Send a regular `turn_on` or `turn_off` through Home Assistant. This publishes `{"state":"ON"}` or
@@ -382,22 +369,17 @@ If it is 0 or the read-back fails, the result is `sent` with detail `timer_not_r
 
 ### `get_attributes`
 
-One `<Component>.GetStatus` per target. A running flip-back timer is returned as `timer`, the shared row: what the
-timer turns the target to (`turns`), `ends_at` and `remaining_s`. The time left is the device's `timer_started_at`
-plus `timer_duration`, against Home Assistant's clock; both clocks are SNTP-synced, and the result is kept between
-0 and the duration, which bounds any skew. With no timer running there is no `timer` key, so a relay with none
-returns an empty entry.
-
-An `RGBCCT` bulb also returns `brightness` (the device's percent, as Hue's is), and, for the active mode only,
-`color_temp_kelvin` or `rgb_color` with `hs_color` and `xy_color` derived from it. The bulb keeps these while off,
-so they read then too. The same capabilities as `turn_on_for` are in scope; other light components are refused
-with `capability_not_tested`. A device that doesn't answer raises.
+One live read of `OnOff.OnTime` per target. The node cache can't answer: the plug tested never reports `OnTime` on
+its subscription, so the cached value stays 0 while a timer runs. A running timer is returned as `timer`, the shared
+row: `turns` is always `off`, as Matter's only timer here is `turn_on_for`'s, and `remaining_s` is `OnTime`'s tenths
+in seconds, with `ends_at` from Home Assistant's clock. `OnTime` is 0 with no timer running, and then there is no
+`timer` key, so the entry is empty. A device that doesn't answer raises.
 
 ### Cancelling
 
-Send a regular `turn_on` or `turn_off`: either cancels the timed-off (the Matter
-spec says `On` and `Off` commands clear `OnTime`). A second `turn_on_for` during a timer replaces
-it.
+Send a regular `turn_off`: it cancels the timed-off, as the Matter spec says `Off` clears `OnTime`. A plain
+`turn_on` does not: on the plug tested, the timer still turned it off on time. A second `turn_on_for` during a timer
+replaces it.
 
 ### Sharp edges
 
