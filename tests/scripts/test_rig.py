@@ -450,6 +450,42 @@ def test_an_uncontested_lock_says_nothing(tmp_path):
     assert printed == []
 
 
+def test_wait_free_returns_at_once_when_no_run_holds_the_lock(tmp_path, monkeypatch):
+    def no_sleep(_seconds):
+        raise AssertionError("wait_free polled a free lock")
+
+    monkeypatch.setattr(rig.time, "sleep", no_sleep)
+    printed: list[str] = []
+    rig.wait_free(tmp_path / rig.LOCK_NAME, out=printed.append)
+    assert printed == ["The rig lock is free."]
+
+
+def test_wait_free_names_the_holder_and_returns_once_it_releases_without_taking_the_lock(tmp_path, monkeypatch):
+    path = tmp_path / rig.LOCK_NAME
+    held = rig.lock_rig(path, "wt/first")
+    printed: list[str] = []
+    monkeypatch.setattr(rig.time, "sleep", lambda _seconds: held.close())
+
+    rig.wait_free(path, out=printed.append)
+
+    assert [line.split(" (pid")[0] for line in printed] == [
+        "Another rig run holds the lock: wt/first",
+        "The rig lock is free.",
+    ]
+    rig.lock_rig(path, "wt/second", out=printed.append).close()  # wait_free kept no hold
+    assert printed[-1] == "The rig lock is free."
+
+
+def test_main_wait_free_stops_before_the_journal_and_env(tmp_path, monkeypatch):
+    def untouched(*_args):
+        raise AssertionError("--wait-free went past the lock")
+
+    monkeypatch.setattr(rig, "common_dir", lambda: tmp_path)
+    monkeypatch.setattr(rig, "hold_rig", untouched)
+    monkeypatch.setattr(rig, "load_env", untouched)
+    assert rig.main(["--wait-free"]) == 0
+
+
 def test_check_tokens_stops_a_zha_run_without_an_admin_token():
     registry = AdapterRegistry.discover()
     step_file = next(f for f in load_step_files() if f.action == "turn_on_for")
