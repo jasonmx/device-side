@@ -315,9 +315,7 @@ def _forgotten(hass: HomeAssistant, light_id: str, running: bool) -> None:
 def applies_later(api: HueBridgeV2) -> bool:
     """Whether aiohue's light and grouped_light controllers apply an event in a task, after our subscriber has run:
     hiding a report depends on it. _handle_event is private to aiohue: one without it is taken to apply at once."""
-    return all(
-        iscoroutinefunction(getattr(c, "_handle_event", None)) for c in (api.lights, api.groups.grouped_light)
-    )
+    return all(iscoroutinefunction(getattr(c, "_handle_event", None)) for c in (api.lights, api.groups.grouped_light))
 
 
 @callback

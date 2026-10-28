@@ -79,10 +79,7 @@ async def advance(hass, start, seconds: float) -> None:
 
 
 def sent(broker) -> dict[tuple[str, str], dict]:
-    return {
-        (r["topic"].split("/")[-2], r["payload"]["id"]): r["payload"]["options"]
-        for r in broker.requests()
-    }
+    return {(r["topic"].split("/")[-2], r["payload"]["id"]): r["payload"]["options"] for r in broker.requests()}
 
 
 @pytest.mark.parametrize(

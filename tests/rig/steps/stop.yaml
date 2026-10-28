@@ -1,7 +1,8 @@
 # hue_dimmer tests/RELEASE_CHECKLIST.md §2.5 and §2.6 from the stop side; move.yaml checks the move that follows.
-# Samples after a move read device_side's prediction, in percent: HA shows a Hue fade's end value at once.
+# Samples after a move read device_side (Hue's prediction, Zigbee2MQTT's live read), in percent: HA shows a fade's
+# end value at once.
 action: stop
-rig_seconds: 260
+rig_seconds: 320
 tests:
   - name: halts_a_move  # §2.5; the hold is watched in move.yaml's raise_stop_raise
     roles: [light_ct, group]
@@ -14,7 +15,7 @@ tests:
       - expect_response: {status: expected, integration: self}
       - sample: {attribute: brightness, for: 4, expect: steady, max: 78, source: device_side}
 
-  - name: halts_a_move_to_off  # the bridge refuses a dimming stop during a soft off; the cut is on + brightness
+  - name: halts_a_move_to_off  # Hue refuses a dimming stop during a soft off, so it is cut with on + brightness
     roles: [light_ct, group]
     setup:
       - set: {state: on, brightness_pct: 100}
@@ -40,6 +41,7 @@ tests:
 
   - name: halts_a_combined_move  # one write holds both stops
     roles: [light_ct, group]
+    only: [hue]
     setup:
       - set: {state: on, brightness_pct: 10, color_temp_kelvin: 2700}
     steps:
@@ -56,6 +58,7 @@ tests:
 
   - name: halts_a_move_to_off_and_warmer  # the cut carries the color temperature stop
     roles: [light_ct, group]
+    only: [hue]
     setup:
       - set: {state: on, brightness_pct: 100, color_temp_kelvin: 6500}
     steps:
@@ -66,3 +69,40 @@ tests:
       - expect_state: {state: on, within: tol}
       - sample: {attribute: brightness, for: 3, expect: steady, min: 47, max: 82, source: device_side}
       - sample: {attribute: color_temp_kelvin, for: 2, expect: steady, min: 3700, max: 4600, source: device_side}
+
+  # Zigbee2MQTT publishes a hue or saturation stop's color in a mode HA drops; xy_writeback brings HA in line.
+  - name: hue_cycle_stop
+    roles: [light_color]
+    only: [zigbee2mqtt]
+    setup:
+      - set: {state: on, brightness_pct: 70, hs_color: [30, 90]}
+    steps:
+      - call: {action: move, hue: up, sweep_time: 20}  # 18° a second: about 84° after 3 s
+      - wait: 3
+      - call: {}
+      - expect_response: {status: expected, integration: self}
+      - expect_matches_read: {attributes: [xy_color.0, xy_color.1], tolerance: 0.01, within: 3}
+      - wait: 3
+      - expect_matches_read: {attributes: [xy_color.0, xy_color.1], tolerance: 0.01}
+    observe:
+      see: 'The light at hue 30° (orange), 90 % saturation, turning through yellow at 18° a second, stopped after 3 s near 84°.'
+      watch: 'The stop and the 1 s after it: no jump, and no second change when Home Assistant''s color is brought in line.'
+      ask: Did it stop where it was and hold, with no jump at the stop or a second later?
+
+  - name: saturation_down_stop
+    roles: [light_color]
+    only: [zigbee2mqtt]
+    setup:
+      - set: {state: on, brightness_pct: 70, hs_color: [200, 90]}
+    steps:
+      - call: {action: move, saturation: down, sweep_time: 10}  # 9 % a second: about 63 % after 3 s
+      - wait: 3
+      - call: {}
+      - expect_response: {status: expected, integration: self}
+      - expect_matches_read: {attributes: [xy_color.0, xy_color.1], tolerance: 0.01, within: 3}
+      - wait: 3
+      - expect_matches_read: {attributes: [xy_color.0, xy_color.1], tolerance: 0.01}
+    observe:
+      see: 'The light at hue 200° (sky blue), 90 % saturation, paling at 9 % a second, stopped after 3 s near 63 %.'
+      watch: 'The stop: it holds, with no drift on toward white and no jump a second later.'
+      ask: Did it stop part way pale and hold there, with no drift or jump?

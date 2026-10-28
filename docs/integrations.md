@@ -279,6 +279,60 @@ skipped.
 
 Lights only, as for `turn_on_for`.
 
+### `move` and `stop`
+
+`move` covers `brightness`, `saturation` and `hue`. `color_temp` is refused with `fields_not_tested`: every stop
+of a color temperature fade on a Hue bulb, the Hue bridge's own included, makes a visible jump, because the bulb's
+output during the fade departs from the value it reports.
+
+Brightness and saturation are each one publish of the end point (the limit, or the end of the range) with a
+`transition` of `sweep_time` × the fraction of the range left, which the bulb then runs on its own. In one call
+they are two publishes, and the bulb runs both. Brightness up is `{"state": "ON", "brightness", "transition"}`
+and turns the light on. An off bulb keeps its level and would fade up from there, so a light that is off is first
+turned on at the bottom, `{"state": "ON", "brightness": 1, "transition": 0}` (one publish to a group that is all
+off, else to each off member). Down to 0 % is Z2M's soft off, `{"state": "OFF",
+"transition"}`, which keeps the level for the next plain on. Saturation is written as a color at the light's
+current hue, `{"color": {"hue", "saturation"}, "transition"}`: with Z2M's `hue_native_control` on, the bulb fades
+it in xy and holds its hue. Saturation and hue move only a light that is on, so on a light that is off, as for a
+move down, the result is `unchanged` with `off`. An attribute already at its limit is left out, and a move with
+nothing left to do is `unchanged` with `at_limit`.
+
+Hue is Z2M's `hue_move`, a cycle around the color wheel the bulb keeps running until a stop. Its rate is
+`254 / sweep_time` steps of the wheel per second, rounded, so `sweep_time` is one full cycle. ZCL takes 1 to
+254 steps per second, so a `sweep_time` under 1 s or over 254 s is clamped and the result carries `clamped_to`.
+Hue and saturation are dropped, with `fields_dropped`, on a light whose Z2M definition lacks the `color_hs`
+feature (read from `zigbee2mqtt/bridge/devices`), and on a group with any such member.
+
+`stop` sends `brightness_move: stop` to a light that is on, `hue_move: stop` where a hue move of Device Side's is
+cycling, and a raw `stopMoveStep` where its saturation move is fading. Z2M's own `saturation_move: stop` halts only
+the saturation attribute and lets the xy fade drift on. Each is its own publish, the color ones first: Z2M reads
+the light back about 0.7 s after a brightness stop before it sends the next key of the same message. A light
+that is off, with no soft off of Device Side's fading it, is `unchanged` with `off`.
+
+Z2M publishes a fade's end value at once and reads the light back within a second of a brightness or hue stop.
+Device Side remembers each move and stop for its duration plus 2 seconds, so a move after a stop starts from where
+the light halted. Once a fade has run, the light's state and brightness are read back (`{"state": "", "brightness":
+""}` on its get topic), so Home Assistant ends right even if a `get_attributes` read mid-fade overwrote the end
+value. A new move or a stop replaces the pending read.
+
+**Color after a stop.** Z2M announces a color light to Home Assistant with `xy` or `hs`, never both, and after a
+hue or saturation command publishes the color as `hs`, which Home Assistant drops for a light announced with `xy`
+([Koenkk/zigbee2mqtt#28757](https://github.com/Koenkk/zigbee2mqtt/issues/28757)). So 1 s after a hue or saturation
+stop, and at the end of a saturation move, Device Side reads such a light's `colorMode`, `currentX` and `currentY`
+(as `get_attributes` reads them). If the bulb is in hs mode, it writes the bulb's own x/y back with `transition: 0`:
+the bulb doesn't change, Z2M then publishes `xy`, and the bulb stays in xy mode. Otherwise it asks Z2M for the
+color (`{"color": ""}` on the get topic): after a stop of an xy fade, Z2M's own read-back carries the fade's end
+point. A light announced with `hs` gets the color get after a saturation stop only, which Z2M doesn't read back.
+A read or write that fails is logged as a warning and leaves Home Assistant's color stale; the result is still
+`sent`.
+
+**Groups.** A group gets one publish per attribute to its group topic, so its members fade together. Its start is
+the mean of its members that are on, and each member's fade is remembered from its own start. Z2M reads a group's
+stop back from its first member only, so the color after a stop, and the read-back once a fade has run, go to each
+member on its own.
+
+Lights only, as for `turn_on_for`.
+
 ### Cancelling
 
 Send a regular `turn_on` or `turn_off` through Home Assistant. This publishes `{"state":"ON"}` or
@@ -313,6 +367,10 @@ firmware. Most Z2M-supported lights cancel the timer on any state change.
   round trips each, and a call has 30 s for all its targets. A healthy read takes a quarter of a second or less,
   but a group of many bulbs on a slow mesh can run out the 30 s, and then every target in that call fails with
   `timeout`. Read a large group's members by area or label instead, which reads them four at a time.
+- **A color stop costs a read and a write.** On a light Home Assistant lists with `xy`, each hue or saturation
+  stop adds a Zigbee read and a write or get, 1 s later, and leaves the bulb in xy mode (Color after a stop, above).
+- **A change from elsewhere mid-move.** A brightness or saturation change made outside Device Side within a move's
+  duration plus 2 seconds isn't noticed, so a move started then begins from the prediction, not from the change.
 - **No confirmation.** Z2M's MQTT interface does not synchronously confirm the timer started.
   The result is always `sent`, never `confirmed`, regardless of whether the device accepted the
   command.

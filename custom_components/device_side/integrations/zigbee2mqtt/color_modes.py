@@ -130,7 +130,8 @@ async def ensure_color_modes(hass: HomeAssistant, enabled: bool) -> None:
         def changed(_z2m_id: str, name: str = name, modes: list[str] = modes) -> None:
             _LOGGER.info(
                 "Set Zigbee2MQTT's Home Assistant color modes for %s to %s%s",
-                name, ", ".join(modes),
+                name,
+                ", ".join(modes),
                 ", so Home Assistant shows its color in either mode" if enabled else ", as Zigbee2MQTT announces it",
             )
 
@@ -162,7 +163,11 @@ async def async_watch(hass: HomeAssistant) -> Callable[[], None]:
     The retained messages each subscription gets at once start the first pass.
     """
     debouncer = Debouncer(
-        hass, _LOGGER, cooldown=_SETTLE_S, immediate=False, function=partial(ensure_color_modes, hass, True),
+        hass,
+        _LOGGER,
+        cooldown=_SETTLE_S,
+        immediate=False,
+        function=partial(ensure_color_modes, hass, True),
         background=True,
     )
 

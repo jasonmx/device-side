@@ -27,8 +27,12 @@ BULB = {
     "genOnOff": {"onOff": 1, "onTime": 0},
     "genLevelCtrl": {"currentLevel": 152},
     "lightingColorCtrl": {
-        "colorMode": 2, "colorTemperature": 250, "currentX": 19667, "currentY": 32722,
-        "currentHue": 127, "currentSaturation": 254,
+        "colorMode": 2,
+        "colorTemperature": 250,
+        "currentX": 19667,
+        "currentY": 32722,
+        "currentHue": 127,
+        "currentSaturation": 254,
     },
 }
 ROW = {"brightness": 59.8, "color_temp_kelvin": 4000}
@@ -77,8 +81,13 @@ async def test_reads_each_cluster_and_returns_the_row(hass, broker):
         ),
     ]
     assert broker.subscribers == {
-        topic: [] for topic in ("zigbee2mqtt/bridge/logging", "zigbee2mqtt/bridge/response/device/options", INFO,
-                                "zigbee2mqtt/lamp")
+        topic: []
+        for topic in (
+            "zigbee2mqtt/bridge/logging",
+            "zigbee2mqtt/bridge/response/device/options",
+            INFO,
+            "zigbee2mqtt/lamp",
+        )
     }
 
 
@@ -275,7 +284,8 @@ def group(hass, broker, one: dict, two: dict, members: list | None = None) -> st
 
 async def test_group_averages_its_lit_members(hass, broker):
     group(
-        hass, broker,
+        hass,
+        broker,
         one={"genLevelCtrl": {"currentLevel": 254}, "lightingColorCtrl": {"colorTemperature": 200}},
         two={"genOnOff": {"onOff": 0}, "genLevelCtrl": {"currentLevel": 1}},
     )
@@ -291,7 +301,8 @@ async def test_group_averages_its_lit_members(hass, broker):
 
 async def test_group_with_every_member_off_averages_them_all(hass, broker):
     group(
-        hass, broker,
+        hass,
+        broker,
         one={"genOnOff": {"onOff": 0}, "genLevelCtrl": {"currentLevel": 1}},
         two={"genOnOff": {"onOff": 0}, "genLevelCtrl": {"currentLevel": 1}},
     )
@@ -320,7 +331,10 @@ async def test_group_reports_no_timer_when_a_lit_member_runs_none(hass, broker):
 
 async def test_group_leaves_out_unavailable_members_and_those_ha_lacks(hass, broker):
     group(
-        hass, broker, one={}, two={"genLevelCtrl": {"currentLevel": 1}},
+        hass,
+        broker,
+        one={},
+        two={"genLevelCtrl": {"currentLevel": 1}},
         members=[{"ieee_address": "0x01"}, {"ieee_address": "0x02"}, {"ieee_address": "0x03"}, {}],
     )
     hass.states.async_set("light.two", "unavailable")

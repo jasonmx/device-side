@@ -51,7 +51,10 @@ def sent(commands) -> list[tuple[int, int, dict]]:
     """Each command as (cluster, command, params), after checking it went to the bulb's in cluster as a server one."""
     for command in commands:
         assert {k: command.data[k] for k in ("ieee", "endpoint_id", "cluster_type", "command_type")} == {
-            "ieee": IEEE, "endpoint_id": 11, "cluster_type": "in", "command_type": "server"
+            "ieee": IEEE,
+            "endpoint_id": 11,
+            "cluster_type": "in",
+            "command_type": "server",
         }
     return [(command.data["cluster_id"], command.data["command"], command.data["params"]) for command in commands]
 

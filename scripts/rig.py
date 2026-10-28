@@ -14,6 +14,8 @@ Ctrl-C, SIGTERM and SIGHUP stop a run, putting the devices back; a second one le
 journaled first (next to the lock), so whatever a killed run leaves changed, the next run puts back before its gate, or
 --recover alone does.
 
+Under cmux the run colors its workspace: green holding the lock, amber waiting for it.
+
 Usage: scripts/rig.py [--dry-run] [--no-deploy] [--unattended] [--integration KEY ...]
                       [--action NAME ...] [-k TEXT]
        scripts/rig.py --recover
@@ -28,6 +30,7 @@ import fcntl
 import getpass
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -70,6 +73,8 @@ READY_TIMEOUT_S = 450
 RESTART_ESTIMATE_S = 90
 LOCK_NAME = "device_side-rig.lock"
 LOCK_POLL_S = 2.0  # how often a waiting run retries the lock
+WORKSPACE_HELD = "Green"  # a cmux workspace's color while its run holds the lock
+WORKSPACE_QUEUED = "Amber"  # ...while its run waits for the lock
 JOURNAL_NAME = "device_side-rig.journal.json"
 ABORT_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 # Run reports go where the OS clears old files: they are for reviewing a run, not for keeping.
@@ -196,6 +201,22 @@ def check_deploy(env: dict, deploy: Deploy) -> None:
         raise SystemExit(f"Cannot deploy: {deploy.blocker}.")
 
 
+def workspace_color(color: str | None) -> None:
+    """Color the cmux workspace this run belongs to (`color` None clears it), so the sidebar shows who holds the lock
+    and who queues. Best effort: it does nothing outside cmux, and a failure never stops a run."""
+    workspace = os.environ.get("CMUX_WORKSPACE_ID")
+    if not workspace or not shutil.which("cmux"):
+        return
+    action = ["--action", "set-color", "--color", color] if color else ["--action", "clear-color"]
+    with contextlib.suppress(OSError, subprocess.SubprocessError):
+        subprocess.run(
+            ["cmux", "workspace-action", "--workspace", workspace, *action],
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+
+
 def lock_entry(holder: str) -> str:
     """What a run writes into the lock: `holder` and its pid, then how to reach whoever started it.
 
@@ -225,7 +246,7 @@ def lock_holder(entry: str) -> str:
         return held_by
     try:
         name = json.loads(Path(session_file).read_text())["name"]
-    except (OSError, ValueError, KeyError, TypeError):
+    except OSError, ValueError, KeyError, TypeError:
         return held_by
     return f'{held_by}, Claude Code session "{name}" (SendMessage reaches it)'
 
@@ -242,6 +263,8 @@ def wait_for_lock(handle: TextIO, operation: int, out: Callable[[str], None]) ->
             handle.seek(0)
             held_by = lock_holder(handle.read())
             if held_by != waiting_on:
+                if waiting_on is None:
+                    workspace_color(WORKSPACE_QUEUED)
                 out(f"Another rig run holds the lock: {held_by}. Waiting for it to finish (Ctrl-C to give up)...")
                 waiting_on = held_by
             time.sleep(LOCK_POLL_S)
@@ -261,6 +284,7 @@ def lock_rig(path: Path, holder: str, out: Callable[[str], None] = print) -> Tex
     handle.truncate(0)
     handle.write(lock_entry(holder))
     handle.flush()
+    workspace_color(WORKSPACE_HELD)
     return handle
 
 
@@ -385,6 +409,21 @@ def main(argv: list[str] | None = None) -> int:
         help="wait until no rig run holds the lock, without taking it; another run may take it first",
     )
     args = parser.parse_args(argv)
+    colors = args.wait_free or not args.dry_run  # a dry run holds no lock and sets no color, so it clears none
+    try:
+        with handling_signals(leave):  # a run killed while it waits still clears its color
+            return wait_or_run(args)
+    finally:
+        if colors:
+            workspace_color(None)
+
+
+def leave(signum: int, _frame: object) -> None:
+    """Stop a run that holds nothing yet, with the shell's exit code for the signal."""
+    raise SystemExit(128 + signum)
+
+
+def wait_or_run(args: argparse.Namespace) -> int:
     if args.wait_free:
         wait_free(common_dir() / LOCK_NAME)
         return 0

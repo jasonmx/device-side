@@ -85,7 +85,7 @@
         },
         "sweep_time": {
           "name": "Sweep time",
-          "description": "Seconds a full sweep takes, such as 0% to 100% brightness. The speed is the same wherever the move starts."
+          "description": "Seconds a full sweep takes, such as 0% to 100% brightness, or once around the color wheel for hue. The speed is the same wherever the move starts."
         },
         "brightness_limit": {
           "name": "Brightness limit",
