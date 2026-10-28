@@ -47,8 +47,8 @@ tests and cleanup. `--dry-run` takes none. The deploy is inside the lock; the tr
 ### 3. Diagnose a bad restart (F)
 
 In `wait_until_ready`:
-- Wait up to 330 s after a restart, past stage 2.
-- With the service missing, read config entries over the admin WebSocket (`config_entries/get`, reusing `HAClient`
+- Wait up to 450 s after a restart, past stages 1 and 2 (120 s + 300 s): a restart behind a hung ZHA took ~350 s.
+- With the service missing, HA running or still starting, read config entries over the admin WebSocket (`config_entries/get`, reusing `HAClient`
   from `tests/rig/client.py`). No device_side entry: keep the first-load hint. Otherwise print device_side's state and
   each `after_dependencies` entry that isn't `loaded` (for example `zha: setup_in_progress`), and say "device_side
   actions are unavailable in the house until this is fixed". Without an admin token, say what couldn't be checked.

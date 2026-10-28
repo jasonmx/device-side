@@ -63,7 +63,9 @@ from tests.rig.journal import Journal  # noqa: E402
 COMPONENT = "custom_components/device_side"
 BENCH_DIR = REPO / "docs" / "bench"
 SERVICE = ("device_side", "turn_on_for")
-READY_TIMEOUT_S = 330  # past HA's 300 s bootstrap stage-2 timeout, after which a stuck dependency is let go
+# HA's bootstrap stage-1 (120 s) and stage-2 (300 s) timeouts, after which a stuck dependency is let go, plus the
+# container's start. A restart behind a hung ZHA took about 350 s.
+READY_TIMEOUT_S = 450
 RESTART_ESTIMATE_S = 90
 LOCK_NAME = "device_side-rig.lock"
 LOCK_POLL_S = 2.0  # how often a waiting run retries the lock
@@ -276,23 +278,25 @@ def wait_until_ready(
     timeout: float = READY_TIMEOUT_S,
     sleep: Callable[[float], None] = time.sleep,
 ) -> None:
-    """Until HA reports RUNNING and lists device_side.turn_on_for; exits the runner on timeout, saying why when HA is
-    running without it."""
+    """Until HA reports RUNNING and lists device_side.turn_on_for; exits the runner on timeout, saying why when HA
+    answers without it, still starting or running."""
     deadline = time.monotonic() + timeout
-    running = False
+    state = None
     while time.monotonic() < deadline:
-        running = False  # only the last poll counts: HA that was RUNNING may have crashed since
+        state = None  # only the last poll counts: HA that was RUNNING may have crashed since
         try:
-            running = _get(f"{url}/api/config", token).get("state") == "RUNNING"
-            if running:
+            state = _get(f"{url}/api/config", token).get("state")
+            if state == "RUNNING":
                 services = {entry["domain"]: entry["services"] for entry in _get(f"{url}/api/services", token)}
                 if SERVICE[1] in services.get(SERVICE[0], {}):
                     return
         except urllib.error.URLError, OSError, ValueError, TypeError, KeyError, AttributeError:
             pass
         sleep(3)
-    if running:
+    if state == "RUNNING":
         raise SystemExit(f"HA is running but has no {'.'.join(SERVICE)}. {diagnose(url, admin_token)}")
+    if state is not None:
+        raise SystemExit(f"HA is still starting after {timeout:.0f}s ({state}). {diagnose(url, admin_token)}")
     raise SystemExit(f"HA did not report RUNNING within {timeout:.0f}s; check HA logs for errors.")
 
 

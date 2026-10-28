@@ -235,6 +235,14 @@ def test_wait_until_ready_says_why_the_service_is_missing(monkeypatch):
         rig.wait_until_ready("http://ha", "token", "admin", timeout=35, sleep=lambda _: None)
 
 
+def test_wait_until_ready_says_why_ha_is_still_starting(monkeypatch):
+    fake_clock(monkeypatch)
+    fake_ha(monkeypatch, [{"state": "NOT_RUNNING"}] * 5)
+    monkeypatch.setattr(rig, "diagnose", lambda url, admin_token: "zha (setup_in_progress).")
+    with pytest.raises(SystemExit, match=r"still starting after 35s \(NOT_RUNNING\)\. zha \(setup_in_progress\)"):
+        rig.wait_until_ready("http://ha", "token", "admin", timeout=35, sleep=lambda _: None)
+
+
 WAITS_FOR = ["hue", "zha"]
 
 
