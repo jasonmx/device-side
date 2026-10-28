@@ -3,13 +3,10 @@
 | | |
 |---|---|
 | Result | pass |
-| Date | 2026-10-27 |
-| Source | rig run (`scripts/rig.py`), commit `bfba654` |
-| Fingerprint | `31adc08629d34287` (`integrations/hue/move.py`) |
+| Date | 2026-10-28 |
+| Source | rig run (`scripts/rig.py`), commit `33932a6` |
 | Home Assistant | 2026.10.2 |
 | Device | Hue ambiance lamp (`LTA009`), firmware `1.163.1`; Zone, firmware `unknown` |
-| Capabilities | every capability the adapter addresses |
-| Fields | `brightness`, `brightness_limit`, `color_temp`, `color_temp_limit` |
 
 ## Tests
 
@@ -58,4 +55,4 @@
 | `brighter_and_cooler[group]` | `light` (group) | pass |
 | `brighter_and_cooler[group] observed` | `light` (group) | not observed |
 
-Tests marked `not observed` had nobody watching; their fields and capabilities are not listed.
+Tests marked `not observed` had nobody watching.

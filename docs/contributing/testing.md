@@ -82,14 +82,15 @@ tests:
 | `expect_state` | Checks state and attributes now, or `within` seconds. `unchanged` is the state before the test. A `{min, max}` range fits values that drift. On a `group` it checks every member. |
 | `expect_matches_read` | Checks that HA's state of each of `attributes` (dotted: `xy_color.0`) is within `tolerance` of a live `device_side.get_attributes` read, now or `within` seconds. On a `group` it checks every member. |
 | `wait` | Sleeps. |
-| `sample` | Polls `attribute` for `for` seconds and expects it `rising`, `falling` or `steady`, optionally within `min`/`max`. `source: device_side` reads `device_side.get_attributes` instead of HA's state, in its units (brightness in percent), for a fade HA shows only the end of. |
+| `sample` | Polls `attribute` for `for` seconds and expects it `rising`, `falling` or `steady` (brightness may spread one Zigbee level step, 1/254, as a bulb settles after a stop), optionally within `min`/`max`. `source: device_side` reads `device_side.get_attributes` instead of HA's state, in its units (brightness in percent), for a fade HA shows only the end of. |
 | `do` | Prints an instruction for the person and waits for Enter. Only in the `setup` of an observed test. |
 | `restore` | Puts back the state from before the test. It also runs after every test, pass or fail. |
 | `bridge` | Hue only: writes to the Hue bridge directly, bypassing Home Assistant, as another actor (the Hue app) would. `put: {...}` sends that CLIP v2 body to the target's light (a `group` target's grouped_light); `recall: true` recalls the `scene` target. In an observed run it runs as written. It needs `HUE_BRIDGE_HOST` and `HUE_APP_KEY` in `.env.rig`, and fails in any other integration's suite. |
 | `z2m_option` | Sets Zigbee2MQTT device options on the target (`hue_native_control: false`) and waits for Z2M's ok. Does nothing in another integration's suite. |
 | `expect_z2m_option` | Expects the target's Zigbee2MQTT device options to hold the given values. Does nothing in another integration's suite. |
 
-Any step takes `target: <role>` to act on another role the test lists. Durations accept numbers, `duration`
+Any step takes `target: <role>` to act on another role the test lists; a `group` case that targets a light role
+is skipped where the inventory lists the group's `members` and that light isn't one. Durations accept numbers, `duration`
 (the last call's), `tol` (the integration's timing tolerance) and `+ - *`. `only: [<integration>]` limits a
 test to some integrations; when those pile up, split the file.
 

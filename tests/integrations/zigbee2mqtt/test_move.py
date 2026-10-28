@@ -14,6 +14,7 @@ pytestmark = pytest.mark.usefixtures("setup_production", "clock")
 SENT = {"status": "sent", "integration": "zigbee2mqtt"}
 SET = f"zigbee2mqtt/{IEEE}/set"
 GET = f"zigbee2mqtt/{IEEE}/get"
+BOTTOM = {"state": "ON", "brightness": 1, "transition": 0}
 
 
 @pytest.mark.parametrize(
@@ -62,11 +63,12 @@ async def test_hue_sweep_time_outside_1_to_254_s_is_clamped_and_reported(hass, b
 
 
 async def test_up_from_off_starts_at_the_bottom(hass, broker):
+    # An off light keeps its level, which a fade from off would start at: it is turned on at the bottom first.
     entity_id = light(hass, broker, state="off")
 
     await call(hass, "move", {"entity_id": entity_id, "brightness": "up"})
 
-    assert commands(broker) == [(SET, {"state": "ON", "brightness": 254, "transition": 5.0})]
+    assert commands(broker) == [(SET, BOTTOM), (SET, {"state": "ON", "brightness": 254, "transition": 5.0})]
 
 
 @pytest.mark.parametrize(
@@ -101,6 +103,7 @@ async def test_hue_from_off_moves_with_brightness_up(hass, broker):
     await call(hass, "move", {"entity_id": entity_id, "brightness": "up", "hue": "up"})
 
     assert commands(broker) == [
+        (SET, BOTTOM),
         (SET, {"state": "ON", "brightness": 254, "transition": 5.0}),
         (SET, {"hue_move": 51}),
     ]
@@ -183,11 +186,25 @@ async def test_a_group_with_an_off_member_moves_it_up_from_the_bottom(hass, brok
 
     await call(hass, "move", {"entity_id": room, "brightness": "up"})
 
-    # From the lit member's 80 %: 1 s.
-    assert commands(broker) == [("zigbee2mqtt/7/set", {"state": "ON", "brightness": 254, "transition": 1.0})]
+    # From the lit member's 80 %: 1 s. Only the off member is put at the bottom first.
+    assert commands(broker) == [
+        ("zigbee2mqtt/0x02/set", BOTTOM),
+        ("zigbee2mqtt/7/set", {"state": "ON", "brightness": 254, "transition": 1.0}),
+    ]
     cache = transition_cache(hass)
     clock.now += 0.5
     assert cache.value("light.two", BRIGHTNESS, -1) == pytest.approx(50.0)
+
+
+async def test_a_group_all_off_is_put_at_the_bottom_with_one_publish(hass, broker):
+    room = group(hass, broker, one={"state": "off"}, two={"state": "off"})
+
+    await call(hass, "move", {"entity_id": room, "brightness": "up"})
+
+    assert commands(broker) == [
+        ("zigbee2mqtt/7/set", BOTTOM),
+        ("zigbee2mqtt/7/set", {"state": "ON", "brightness": 254, "transition": 5.0}),
+    ]
 
 
 async def test_a_group_saturation_move_records_each_lit_member(hass, broker, clock):

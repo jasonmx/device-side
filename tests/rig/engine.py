@@ -137,6 +137,10 @@ class Observe:
     ask: str
 
 
+# How far a steady sample may spread, in its source's units: a Zigbee bulb can settle one level step (1/254) after a
+# stop. HA's brightness is 0-255, device_side's in percent.
+STEADY_SPREAD = {("brightness", "ha"): 255 / 254 + 1e-9, ("brightness", "device_side"): 100 / 254 + 1e-9}
+
 # Steps that check something; an observed run turns them into the waits they imply.
 CHECKS = frozenset({"expect_response", "expect_error", "expect_state", "expect_matches_read", "sample"})
 
@@ -263,9 +267,7 @@ def _parse_expect_matches_read(args: Any) -> dict:
 
 
 def _parse_sample(args: Any) -> dict:
-    args = _mapping(
-        args, required=["attribute", "for"], allowed=["target", "every", "expect", "min", "max", "source"]
-    )
+    args = _mapping(args, required=["attribute", "for"], allowed=["target", "every", "expect", "min", "max", "source"])
     args["for"] = Expr.parse(args["for"])
     args["every"] = Expr.parse(args.get("every", 0.5))
     if args.get("expect", "rising") not in ("rising", "falling", "steady"):
@@ -492,7 +494,12 @@ def cases(suite: Suite, inventory: Inventory, keyword: str | None = None) -> lis
                     case = Case(suite, test, role, {}, f"no {missing[0]} entity in inventory", observed)
                 else:
                     members = inventory.members(suite.integration, entities["group"]) if "group" in entities else ()
-                    case = Case(suite, test, role, entities, observed=observed, members=members)
+                    # A group case that also targets a light means one of the group's: where the inventory lists them.
+                    outside = [
+                        n for n, e in entities.items() if n.startswith("light_") and members and e not in members
+                    ]
+                    skip = f"{outside[0]} is not one of the group's members" if outside else None
+                    case = Case(suite, test, role, entities, skip, observed, members)
                 result.append(case)
     return result
 
@@ -1155,13 +1162,13 @@ class _CaseRun:
         `source: device_side` reads device_side.get_attributes instead of HA's state, in its units (brightness in
         percent): mid-move it predicts where the light is, where HA shows a Hue fade's end value at once.
         """
-        entity_id, attribute = self.entity(args), args["attribute"]
+        entity_id, attribute, source = self.entity(args), args["attribute"], args.get("source", "ha")
         loop = asyncio.get_running_loop()
         deadline = loop.time() + args["for"].eval(self.names)
         every = max(args["every"].eval(self.names), 0.05)
         readings: list[float] = []
         while True:
-            value = await self.reading(entity_id, attribute, args.get("source", "ha"))
+            value = await self.reading(entity_id, attribute, source)
             if value is not None and (isinstance(value, bool) or not isinstance(value, int | float)):
                 raise StepFailure(f"{entity_id}: {attribute} is {value!r}, not a number")
             readings.append(float(value or 0))
@@ -1179,7 +1186,7 @@ class _CaseRun:
                 raise StepFailure(f"{entity_id}: {attribute} did not rise steadily: {shown}")
             case "falling" if not (all(b <= a for a, b in pairs) and readings[-1] < readings[0]):
                 raise StepFailure(f"{entity_id}: {attribute} did not fall steadily: {shown}")
-            case "steady" if len(set(readings)) > 1:
+            case "steady" if max(readings) - min(readings) > STEADY_SPREAD.get((attribute, source), 0):
                 raise StepFailure(f"{entity_id}: {attribute} moved: {shown}")
 
     async def reading(self, entity_id: str, attribute: str, source: str) -> Any:
@@ -1259,8 +1266,16 @@ async def run(
         for suite, adapter, *_ in planned
     }
     rig_run = _Run(
-        registry, tolerance, settle, inventory.power(), ask, out, options,
-        EntryOptions(admin, journal=journal) if admin else None, bridge=bridge, journal=journal,
+        registry,
+        tolerance,
+        settle,
+        inventory.power(),
+        ask,
+        out,
+        options,
+        EntryOptions(admin, journal=journal) if admin else None,
+        bridge=bridge,
+        journal=journal,
     )
     try:
         waiting = [

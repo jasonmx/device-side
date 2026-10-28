@@ -255,7 +255,9 @@ output during the fade departs from the value it reports.
 Brightness and saturation are each one publish of the end point (the limit, or the end of the range) with a
 `transition` of `sweep_time` × the fraction of the range left, which the bulb then runs on its own. In one call
 they are two publishes, and the bulb runs both. Brightness up is `{"state": "ON", "brightness", "transition"}`
-and turns the light on, from the bottom if it was off. Down to 0 % is Z2M's soft off, `{"state": "OFF",
+and turns the light on. An off bulb keeps its level and would fade up from there, so a light that is off is first
+turned on at the bottom, `{"state": "ON", "brightness": 1, "transition": 0}` (one publish to a group that is all
+off, else to each off member). Down to 0 % is Z2M's soft off, `{"state": "OFF",
 "transition"}`, which keeps the level for the next plain on. Saturation is written as a color at the light's
 current hue, `{"color": {"hue", "saturation"}, "transition"}`: with Z2M's `hue_native_control` on, the bulb fades
 it in xy and holds its hue. Saturation and hue move only a light that is on, so on a light that is off, as for a

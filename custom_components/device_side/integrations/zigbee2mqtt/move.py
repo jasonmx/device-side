@@ -32,6 +32,8 @@ MIN_CYCLE_S, MAX_CYCLE_S = 1.0, 254.0
 # The end read-back, after the fade has run: a live read mid-fade may have overwritten Z2M's published end value.
 END_READ_S = 1.0
 COLOR_HS = "color_hs"  # the Z2M feature a hue or saturation move needs
+# An off light keeps its level, and a fade from off starts there: it is turned on at the bottom first.
+AT_THE_BOTTOM = {"state": "ON", "brightness": 1, "transition": 0}
 
 
 def transition_cache(hass: HomeAssistant) -> TransitionCache:
@@ -83,13 +85,15 @@ async def publish(hass: HomeAssistant, mqtt_topic: str, payload: dict) -> None:
 
 @dataclass(frozen=True, slots=True)
 class Fade:
-    """One attribute's fade: the payload published, each moving light's start and end, and how long it runs."""
+    """One attribute's fade: the payload published, each moving light's start and end, and how long it runs; first, any
+    publishes that put a light at the fade's start."""
 
     attribute: str
     payload: dict
     starts: dict[str, float]
     ends: dict[str, float]
     duration: float
+    before: tuple[tuple[str, dict], ...] = ()
 
 
 class Z2MMove(Adapter[MoveRequest]):
@@ -158,7 +162,7 @@ def plan(cache: TransitionCache, move: MoveRequest, target: Target, lights: list
     """Each attribute's fade or hue move, or why it has none to make."""
     outcomes: list[Fade | HueMove | str] = []
     if move.brightness:
-        outcomes.append(brightness_fade(cache, move, lights))
+        outcomes.append(brightness_fade(cache, move, target, lights))
     if move.saturation:
         outcomes.append(saturation_fade(cache, move, target, lights))
     if move.hue:
@@ -178,6 +182,8 @@ async def start(
             async with cache.recording((light_id, outcome.attribute) for light_id in outcome.starts):
                 for light_id, begin in outcome.starts.items():
                     cache.moving(light_id, outcome.attribute, begin, outcome.ends[light_id], outcome.duration)
+                for mqtt_topic, payload in outcome.before:
+                    await publish(hass, mqtt_topic, payload)
                 await publish(hass, set_topic, outcome.payload)
             reads.append((outcome.duration + END_READ_S, end_read(hass, target, lights, outcome.attribute)))
         else:
@@ -197,7 +203,7 @@ async def lacked(hass: HomeAssistant, request: MoveRequest, lights: list[Target]
     return color
 
 
-def brightness_fade(cache: TransitionCache, request: MoveRequest, lights: list[Target]) -> Fade | str:
+def brightness_fade(cache: TransitionCache, request: MoveRequest, target: Target, lights: list[Target]) -> Fade | str:
     """The brightness fade toward the limit; off down with nothing lit, at_limit when there is none left to make."""
     up = request.brightness == UP
     limit = request.brightness_limit if request.brightness_limit is not None else (100.0 if up else 0.0)
@@ -217,8 +223,11 @@ def brightness_fade(cache: TransitionCache, request: MoveRequest, lights: list[T
     else:
         payload = {"brightness": max(1, round(limit / 100 * 254)), "transition": transition_s}
         payload = {"state": "ON", **payload} if up else payload
+    off = [light for light in lights if light not in lit_lights] if up else []
+    # One publish to the group when it is all off, so its members light together; else each off member's own.
+    before = tuple((topic(light, "set"), AT_THE_BOTTOM) for light in ([target] if off == lights else off))
     moving_starts = {light_id: starts[light_id] for light_id in moving}
-    return Fade(BRIGHTNESS, payload, moving_starts, dict.fromkeys(moving, limit), duration)
+    return Fade(BRIGHTNESS, payload, moving_starts, dict.fromkeys(moving, limit), duration, before)
 
 
 def saturation_fade(cache: TransitionCache, request: MoveRequest, target: Target, lights: list[Target]) -> Fade | str:
