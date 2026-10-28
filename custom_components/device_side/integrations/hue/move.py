@@ -9,18 +9,12 @@ from homeassistant.util.color import color_temperature_kelvin_to_mired
 
 from .bridge import bridge_api, controller, resource_id
 from .report_filter import report_filter
-from .transition_cache import (
-    BRIGHTNESS,
-    COLOR_TEMP,
-    MIN_BRIGHTNESS_STEP,
-    MIN_MIREK_STEP,
-    TransitionCache,
-    transition_cache,
-)
+from .transition_cache import MIN_BRIGHTNESS_STEP, MIN_MIREK_STEP, transition_cache
 from ...actions.move import UP, WARMER, MoveRequest
 from ...core.adapter import Adapter
 from ...core.models import EntityResult, Status, Target
 from ...core.scope import AdapterScope
+from ...core.transition import BRIGHTNESS, COLOR_TEMP, TransitionCache
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable

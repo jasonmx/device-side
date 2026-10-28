@@ -7,7 +7,7 @@ from ...fixtures.hue import HueBridge, add_hue_entity, add_hue_group, hue_entry,
 
 
 class Clock:
-    """A TransitionCache clock the test moves by hand."""
+    """A transition cache clock the test moves by hand."""
 
     def __init__(self) -> None:
         self.now = 1000.0

@@ -32,9 +32,10 @@ from homeassistant.helpers.target import TargetSelection, async_extract_referenc
 
 from .attributes import ATTRIBUTES, event_fields, reported_values, strip
 from .bridge import bridge_api
-from .transition_cache import BRIGHTNESS, MIN_BRIGHTNESS_STEP, TransitionCache, transition_cache
+from .transition_cache import MIN_BRIGHTNESS_STEP, transition_cache
 from ...core.models import Target
 from ...core.runtime import get_runtime
+from ...core.transition import BRIGHTNESS, TransitionCache
 
 if TYPE_CHECKING:
     from aiohue.v2 import HueBridgeV2

@@ -2,9 +2,17 @@
 
 import pytest
 
-from custom_components.device_side.integrations.hue.transition_cache import API_SETTLE_SECONDS, TransitionCache
+from custom_components.device_side.core.transition import TransitionCache, transition_cache
 
-from .conftest import Clock
+SETTLE_SECONDS = 15.0
+
+
+class Clock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
 
 
 @pytest.fixture
@@ -14,7 +22,7 @@ def clock() -> Clock:
 
 @pytest.fixture
 def cache(clock) -> TransitionCache:
-    return TransitionCache(clock)
+    return TransitionCache(SETTLE_SECONDS, clock)
 
 
 def test_nothing_cached_returns_the_reported_value(cache):
@@ -40,7 +48,7 @@ def test_inside_the_guard_the_prediction_wins(cache, clock, start, target, durat
 @pytest.mark.parametrize("duration", [pytest.param(5.0, id="moving"), pytest.param(0.0, id="stopped")])
 def test_after_the_guard_the_report_wins_and_the_entry_is_pruned(cache, clock, duration):
     cache.moving("light-1", "brightness", 30.0, 100.0, duration)
-    clock.now += duration + API_SETTLE_SECONDS + 0.1
+    clock.now += duration + SETTLE_SECONDS + 0.1
 
     assert cache.value("light-1", "brightness", 70.0) == 70.0
     clock.now = 1000.0
@@ -60,7 +68,7 @@ def test_follows_any_attribute_inside_its_window(cache, clock):
     cache.stopped("light-1", "color_temp", 300.0)
 
     assert cache.attributes("light-1") == ["brightness", "color_temp"]
-    clock.now += API_SETTLE_SECONDS + 0.1
+    clock.now += SETTLE_SECONDS + 0.1
     assert cache.attributes("light-1") == ["brightness"]
     clock.now += 10.0
     assert not cache.follows("light-1")
@@ -99,3 +107,12 @@ async def test_a_refused_write_puts_back_what_each_key_held(cache):
     assert cache.halted("light-1", "brightness")
     assert cache.value("light-1", "brightness", 13.0) == 42.0
     assert not cache.follows("light-2")
+
+
+async def test_each_integration_keeps_its_own_cache(hass, setup_integration):
+    hue = transition_cache(hass, "hue", lambda: TransitionCache(15))
+    z2m = transition_cache(hass, "zigbee2mqtt", lambda: TransitionCache(1))
+
+    assert transition_cache(hass, "hue", lambda: TransitionCache(0)) is hue
+    assert z2m is not hue
+    assert (hue.settle_seconds, z2m.settle_seconds) == (15, 1)

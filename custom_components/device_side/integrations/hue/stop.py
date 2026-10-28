@@ -8,10 +8,11 @@ from homeassistant.core import HomeAssistant
 from .bridge import bridge_api, controller, put, resource_id, stops
 from .move import in_soft_off, light_brightness, light_mirek, lit, reported_brightness, room_lights
 from .report_filter import report_filter
-from .transition_cache import BRIGHTNESS, COLOR_TEMP, TransitionCache, transition_cache
+from .transition_cache import transition_cache
 from ...core.adapter import Adapter
 from ...core.models import EntityResult, Request, Status, Target
 from ...core.scope import AdapterScope
+from ...core.transition import BRIGHTNESS, COLOR_TEMP, TransitionCache
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
