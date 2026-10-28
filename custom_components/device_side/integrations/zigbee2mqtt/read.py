@@ -71,7 +71,7 @@ class Reader:
         try:
             entry = json.loads(msg.payload)
             message = entry["message"]
-        except (ValueError, TypeError, KeyError):
+        except ValueError, TypeError, KeyError:
             return
         if entry.get("level") == "error" and all(part in message for part in self._failure):
             self._reply.set_exception(RuntimeError(message))
@@ -84,7 +84,7 @@ class Reader:
         try:
             state = json.loads(msg.payload)
             value = state.get(READ_KEY)
-        except (ValueError, AttributeError):
+        except ValueError, AttributeError:
             return
         if isinstance(value, dict) and set(value) == self._expected:
             self._reply.set_result((value, state))
@@ -139,7 +139,9 @@ async def reader(hass: HomeAssistant, devices: list[Target]) -> AsyncIterator[Re
         def added(address: str) -> None:
             _LOGGER.info(
                 "Added %s to Zigbee2MQTT's %s for %s, so get_attributes reads it live",
-                READ_KEY, _FILTERED_CACHE, by_address[address].entity_id,
+                READ_KEY,
+                _FILTERED_CACHE,
+                by_address[address].entity_id,
             )
 
         await ensure_options(hass, "device", list(by_address), _with_read_key, added)

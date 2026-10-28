@@ -15,6 +15,7 @@ from .fakes.scripted import SCRIPT
 
 FAKE_INTEGRATIONS = ["tests.fakes.broken_integration", "tests.fakes.fake_integration", "tests.fakes.fake_special"]
 
+
 @pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations):
     yield
@@ -53,9 +54,7 @@ async def setup_production(hass: HomeAssistant) -> MockConfigEntry:
 
 
 async def call(hass: HomeAssistant, service: str, data: dict, return_response: bool = True):
-    return await hass.services.async_call(
-        DOMAIN, service, data, blocking=True, return_response=return_response
-    )
+    return await hass.services.async_call(DOMAIN, service, data, blocking=True, return_response=return_response)
 
 
 async def refusal(hass: HomeAssistant, service: str, data: dict) -> str:

@@ -118,9 +118,7 @@ def mock_chip(monkeypatch):
     def _OnWithTimedOff(onOffControl=0, onTime=0, offWaitTime=0):
         return SimpleNamespace(onOffControl=onOffControl, onTime=onTime, offWaitTime=offWaitTime)
 
-    mock_objects = SimpleNamespace(
-        OnOff=SimpleNamespace(Commands=SimpleNamespace(OnWithTimedOff=_OnWithTimedOff))
-    )
+    mock_objects = SimpleNamespace(OnOff=SimpleNamespace(Commands=SimpleNamespace(OnWithTimedOff=_OnWithTimedOff)))
     mock_chip_clusters = SimpleNamespace(Objects=mock_objects)
     mock_chip_pkg = SimpleNamespace(clusters=mock_chip_clusters)
 
