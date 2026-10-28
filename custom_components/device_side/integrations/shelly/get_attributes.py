@@ -5,11 +5,11 @@ from typing import ClassVar
 
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
-from homeassistant.util.color import color_RGB_to_hs, color_RGB_to_xy
 
 from .addressing import address, unsupported_reason
 from .rpc import get_status
 from ...core.adapter import Adapter
+from ...core.color import rgb_row
 from ...core.models import EntityResult, Request, Status, Target
 from ...core.scope import AdapterScope
 from ...core.timer import timer_row
@@ -29,10 +29,7 @@ def status_row(component: str, status: dict, now: datetime) -> dict:
         if status["mode"] == "cct":
             row["color_temp_kelvin"] = status["ct"]
         elif status["mode"] == "rgb":
-            rgb = status["rgb"]
-            row["rgb_color"] = list(rgb)
-            row["hs_color"] = list(color_RGB_to_hs(*rgb))
-            row["xy_color"] = list(color_RGB_to_xy(*rgb))
+            row.update(rgb_row(*status["rgb"]))
     if "timer_started_at" in status and "timer_duration" in status:
         duration = status["timer_duration"]
         remaining = min(max(status["timer_started_at"] + duration - now.timestamp(), 0), duration)

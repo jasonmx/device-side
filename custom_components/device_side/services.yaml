@@ -230,6 +230,8 @@ get_attributes:
         integration: shelly
       - domain: switch
         integration: matter
+      - domain: light
+        integration: zha
 
 set_scene:
   target:

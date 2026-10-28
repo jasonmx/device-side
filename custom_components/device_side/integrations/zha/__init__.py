@@ -1,6 +1,7 @@
-"""ZHA, through the core zha integration's cluster command action."""
+"""ZHA, through the core zha integration's cluster command action and its gateway's attribute reads."""
 
 from .addressing import is_zha_group
+from .get_attributes import ZHAGetAttributes
 from .groups import expand_group
 from .turn_on_for import ZHATurnOnFor
 from ...core.scope import IntegrationInfo
@@ -14,4 +15,4 @@ INTEGRATION = IntegrationInfo(
     max_concurrency=2,
 )
 
-ADAPTERS = [ZHATurnOnFor]
+ADAPTERS = [ZHAGetAttributes, ZHATurnOnFor]

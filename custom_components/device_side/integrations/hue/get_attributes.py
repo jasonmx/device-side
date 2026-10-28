@@ -5,12 +5,13 @@ from statistics import mean
 from typing import TYPE_CHECKING, ClassVar
 
 from homeassistant.core import HomeAssistant
-from homeassistant.util.color import color_temperature_mired_to_kelvin, color_xy_to_hs, color_xy_to_RGB
+from homeassistant.util.color import color_temperature_mired_to_kelvin
 
 from .bridge import bridge_api, resource_id
 from .move import light_mirek, lit
 from .transition_cache import BRIGHTNESS, COLOR_TEMP, TransitionCache, transition_cache
 from ...core.adapter import Adapter
+from ...core.color import xy_row
 from ...core.models import EntityResult, Request, Status, Target
 from ...core.scope import AdapterScope
 
@@ -51,10 +52,7 @@ def attributes(lights: Iterable[Light]) -> dict:
     if kelvins:
         row["color_temp_kelvin"] = round(mean(kelvins))
     if xys := [(light.color.xy.x, light.color.xy.y) for light in lights if light.color]:
-        xy = (round(mean(x for x, _ in xys), 4), round(mean(y for _, y in xys), 4))
-        row["xy_color"] = list(xy)
-        row["rgb_color"] = list(color_xy_to_RGB(*xy))
-        row["hs_color"] = list(color_xy_to_hs(*xy))
+        row.update(xy_row(round(mean(x for x, _ in xys), 4), round(mean(y for _, y in xys), 4)))
     return row
 
 

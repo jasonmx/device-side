@@ -26,6 +26,7 @@ def add_zha_entity(
     ieee: str = IEEE,
     unique_id: str | None = None,
     state: str = "off",
+    attributes: dict | None = None,
 ) -> str:
     """Register a ZHA entity; a light's unique_id is "{ieee}-{endpoint_id}" unless one is given."""
     domain, object_id = entity_id.split(".")
@@ -38,7 +39,7 @@ def add_zha_entity(
         config_entry=entry,
         device_id=device.id,
     )
-    hass.states.async_set(entity_id, state)
+    hass.states.async_set(entity_id, state, attributes)
     return entity_id
 
 
