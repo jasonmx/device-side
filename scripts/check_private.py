@@ -49,7 +49,7 @@ def find(paths: list[Path], terms: dict[str, str]) -> list[str]:
     for path in paths:
         try:
             lines = path.read_text().splitlines()
-        except (UnicodeDecodeError, FileNotFoundError):
+        except UnicodeDecodeError, FileNotFoundError:
             continue
         for number, line in enumerate(lines, 1):
             lowered = line.lower()

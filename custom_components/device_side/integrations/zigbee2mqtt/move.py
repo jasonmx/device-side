@@ -141,9 +141,7 @@ class Z2MMove(Adapter[MoveRequest]):
                 detail = "off" if "off" in outcomes else outcomes[0]
                 return self.result(target, Status.UNCHANGED, detail=detail)
             clamped_to = await start(hass, cache, target, lights, made)
-            return self.result(
-                target, Status.SENT, clamped_to=clamped_to, detail="fields_dropped" if dropped else None
-            )
+            return self.result(target, Status.SENT, clamped_to=clamped_to, detail="fields_dropped" if dropped else None)
 
         return await self.gather(hass, targets, send)
 

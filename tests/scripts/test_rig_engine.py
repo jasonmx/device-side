@@ -163,10 +163,7 @@ async def test_an_expect_error_mismatch_fails_naming_both_summaries(tmp_path):
     result = await run_one(ha, suite(tmp_path, REFUSAL), inventory(light_wrapped="light.lamp"))
     outcome, detail = outcomes(result)["refuses[light_wrapped]"]
     assert outcome is Outcome.FAIL
-    assert detail == (
-        "step 2 (expect_error): error summary is 'light.lamp: error', "
-        "expected 'light.lamp: timeout'"
-    )
+    assert detail == ("step 2 (expect_error): error summary is 'light.lamp: error', expected 'light.lamp: timeout'")
 
 
 async def test_a_call_that_succeeds_where_an_error_is_expected_fails(tmp_path):
@@ -1271,15 +1268,18 @@ async def test_options_already_in_force_are_not_saved(tmp_path, monkeypatch):
     admin.respond = options_seen(admin)
 
     result = await run(
-        [suite(tmp_path, option_file("opt"), "fake")], inventory("fake", light_ct="light.a"), OPTION_REGISTRY,
-        admin, admin=admin, tolerance=TOLERANCE, out=lambda _: None,
+        [suite(tmp_path, option_file("opt"), "fake")],
+        inventory("fake", light_ct="light.a"),
+        OPTION_REGISTRY,
+        admin,
+        admin=admin,
+        tolerance=TOLERANCE,
+        out=lambda _: None,
     )
 
     assert not result.failed
     assert admin.saved == []
     assert admin.aborted == 1
-
-
 
 
 async def test_the_journal_holds_each_change_before_it_is_made_and_is_gone_after_the_run(tmp_path, monkeypatch):
@@ -1302,8 +1302,14 @@ async def test_the_journal_holds_each_change_before_it_is_made_and_is_gone_after
 
     admin.rest, admin.call_service = save, light
     result = await run(
-        [suite(tmp_path, RESTORED_MIDWAY, "fake")], inventory("fake", light_ct="light.a"), OPTION_REGISTRY,
-        admin, admin=admin, tolerance=TOLERANCE, out=lambda _: None, journal=journal,
+        [suite(tmp_path, RESTORED_MIDWAY, "fake")],
+        inventory("fake", light_ct="light.a"),
+        OPTION_REGISTRY,
+        admin,
+        admin=admin,
+        tolerance=TOLERANCE,
+        out=lambda _: None,
+        journal=journal,
     )
 
     assert not result.failed
@@ -1327,8 +1333,14 @@ async def test_a_run_cancelled_mid_case_puts_back_and_clears_its_journal(tmp_pat
     admin.respond = options_seen(admin)
     task = asyncio.create_task(
         run(
-            [suite(tmp_path, WAITING_MIDWAY, "fake")], inventory("fake", light_ct="light.a"), OPTION_REGISTRY,
-            admin, admin=admin, tolerance=TOLERANCE, out=lambda _: None, journal=journal,
+            [suite(tmp_path, WAITING_MIDWAY, "fake")],
+            inventory("fake", light_ct="light.a"),
+            OPTION_REGISTRY,
+            admin,
+            admin=admin,
+            tolerance=TOLERANCE,
+            out=lambda _: None,
+            journal=journal,
         )
     )
     while admin.states["light.a"]["state"] != "off":
@@ -1383,7 +1395,6 @@ async def test_an_option_outside_the_adapters_scope_is_a_schema_error(tmp_path):
         )
 
 
-
 async def test_an_option_file_skips_an_adapter_without_the_option(tmp_path):
     # move-predicted_state.yaml is Hue's: Zigbee2MQTT's move has no predicted_state.
     out: list[str] = []
@@ -1397,6 +1408,7 @@ async def test_an_option_file_skips_an_adapter_without_the_option(tmp_path):
     )
     assert result.suites == []
     assert "zigbee2mqtt / move: no options, steps.yaml skipped" in out
+
 
 def test_a_step_file_lists_options_by_name(tmp_path):
     path = tmp_path / "steps.yaml"
@@ -1467,9 +1479,14 @@ def bridge_inventory() -> Inventory:
 async def run_bridge(tmp_path, bridge, ha=None, text=BRIDGE_STEPS, integration="hue") -> dict:
     ha = ha or BridgeHA()
     steps = suite(tmp_path, text.replace("set_scene", "turn_on_for") if integration == "shelly" else text, integration)
-    result = await run_one(ha, steps, bridge_inventory() if integration == "hue" else inventory(
-        integration, light_dimmable="light.bulb", group="light.room", scene="scene.dusk"
-    ), bridge=bridge)
+    result = await run_one(
+        ha,
+        steps,
+        bridge_inventory()
+        if integration == "hue"
+        else inventory(integration, light_dimmable="light.bulb", group="light.room", scene="scene.dusk"),
+        bridge=bridge,
+    )
     return outcomes(result)
 
 

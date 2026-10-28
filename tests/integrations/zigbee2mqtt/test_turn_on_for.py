@@ -56,9 +56,7 @@ async def test_light_with_brightness_calls_turn_on_then_publishes_on_time(hass, 
     entry = z2m_entry(hass)
     add_z2m_entity(hass, entry, "light.kitchen")
 
-    response = await call(
-        hass, "turn_on_for", {"entity_id": "light.kitchen", "duration": 10, "brightness": 128}
-    )
+    response = await call(hass, "turn_on_for", {"entity_id": "light.kitchen", "duration": 10, "brightness": 128})
 
     assert response == {"light.kitchen": SENT}
     assert len(turn_ons) == 1
@@ -117,7 +115,9 @@ async def test_non_z2m_mqtt_entity_is_refused(hass, setup_production, publishes,
         identifiers={("mqtt", "some_other_bridge_0x1234")},
     )
     er.async_get(hass).async_get_or_create(
-        "light", "mqtt", "other_ieee",
+        "light",
+        "mqtt",
+        "other_ieee",
         suggested_object_id="other_light",
         config_entry=entry,
         device_id=other_device.id,
@@ -161,9 +161,7 @@ async def test_multiple_devices_each_get_their_own_topic(hass, setup_production,
     add_z2m_entity(hass, entry, "light.room1", ieee=ieee1)
     add_z2m_entity(hass, entry, "light.room2", ieee=ieee2)
 
-    response = await call(
-        hass, "turn_on_for", {"entity_id": ["light.room1", "light.room2"], "duration": 5}
-    )
+    response = await call(hass, "turn_on_for", {"entity_id": ["light.room1", "light.room2"], "duration": 5})
 
     assert response["light.room1"] == SENT
     assert response["light.room2"] == SENT
@@ -196,9 +194,7 @@ async def test_group_without_fields_publishes_to_group_id_topic(hass, setup_prod
 async def test_group_with_fields_calls_turn_on_then_publishes(hass, setup_production, publishes, turn_ons):
     add_z2m_group(hass, z2m_entry(hass), "light.downstairs", group_id=7)
 
-    response = await call(
-        hass, "turn_on_for", {"entity_id": "light.downstairs", "duration": 5, "brightness": 128}
-    )
+    response = await call(hass, "turn_on_for", {"entity_id": "light.downstairs", "duration": 5, "brightness": 128})
 
     assert response == {"light.downstairs": SENT}
     assert turn_ons[0].data == {"entity_id": "light.downstairs", "brightness": 128}
@@ -217,9 +213,7 @@ async def test_device_and_group_each_get_their_own_topic(hass, setup_production,
     add_z2m_entity(hass, entry, "light.kitchen")
     add_z2m_group(hass, entry, "light.downstairs", group_id=7)
 
-    response = await call(
-        hass, "turn_on_for", {"entity_id": ["light.kitchen", "light.downstairs"], "duration": 5}
-    )
+    response = await call(hass, "turn_on_for", {"entity_id": ["light.kitchen", "light.downstairs"], "duration": 5})
 
     assert response == {"light.kitchen": SENT, "light.downstairs": SENT}
     assert {p.data["topic"] for p in publishes} == {TOPIC, "zigbee2mqtt/7/set"}

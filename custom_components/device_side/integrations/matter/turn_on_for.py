@@ -64,9 +64,7 @@ class MatterTurnOnFor(Adapter[TurnOnForRequest]):
                 read = await client.read_attribute(node_id=node_id, attribute_path=path)
                 on_time_value = read.get(path)
             except Exception as err:  # noqa: BLE001
-                _LOGGER.debug(
-                    "turn_on_for matter read-back failed for %s: %s", target.entity_id, err
-                )
+                _LOGGER.debug("turn_on_for matter read-back failed for %s: %s", target.entity_id, err)
                 return self.result(target, Status.SENT, detail="readback_failed")
 
             if on_time_value:

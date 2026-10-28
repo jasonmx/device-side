@@ -41,7 +41,9 @@ def test_hs_mode_reports_hue_and_saturation_and_the_colors_derived_from_them():
 
     hs = (180.0, 100.0)
     assert zcl_row(attributes, NOW) == {
-        "hs_color": list(hs), "rgb_color": list(color_hs_to_RGB(*hs)), "xy_color": list(color_hs_to_xy(*hs)),
+        "hs_color": list(hs),
+        "rgb_color": list(color_hs_to_RGB(*hs)),
+        "xy_color": list(color_hs_to_xy(*hs)),
     }
 
 

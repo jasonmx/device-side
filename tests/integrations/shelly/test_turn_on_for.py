@@ -94,7 +94,7 @@ async def test_switch_as_x_light_sends_the_switch_call(hass, setup_production):
 @pytest.mark.parametrize(
     ("entity_id", "key", "data"),
     [
-        ("light.relay", "switch:0", {"brightness": 10}),   # relay shown as a light is on/off
+        ("light.relay", "switch:0", {"brightness": 10}),  # relay shown as a light is on/off
         ("light.dimmer", "light:0", {"color_temp_kelvin": 3000}),
         ("light.cct", "cct:0", {"rgb_color": [1, 2, 3]}),
     ],

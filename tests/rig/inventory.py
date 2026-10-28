@@ -19,9 +19,11 @@ def main_checkout(repo: Path = REPO) -> Path:
     try:
         common = subprocess.run(
             ["git", "-C", str(repo), "rev-parse", "--path-format=absolute", "--git-common-dir"],
-            check=True, capture_output=True, text=True,
+            check=True,
+            capture_output=True,
+            text=True,
         ).stdout.strip()
-    except (OSError, subprocess.CalledProcessError):
+    except OSError, subprocess.CalledProcessError:
         return repo
     return Path(common).parent
 

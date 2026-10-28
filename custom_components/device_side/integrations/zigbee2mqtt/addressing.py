@@ -24,7 +24,7 @@ def z2m_address(device: dr.DeviceEntry) -> str | None:
     """
     for itype, ident in device.identifiers:
         if itype == "mqtt" and ident.startswith(_Z2M_PREFIX):
-            return ident[len(_Z2M_PREFIX):]
+            return ident[len(_Z2M_PREFIX) :]
     return None
 
 

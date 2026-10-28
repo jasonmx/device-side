@@ -15,7 +15,4 @@ def detect(hass: HomeAssistant, entry: er.RegistryEntry, device: dr.DeviceEntry 
     """
     if device is None:
         return False
-    return any(
-        itype == "mqtt" and ident.startswith(_Z2M_IDENTIFIER_PREFIX)
-        for itype, ident in device.identifiers
-    )
+    return any(itype == "mqtt" and ident.startswith(_Z2M_IDENTIFIER_PREFIX) for itype, ident in device.identifiers)
