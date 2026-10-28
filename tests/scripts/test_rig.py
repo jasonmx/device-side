@@ -21,6 +21,15 @@ REPO = Path(__file__).parents[2]
 _spec = importlib.util.spec_from_file_location("rig", REPO / "scripts" / "rig.py")
 rig = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(rig)
+real_workspace_color = rig.workspace_color  # the autouse fixture swaps the module's for a recorder
+
+
+@pytest.fixture(autouse=True)
+def workspace_colors(monkeypatch) -> list[str | None]:
+    """Record the cmux workspace colors a run sets, so no test reaches the real cmux."""
+    colors: list[str | None] = []
+    monkeypatch.setattr(rig, "workspace_color", colors.append)
+    return colors
 
 
 def write(tmp_path: Path, name: str, text: str) -> Path:
@@ -472,6 +481,93 @@ def test_an_uncontested_lock_says_nothing(tmp_path):
     printed: list[str] = []
     rig.lock_rig(tmp_path / rig.LOCK_NAME, "wt/first", out=printed.append).close()
     assert printed == []
+
+
+def test_a_run_colors_its_workspace_amber_while_it_waits_and_green_once_it_holds_the_lock(
+    tmp_path, monkeypatch, workspace_colors
+):
+    path = tmp_path / rig.LOCK_NAME
+    held = rig.lock_rig(path, "wt/first")
+    assert workspace_colors == [rig.WORKSPACE_HELD]
+    workspace_colors.clear()
+
+    def release_on_second_poll(_seconds):
+        assert workspace_colors == [rig.WORKSPACE_QUEUED]
+        held.close()
+
+    monkeypatch.setattr(rig.time, "sleep", release_on_second_poll)
+    rig.lock_rig(path, "wt/second", out=lambda _line: None).close()
+
+    assert workspace_colors == [rig.WORKSPACE_QUEUED, rig.WORKSPACE_HELD]
+
+
+def test_main_clears_the_workspace_color_when_the_run_ends_but_not_after_a_dry_run(monkeypatch, workspace_colors):
+    monkeypatch.setattr(rig, "hold_rig", lambda _dry_run: (None, None))
+    monkeypatch.setattr(rig, "run_held", lambda *_args: 0)
+    rig.main(["--dry-run"])
+    assert workspace_colors == []
+    rig.main([])
+    assert workspace_colors == [None]
+
+
+def test_main_clears_the_workspace_color_when_a_wait_is_given_up(monkeypatch, workspace_colors):
+    def interrupted(_dry_run):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(rig, "hold_rig", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        rig.main([])
+    assert workspace_colors == [None]
+
+
+def test_main_clears_the_workspace_color_after_a_wait_free_dry_run(monkeypatch, workspace_colors):
+    monkeypatch.setattr(rig, "wait_free", lambda _path: None)
+    monkeypatch.setattr(rig, "common_dir", lambda: Path("."))
+    assert rig.main(["--wait-free", "--dry-run"]) == 0
+    assert workspace_colors == [None]
+
+
+def test_a_sigterm_while_queued_for_the_lock_still_clears_the_workspace_color(monkeypatch, workspace_colors):
+    def queued(_dry_run):
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    monkeypatch.setattr(rig, "hold_rig", queued)
+    with pytest.raises(SystemExit) as stopped:
+        rig.main([])
+    assert stopped.value.code == 128 + signal.SIGTERM
+    assert workspace_colors == [None]
+
+
+def test_workspace_color_calls_cmux_only_inside_a_cmux_workspace(monkeypatch):
+    calls: list[list[str]] = []
+    monkeypatch.setattr(rig.subprocess, "run", lambda command, **_kw: calls.append(command))
+    monkeypatch.setattr(rig.shutil, "which", lambda _name: "/bin/cmux")
+    monkeypatch.delenv("CMUX_WORKSPACE_ID", raising=False)
+    real_workspace_color("Green")
+    assert calls == []
+
+    monkeypatch.setenv("CMUX_WORKSPACE_ID", "workspace:7")
+    real_workspace_color("Green")
+    real_workspace_color(None)
+    assert calls == [
+        ["cmux", "workspace-action", "--workspace", "workspace:7", "--action", "set-color", "--color", "Green"],
+        ["cmux", "workspace-action", "--workspace", "workspace:7", "--action", "clear-color"],
+    ]
+
+    monkeypatch.setattr(rig.shutil, "which", lambda _name: None)
+    calls.clear()
+    real_workspace_color("Green")
+    assert calls == []
+
+
+def test_workspace_color_swallows_a_cmux_failure(monkeypatch):
+    def fail(*_args, **_kwargs):
+        raise rig.subprocess.TimeoutExpired("cmux", 5)
+
+    monkeypatch.setattr(rig.subprocess, "run", fail)
+    monkeypatch.setattr(rig.shutil, "which", lambda _name: "/bin/cmux")
+    monkeypatch.setenv("CMUX_WORKSPACE_ID", "workspace:7")
+    real_workspace_color("Amber")
 
 
 def test_wait_free_returns_at_once_when_no_run_holds_the_lock(tmp_path, monkeypatch):
