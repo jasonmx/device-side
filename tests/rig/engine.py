@@ -138,7 +138,7 @@ class Observe:
 
 
 # Steps that check something; an observed run turns them into the waits they imply.
-CHECKS = frozenset({"expect_response", "expect_error", "expect_state", "sample"})
+CHECKS = frozenset({"expect_response", "expect_error", "expect_state", "expect_matches_read", "sample"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -254,6 +254,14 @@ def _parse_expect_state(args: Any) -> dict:
     return args
 
 
+def _parse_expect_matches_read(args: Any) -> dict:
+    args = _mapping(args, required=["attributes", "tolerance"], allowed=["target", "within"])
+    if not isinstance(args["attributes"], list) or not args["attributes"]:
+        raise ValueError("attributes must be a non-empty list of attribute names")
+    args["within"] = Expr.parse(args.get("within", 0))
+    return args
+
+
 def _parse_sample(args: Any) -> dict:
     args = _mapping(
         args, required=["attribute", "for"], allowed=["target", "every", "expect", "min", "max", "source"]
@@ -311,6 +319,8 @@ PARSERS: dict[str, Callable[[Any], Any]] = {
     "expect_response": _parse_expect_response,
     "expect_error": _parse_expect_error,
     "expect_state": _parse_expect_state,
+    # HA's state matches a live device_side.get_attributes read: what HA shows is where the light really is.
+    "expect_matches_read": _parse_expect_matches_read,
     "wait": Expr.parse,
     "sample": _parse_sample,
     "do": _parse_do,
@@ -720,7 +730,8 @@ def _light_data(attributes: dict) -> dict:
 
 
 def _value(state: dict, name: str) -> Any:
-    return state["state"] if name == "state" else state["attributes"].get(name)
+    """The state, or an attribute by dotted name as _lookup reads one (`hs_color.1`)."""
+    return state["state"] if name == "state" else _lookup(state["attributes"], name)
 
 
 def _lookup(row: dict, name: str) -> Any:
@@ -1111,6 +1122,30 @@ class _CaseRun:
                     f"{member}: expected {member_want} within {within:g} s, got {_describe(state, member_want)}"
                 ) from None
 
+    async def _expect_matches_read(self, args: dict, _following: str | None) -> None:
+        """Each attribute (dotted: `xy_color.0`) in HA's state of every member is within `tolerance` of a live
+        get_attributes read, now or within `within` seconds shared between them."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + args["within"].eval(self.names)
+        for member in await self.members(self.entity(args)):
+            while True:
+                state = await self.ha.get_state(member)
+                response = await self.ha.call_service(
+                    "device_side", "get_attributes", {"entity_id": member}, return_response=True
+                )
+                shown = {name: _lookup((state or {}).get("attributes", {}), name) for name in args["attributes"]}
+                read = {name: _lookup((response or {}).get(member) or {}, name) for name in args["attributes"]}
+                if all(
+                    isinstance(shown[name], int | float)
+                    and isinstance(read[name], int | float)
+                    and abs(shown[name] - read[name]) <= args["tolerance"]
+                    for name in args["attributes"]
+                ):
+                    break
+                if loop.time() >= deadline:
+                    raise StepFailure(f"{member}: HA shows {shown}, a live read gives {read}")
+                await asyncio.sleep(0.5)
+
     async def _wait(self, seconds: Expr, _following: str | None) -> None:
         await asyncio.sleep(max(seconds.eval(self.names), 0))
 
@@ -1174,6 +1209,9 @@ class _CaseRun:
         if "within" in args:
             with contextlib.suppress(StepFailure):
                 await self._expect_state(args, following)
+
+    async def _relaxed_expect_matches_read(self, args: dict, _following: str | None) -> None:
+        await asyncio.sleep(max(args["within"].eval(self.names), 0))
 
     async def _relaxed_sample(self, args: dict, _following: str | None) -> None:
         await asyncio.sleep(max(args["for"].eval(self.names), 0))

@@ -42,6 +42,12 @@ gamut, a Shelly component's fields, `AdapterScope.drops`). A `switch`, or a `swi
 light field, so a timed call still runs its timer. A call left nothing to do by dropping is `unchanged` with
 `fields_dropped`. An empty group is skipped silently, as core's group expansion yields nothing for one.
 
+**A value the device can't reach** passes the schema but lies outside what the device can do: a timer longer
+than its counter, or a `move` `sweep_time` outside a native hue cycle's 1–254 s (Zigbee2MQTT). It is clamped to
+that range and the result carries `clamped_to`, the value used. It isn't refused, as the call can still do the
+nearest thing, and it isn't `fields_dropped`, which is for a field the light lacks. Rounding inside the range
+isn't reported.
+
 ## What a response looks like
 
 Core's entity actions return `{entity_id: <that entity's data>}`, one entry per entity that ran, for example

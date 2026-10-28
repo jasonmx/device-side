@@ -43,7 +43,7 @@ Three lanes run in parallel, each in order: Z2M (`Transition` PR, 13i, 13j, its 
 and Hue (from the A60 move on). The rig lock and the bulb moves are shared.
 
 - [x] **`Transition` to core**: refactor PR moving `hue/transition_cache.py` into `core/`. Unblocks 13i and 13f.
-- [ ] **13i** Z2M `move`/`stop`, with the hue/saturation stop probe on the A60.
+- [x] **13i** Z2M `move`/`stop`, with the hue/saturation stop probe on the A60.
 - [ ] **13j** Z2M `set_attributes` while off. Z2M code freezes.
 - [ ] **Z2M A60 run** (13k step 1): full Z2M suite, bulb in place. Clears `experimental` on the Z2M adapters it
   proves.

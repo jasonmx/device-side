@@ -829,6 +829,49 @@ async def test_a_device_side_sample_reads_get_attributes_not_ha(tmp_path):
     assert outcomes(result) == {"ramps[light_dimmable]": (Outcome.PASS, "")}
 
 
+MATCHES_READ = """
+action: turn_on_for
+rig_seconds: 5
+tests:
+  - name: matches
+    roles: [light_dimmable]
+    steps:
+      - call: {duration: 6}
+      - expect_matches_read: {attributes: [xy_color.0, xy_color.1], tolerance: 0.01, within: WITHIN}
+"""
+
+
+@pytest.mark.parametrize(
+    ("read_x", "within", "failure"),
+    [
+        (0.305, 0, ""),
+        (0.35, 0, "light.lamp: HA shows {'xy_color.0': 0.3, 'xy_color.1': 0.4}, a live read gives"),
+        (0.35, 0.6, ""),  # HA catches up within the window
+    ],
+)
+async def test_expect_matches_read_compares_ha_with_a_live_read(tmp_path, read_x, within, failure):
+    def respond(ha, action, data):
+        if action == "get_attributes":
+            reads.append(None)
+            return {data["entity_id"]: {"xy_color": [read_x if len(reads) == 1 else 0.3, 0.4]}}
+        ha.set(data["entity_id"], "on", xy_color=[0.3, 0.4])
+        return {data["entity_id"]: {"status": "confirmed"}}
+
+    reads: list = []
+    ha = FakeHA({"light.lamp": {}}, respond)
+    steps = suite(tmp_path, MATCHES_READ.replace("WITHIN", str(within)))
+    result = await run_one(ha, steps, inventory(light_dimmable="light.lamp"))
+    outcome, detail = outcomes(result)["matches[light_dimmable]"]
+    assert outcome is (Outcome.FAIL if failure else Outcome.PASS)
+    assert failure in detail
+
+
+def test_expect_matches_read_needs_attributes(tmp_path):
+    text = MATCHES_READ.replace("attributes: [xy_color.0, xy_color.1]", "attributes: []")
+    with pytest.raises(ValueError, match="attributes must be a non-empty list"):
+        suite(tmp_path, text.replace("WITHIN", "0"))
+
+
 MOVES = """
 action: move
 rig_seconds: 5
