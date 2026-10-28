@@ -29,7 +29,7 @@ v0.1.0 is the next release.
 | 13b | `get_attributes` contract: switches and timer row | #101 |
 | 13c | Shelly `get_attributes` | #105 |
 | 13d | Matter `get_attributes` | #112 |
-| 13e | ZHA `get_attributes` (experimental until the ZHA A60 run) | #PR |
+| 13e | ZHA `get_attributes` (experimental until the ZHA A60 run) | #114 |
 
 ## To go, in order
 
