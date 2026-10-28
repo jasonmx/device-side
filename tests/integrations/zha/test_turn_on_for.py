@@ -201,9 +201,7 @@ async def test_admin_caller_reaches_zha(hass, setup_production, admin_command, h
     assert admin_command[0].context.user_id == hass_admin_user.id
 
 
-async def test_non_admin_caller_is_refused_by_zha(
-    hass, setup_production, admin_command, hass_read_only_user, readback
-):
+async def test_non_admin_caller_is_refused_by_zha(hass, setup_production, admin_command, hass_read_only_user, readback):
     add_zha_entity(hass, zha_entry(hass), "light.bulb")
 
     with pytest.raises(HomeAssistantError) as raised:
@@ -274,9 +272,7 @@ async def test_a_member_without_on_time_reports_no_timer(
     hass, setup_production, two_light_group, group_commands, readback, on, detail
 ):
     """A member that can't run the timer drops the groupcast silently; its read-back says so."""
-    readback.side_effect = lambda hass, addr, *args, **kwargs: (
-        {zcl.ON_OFF: on} if addr.ieee == B else reads(50)
-    )
+    readback.side_effect = lambda hass, addr, *args, **kwargs: {zcl.ON_OFF: on} if addr.ieee == B else reads(50)
 
     response = await call(hass, "turn_on_for", {"entity_id": "light.zha_group", "duration": 5})
 

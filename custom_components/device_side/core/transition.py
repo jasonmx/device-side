@@ -19,6 +19,7 @@ from homeassistant.core import HomeAssistant
 from .runtime import get_runtime
 
 BRIGHTNESS = "brightness"  # in percent
+SATURATION = "saturation"  # in percent
 
 
 @dataclass(frozen=True, slots=True)

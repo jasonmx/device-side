@@ -21,6 +21,15 @@ REPO = Path(__file__).parents[2]
 _spec = importlib.util.spec_from_file_location("rig", REPO / "scripts" / "rig.py")
 rig = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(rig)
+real_workspace_color = rig.workspace_color  # the autouse fixture swaps the module's for a recorder
+
+
+@pytest.fixture(autouse=True)
+def workspace_colors(monkeypatch) -> list[str | None]:
+    """Record the cmux workspace colors a run sets, so no test reaches the real cmux."""
+    colors: list[str | None] = []
+    monkeypatch.setattr(rig, "workspace_color", colors.append)
+    return colors
 
 
 def write(tmp_path: Path, name: str, text: str) -> Path:
@@ -91,9 +100,7 @@ def test_inventory_rejects_members_without_the_group_role(tmp_path):
 
 
 def test_inventory_rejects_members_given_as_one_string(tmp_path):
-    path = write(
-        tmp_path, "inventory.yaml", "zha:\n  - entity_id: light.g\n    roles: [group]\n    members: light.a\n"
-    )
+    path = write(tmp_path, "inventory.yaml", "zha:\n  - entity_id: light.g\n    roles: [group]\n    members: light.a\n")
     with pytest.raises(ValueError, match="members must be a list of entity IDs"):
         Inventory.load(path)
 
@@ -133,7 +140,10 @@ def test_select_plan_lines_and_estimate(inventory):
     step_files = [step_file for step_file in load_step_files() if step_file.action in ("turn_off_for", "turn_on_for")]
     suites = rig.select(step_files, inventory, None)
     assert [(suite.integration, suite.action) for suite in suites] == [
-        ("shelly", "turn_off_for"), ("hue", "turn_off_for"), ("shelly", "turn_on_for"), ("hue", "turn_on_for"),
+        ("shelly", "turn_off_for"),
+        ("hue", "turn_off_for"),
+        ("shelly", "turn_on_for"),
+        ("hue", "turn_on_for"),
     ]
     assert [suite.integration for suite in rig.select(step_files, inventory, ["hue"])] == ["hue", "hue"]
     narrowed = rig.select(step_files, inventory, ["hue"], ["turn_on_for"])
@@ -337,7 +347,6 @@ def test_deploy_state(monkeypatch, kwargs, needed, blocker):
     assert (state.blocker is None) if blocker is None else (blocker in state.blocker)
 
 
-
 @pytest.mark.parametrize(
     ("deployed", "deploying", "loaded_after", "commit"),
     [
@@ -359,9 +368,13 @@ def test_tested_commit_trusts_a_deploy_without_a_status_command(monkeypatch):
     fake_git(monkeypatch, deployed=(None, None))
     assert rig.tested_commit("", rig.deploy_state(""), deploying=True) == "c1"
 
+
 def run_git(*args: str) -> None:
-    rig.subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", *args],
-                       check=True, capture_output=True)
+    rig.subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", *args],
+        check=True,
+        capture_output=True,
+    )
 
 
 def test_main_checkout_from_a_linked_worktree(tmp_path, monkeypatch):
@@ -472,6 +485,93 @@ def test_an_uncontested_lock_says_nothing(tmp_path):
     printed: list[str] = []
     rig.lock_rig(tmp_path / rig.LOCK_NAME, "wt/first", out=printed.append).close()
     assert printed == []
+
+
+def test_a_run_colors_its_workspace_amber_while_it_waits_and_green_once_it_holds_the_lock(
+    tmp_path, monkeypatch, workspace_colors
+):
+    path = tmp_path / rig.LOCK_NAME
+    held = rig.lock_rig(path, "wt/first")
+    assert workspace_colors == [rig.WORKSPACE_HELD]
+    workspace_colors.clear()
+
+    def release_on_second_poll(_seconds):
+        assert workspace_colors == [rig.WORKSPACE_QUEUED]
+        held.close()
+
+    monkeypatch.setattr(rig.time, "sleep", release_on_second_poll)
+    rig.lock_rig(path, "wt/second", out=lambda _line: None).close()
+
+    assert workspace_colors == [rig.WORKSPACE_QUEUED, rig.WORKSPACE_HELD]
+
+
+def test_main_clears_the_workspace_color_when_the_run_ends_but_not_after_a_dry_run(monkeypatch, workspace_colors):
+    monkeypatch.setattr(rig, "hold_rig", lambda _dry_run: (None, None))
+    monkeypatch.setattr(rig, "run_held", lambda *_args: 0)
+    rig.main(["--dry-run"])
+    assert workspace_colors == []
+    rig.main([])
+    assert workspace_colors == [None]
+
+
+def test_main_clears_the_workspace_color_when_a_wait_is_given_up(monkeypatch, workspace_colors):
+    def interrupted(_dry_run):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(rig, "hold_rig", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        rig.main([])
+    assert workspace_colors == [None]
+
+
+def test_main_clears_the_workspace_color_after_a_wait_free_dry_run(monkeypatch, workspace_colors):
+    monkeypatch.setattr(rig, "wait_free", lambda _path: None)
+    monkeypatch.setattr(rig, "common_dir", lambda: Path("."))
+    assert rig.main(["--wait-free", "--dry-run"]) == 0
+    assert workspace_colors == [None]
+
+
+def test_a_sigterm_while_queued_for_the_lock_still_clears_the_workspace_color(monkeypatch, workspace_colors):
+    def queued(_dry_run):
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    monkeypatch.setattr(rig, "hold_rig", queued)
+    with pytest.raises(SystemExit) as stopped:
+        rig.main([])
+    assert stopped.value.code == 128 + signal.SIGTERM
+    assert workspace_colors == [None]
+
+
+def test_workspace_color_calls_cmux_only_inside_a_cmux_workspace(monkeypatch):
+    calls: list[list[str]] = []
+    monkeypatch.setattr(rig.subprocess, "run", lambda command, **_kw: calls.append(command))
+    monkeypatch.setattr(rig.shutil, "which", lambda _name: "/bin/cmux")
+    monkeypatch.delenv("CMUX_WORKSPACE_ID", raising=False)
+    real_workspace_color("Green")
+    assert calls == []
+
+    monkeypatch.setenv("CMUX_WORKSPACE_ID", "workspace:7")
+    real_workspace_color("Green")
+    real_workspace_color(None)
+    assert calls == [
+        ["cmux", "workspace-action", "--workspace", "workspace:7", "--action", "set-color", "--color", "Green"],
+        ["cmux", "workspace-action", "--workspace", "workspace:7", "--action", "clear-color"],
+    ]
+
+    monkeypatch.setattr(rig.shutil, "which", lambda _name: None)
+    calls.clear()
+    real_workspace_color("Green")
+    assert calls == []
+
+
+def test_workspace_color_swallows_a_cmux_failure(monkeypatch):
+    def fail(*_args, **_kwargs):
+        raise rig.subprocess.TimeoutExpired("cmux", 5)
+
+    monkeypatch.setattr(rig.subprocess, "run", fail)
+    monkeypatch.setattr(rig.shutil, "which", lambda _name: "/bin/cmux")
+    monkeypatch.setenv("CMUX_WORKSPACE_ID", "workspace:7")
+    real_workspace_color("Amber")
 
 
 def test_wait_free_returns_at_once_when_no_run_holds_the_lock(tmp_path, monkeypatch):
@@ -678,7 +778,6 @@ async def test_a_signal_mid_case_puts_everything_back_and_leaves_no_journal(tmp_
     assert not journal.path.exists()
 
 
-
 @pytest.mark.parametrize(("commit", "sources"), [("c1", ["rig run (`scripts/rig.py`), commit `c1short`"]), (None, [])])
 async def test_records_cite_the_commit_ha_loaded_not_head_at_the_end(tmp_path, monkeypatch, capsys, commit, sources):
     rig_ha(monkeypatch, light="on", opt=True, automation="on")
@@ -702,6 +801,7 @@ async def test_records_cite_the_commit_ha_loaded_not_head_at_the_end(tmp_path, m
     assert await rig.run_rig({}, [], fakes.inventory("shelly"), fakes.OPTION_REGISTRY, None, True, commit) == 0
     assert written == sources
     assert ("No bench records" in capsys.readouterr().out) is (commit is None)
+
 
 def aborted_journal(path: Path) -> Journal:
     """What a run killed mid-case leaves: the light it turned off, the option it saved and the automation it paused."""

@@ -1,16 +1,12 @@
-# Hue · move
+# Hue · move-predicted_state
 
 | | |
 |---|---|
 | Result | pass |
-| Date | 2026-10-27 |
-| Source | rig run (`scripts/rig.py`), commit `bfba654` |
-| Fingerprint | `31adc08629d34287` (`integrations/hue/move.py`) |
+| Date | 2026-10-28 |
+| Source | rig run (`scripts/rig.py`), commit `33932a6` |
 | Home Assistant | 2026.10.2 |
 | Device | Hue ambiance lamp (`LTA009`), firmware `1.163.1`; Zone, firmware `unknown` |
-| Capabilities | every capability the adapter addresses |
-| Fields | `brightness`, `color_temp` |
-| Options | `predicted_state` |
 
 ## Tests
 
@@ -29,6 +25,6 @@
 | `color_temp_shows_what_the_bridge_reports[light_ct]` | `light` (light_ct) | pass |
 | `color_temp_shows_what_the_bridge_reports[group]` | `light` (group) | pass |
 
-Tests marked `not observed` had nobody watching; their fields and capabilities are not listed.
+Tests marked `not observed` had nobody watching.
 
 Its color temperature rows prove a call no longer offered: since 2026-10-28 `move` has no color temperature fields, as every halt of a Hue bulb's color temperature fade jumps visibly (`docs/plans/2026-10-28-z2m-move-stop.md`).

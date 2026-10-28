@@ -137,8 +137,12 @@ class Observe:
     ask: str
 
 
+# How far a steady sample may spread, in its source's units: a Zigbee bulb can settle one level step (1/254) after a
+# stop. HA's brightness is 0-255; device_side's is in percent, rounded to 0.1, which can widen the step by 0.1.
+STEADY_SPREAD = {("brightness", "ha"): 255 / 254 + 1e-9, ("brightness", "device_side"): 100 / 254 + 0.1 + 1e-9}
+
 # Steps that check something; an observed run turns them into the waits they imply.
-CHECKS = frozenset({"expect_response", "expect_error", "expect_state", "sample"})
+CHECKS = frozenset({"expect_response", "expect_error", "expect_state", "expect_matches_read", "sample"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -254,10 +258,16 @@ def _parse_expect_state(args: Any) -> dict:
     return args
 
 
+def _parse_expect_matches_read(args: Any) -> dict:
+    args = _mapping(args, required=["attributes", "tolerance"], allowed=["target", "within"])
+    if not isinstance(args["attributes"], list) or not args["attributes"]:
+        raise ValueError("attributes must be a non-empty list of attribute names")
+    args["within"] = Expr.parse(args.get("within", 0))
+    return args
+
+
 def _parse_sample(args: Any) -> dict:
-    args = _mapping(
-        args, required=["attribute", "for"], allowed=["target", "every", "expect", "min", "max", "source"]
-    )
+    args = _mapping(args, required=["attribute", "for"], allowed=["target", "every", "expect", "min", "max", "source"])
     args["for"] = Expr.parse(args["for"])
     args["every"] = Expr.parse(args.get("every", 0.5))
     if args.get("expect", "rising") not in ("rising", "falling", "steady"):
@@ -311,6 +321,8 @@ PARSERS: dict[str, Callable[[Any], Any]] = {
     "expect_response": _parse_expect_response,
     "expect_error": _parse_expect_error,
     "expect_state": _parse_expect_state,
+    # HA's state matches a live device_side.get_attributes read: what HA shows is where the light really is.
+    "expect_matches_read": _parse_expect_matches_read,
     "wait": Expr.parse,
     "sample": _parse_sample,
     "do": _parse_do,
@@ -482,7 +494,11 @@ def cases(suite: Suite, inventory: Inventory, keyword: str | None = None) -> lis
                     case = Case(suite, test, role, {}, f"no {missing[0]} entity in inventory", observed)
                 else:
                     members = inventory.members(suite.integration, entities["group"]) if "group" in entities else ()
-                    case = Case(suite, test, role, entities, observed=observed, members=members)
+                    # A group case that also targets a light means one of the group's: where the inventory lists them.
+                    lights = [name for name in entities if name.startswith("light_")]
+                    outside = [name for name in lights if members and entities[name] not in members]
+                    skip = f"{outside[0]} is not one of the group's members" if outside else None
+                    case = Case(suite, test, role, entities, skip, observed, members)
                 result.append(case)
     return result
 
@@ -720,7 +736,8 @@ def _light_data(attributes: dict) -> dict:
 
 
 def _value(state: dict, name: str) -> Any:
-    return state["state"] if name == "state" else state["attributes"].get(name)
+    """The state, or an attribute by dotted name as _lookup reads one (`hs_color.1`)."""
+    return state["state"] if name == "state" else _lookup(state["attributes"], name)
 
 
 def _lookup(row: dict, name: str) -> Any:
@@ -1111,6 +1128,30 @@ class _CaseRun:
                     f"{member}: expected {member_want} within {within:g} s, got {_describe(state, member_want)}"
                 ) from None
 
+    async def _expect_matches_read(self, args: dict, _following: str | None) -> None:
+        """Each attribute (dotted: `xy_color.0`) in HA's state of every member is within `tolerance` of a live
+        get_attributes read, now or within `within` seconds shared between them."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + args["within"].eval(self.names)
+        for member in await self.members(self.entity(args)):
+            while True:
+                state = await self.ha.get_state(member)
+                response = await self.ha.call_service(
+                    "device_side", "get_attributes", {"entity_id": member}, return_response=True
+                )
+                shown = {name: _lookup((state or {}).get("attributes", {}), name) for name in args["attributes"]}
+                read = {name: _lookup((response or {}).get(member) or {}, name) for name in args["attributes"]}
+                if all(
+                    isinstance(shown[name], int | float)
+                    and isinstance(read[name], int | float)
+                    and abs(shown[name] - read[name]) <= args["tolerance"]
+                    for name in args["attributes"]
+                ):
+                    break
+                if loop.time() >= deadline:
+                    raise StepFailure(f"{member}: HA shows {shown}, a live read gives {read}")
+                await asyncio.sleep(0.5)
+
     async def _wait(self, seconds: Expr, _following: str | None) -> None:
         await asyncio.sleep(max(seconds.eval(self.names), 0))
 
@@ -1120,13 +1161,13 @@ class _CaseRun:
         `source: device_side` reads device_side.get_attributes instead of HA's state, in its units (brightness in
         percent): mid-move it predicts where the light is, where HA shows a Hue fade's end value at once.
         """
-        entity_id, attribute = self.entity(args), args["attribute"]
+        entity_id, attribute, source = self.entity(args), args["attribute"], args.get("source", "ha")
         loop = asyncio.get_running_loop()
         deadline = loop.time() + args["for"].eval(self.names)
         every = max(args["every"].eval(self.names), 0.05)
         readings: list[float] = []
         while True:
-            value = await self.reading(entity_id, attribute, args.get("source", "ha"))
+            value = await self.reading(entity_id, attribute, source)
             if value is not None and (isinstance(value, bool) or not isinstance(value, int | float)):
                 raise StepFailure(f"{entity_id}: {attribute} is {value!r}, not a number")
             readings.append(float(value or 0))
@@ -1144,7 +1185,7 @@ class _CaseRun:
                 raise StepFailure(f"{entity_id}: {attribute} did not rise steadily: {shown}")
             case "falling" if not (all(b <= a for a, b in pairs) and readings[-1] < readings[0]):
                 raise StepFailure(f"{entity_id}: {attribute} did not fall steadily: {shown}")
-            case "steady" if len(set(readings)) > 1:
+            case "steady" if max(readings) - min(readings) > STEADY_SPREAD.get((attribute, source), 0):
                 raise StepFailure(f"{entity_id}: {attribute} moved: {shown}")
 
     async def reading(self, entity_id: str, attribute: str, source: str) -> Any:
@@ -1174,6 +1215,9 @@ class _CaseRun:
         if "within" in args:
             with contextlib.suppress(StepFailure):
                 await self._expect_state(args, following)
+
+    async def _relaxed_expect_matches_read(self, args: dict, _following: str | None) -> None:
+        await asyncio.sleep(max(args["within"].eval(self.names), 0))
 
     async def _relaxed_sample(self, args: dict, _following: str | None) -> None:
         await asyncio.sleep(max(args["for"].eval(self.names), 0))
@@ -1205,6 +1249,10 @@ async def run(
         if adapter is None:
             out(f"{suite.integration} / {suite.action}: no adapter, skipped")
             continue
+        if suite.file.options and not adapter.scope.options:
+            # Another integration's option file, such as Hue's predicted_state: this adapter has none to pin.
+            out(f"{suite.integration} / {suite.action}: no options, {suite.file.path.name} skipped")
+            continue
         if unknown := sorted(suite.file.options - adapter.scope.options):
             raise SchemaError(f"{suite.file.path.name}: {suite.integration} {suite.action} has no option {unknown[0]}")
         client = admin if suite.integration in ADMIN_INTEGRATIONS else ha
@@ -1217,8 +1265,16 @@ async def run(
         for suite, adapter, *_ in planned
     }
     rig_run = _Run(
-        registry, tolerance, settle, inventory.power(), ask, out, options,
-        EntryOptions(admin, journal=journal) if admin else None, bridge=bridge, journal=journal,
+        registry,
+        tolerance,
+        settle,
+        inventory.power(),
+        ask,
+        out,
+        options,
+        EntryOptions(admin, journal=journal) if admin else None,
+        bridge=bridge,
+        journal=journal,
     )
     try:
         waiting = [
