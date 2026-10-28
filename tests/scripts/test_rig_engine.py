@@ -742,6 +742,14 @@ async def test_a_group_without_the_attribute_is_not_read_as_one_light(tmp_path):
     assert reads == ["light.a", "light.b"]
 
 
+async def test_a_group_case_targeting_a_light_outside_the_group_is_skipped(tmp_path):
+    text = GROUP + "      - set: {target: light_ct, state: on}\n"
+    room = RigEntity("light.room", frozenset({"group"}), members=("light.a", "light.b"))
+    inv = Inventory({"fake": [room, RigEntity("light.lamp", frozenset({"light_ct"}))]})
+    result = await run_one(FakeHA({}, members_on()), suite(tmp_path, text, "fake"), inv, registry=GROUP_REGISTRY)
+    assert outcomes(result) == {"every_member[group]": (Outcome.SKIPPED, "light_ct is not one of the group's members")}
+
+
 async def test_a_group_with_no_members_anywhere_fails(tmp_path):
     ha = FakeHA({"light.room": {}}, members_on())
     steps = suite(tmp_path, GROUP, "fake")
@@ -811,6 +819,43 @@ async def test_sample(tmp_path, expect, step, failure):
     assert failure in detail
 
 
+@pytest.mark.parametrize(("settled", "failure"), [(101, ""), (102, "moved")])
+async def test_a_steady_brightness_may_settle_one_step(tmp_path, settled, failure):
+    # A Zigbee bulb can settle one level step after a stop.
+    def respond(ha, action, data):
+        async def _settle():
+            await asyncio.sleep(0.1)
+            ha.set(data["entity_id"], "on", brightness=settled)
+
+        ha.set(data["entity_id"], "on", brightness=100)
+        PENDING.append(asyncio.get_running_loop().create_task(_settle()))
+        return {data["entity_id"]: {"status": "confirmed"}}
+
+    steps = suite(tmp_path, SAMPLE.replace("EXPECT", "steady"))
+    result = await run_one(FakeHA({"light.lamp": {}}, respond), steps, inventory(light_dimmable="light.lamp"))
+    outcome, detail = outcomes(result)["ramps[light_dimmable]"]
+    assert outcome is (Outcome.FAIL if failure else Outcome.PASS)
+    assert failure in detail
+
+
+@pytest.mark.parametrize(("settled", "failure"), [(40.2, ""), (39.8, "moved")])
+async def test_a_steady_device_side_brightness_may_settle_one_rounded_step(tmp_path, settled, failure):
+    # 103/254 and 102/254 of full read 40.6 % and 40.2 %, one step apart once rounded.
+    text = SAMPLE.replace("EXPECT", "steady").replace("max: 200}", "source: device_side}")
+    readings = iter([40.6])
+
+    def respond(ha, action, data):
+        if action == "get_attributes":
+            return {data["entity_id"]: {"brightness": next(readings, settled)}}
+        return {data["entity_id"]: {"status": "confirmed"}}
+
+    ha = FakeHA({"light.lamp": {}}, respond)
+    result = await run_one(ha, suite(tmp_path, text), inventory(light_dimmable="light.lamp"))
+    outcome, detail = outcomes(result)["ramps[light_dimmable]"]
+    assert outcome is (Outcome.FAIL if failure else Outcome.PASS)
+    assert failure in detail
+
+
 async def test_a_device_side_sample_reads_get_attributes_not_ha(tmp_path):
     text = SAMPLE.replace("EXPECT", "rising").replace("max: 200}", "max: 50, source: device_side}")
     predicted = iter(range(10, 100, 5))
@@ -824,6 +869,49 @@ async def test_a_device_side_sample_reads_get_attributes_not_ha(tmp_path):
     ha = FakeHA({"light.lamp": {}}, respond)
     result = await run_one(ha, suite(tmp_path, text), inventory(light_dimmable="light.lamp"))
     assert outcomes(result) == {"ramps[light_dimmable]": (Outcome.PASS, "")}
+
+
+MATCHES_READ = """
+action: turn_on_for
+rig_seconds: 5
+tests:
+  - name: matches
+    roles: [light_dimmable]
+    steps:
+      - call: {duration: 6}
+      - expect_matches_read: {attributes: [xy_color.0, xy_color.1], tolerance: 0.01, within: WITHIN}
+"""
+
+
+@pytest.mark.parametrize(
+    ("read_x", "within", "failure"),
+    [
+        (0.305, 0, ""),
+        (0.35, 0, "light.lamp: HA shows {'xy_color.0': 0.3, 'xy_color.1': 0.4}, a live read gives"),
+        (0.35, 0.6, ""),  # HA catches up within the window
+    ],
+)
+async def test_expect_matches_read_compares_ha_with_a_live_read(tmp_path, read_x, within, failure):
+    def respond(ha, action, data):
+        if action == "get_attributes":
+            reads.append(None)
+            return {data["entity_id"]: {"xy_color": [read_x if len(reads) == 1 else 0.3, 0.4]}}
+        ha.set(data["entity_id"], "on", xy_color=[0.3, 0.4])
+        return {data["entity_id"]: {"status": "confirmed"}}
+
+    reads: list = []
+    ha = FakeHA({"light.lamp": {}}, respond)
+    steps = suite(tmp_path, MATCHES_READ.replace("WITHIN", str(within)))
+    result = await run_one(ha, steps, inventory(light_dimmable="light.lamp"))
+    outcome, detail = outcomes(result)["matches[light_dimmable]"]
+    assert outcome is (Outcome.FAIL if failure else Outcome.PASS)
+    assert failure in detail
+
+
+def test_expect_matches_read_needs_attributes(tmp_path):
+    text = MATCHES_READ.replace("attributes: [xy_color.0, xy_color.1]", "attributes: []")
+    with pytest.raises(ValueError, match="attributes must be a non-empty list"):
+        suite(tmp_path, text.replace("WITHIN", "0"))
 
 
 MOVES = """
@@ -1305,6 +1393,21 @@ async def test_an_option_outside_the_adapters_scope_is_a_schema_error(tmp_path):
             registry=OPTION_REGISTRY,
             admin=None,
         )
+
+
+async def test_an_option_file_skips_an_adapter_without_the_option(tmp_path):
+    # move-predicted_state.yaml is Hue's: Zigbee2MQTT's move has no predicted_state.
+    out: list[str] = []
+    result = await run(
+        [suite(tmp_path, option_file("predicted_state"), "zigbee2mqtt")],
+        inventory("zigbee2mqtt", light_ct="light.a"),
+        REGISTRY,
+        FakeAdmin({"light.a": {}}),
+        tolerance=TOLERANCE,
+        out=out.append,
+    )
+    assert result.suites == []
+    assert "zigbee2mqtt / move: no options, steps.yaml skipped" in out
 
 
 def test_a_step_file_lists_options_by_name(tmp_path):

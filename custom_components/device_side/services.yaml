@@ -150,6 +150,8 @@ move:
     entity:
       - domain: light
         integration: hue
+      - domain: light
+        integration: mqtt
   fields:
     brightness:
       example: up
@@ -222,6 +224,8 @@ stop:
     entity:
       - domain: light
         integration: hue
+      - domain: light
+        integration: mqtt
 
 get_attributes:
   target:

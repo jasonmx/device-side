@@ -3,6 +3,8 @@
 from .addressing import is_z2m_group
 from .detect import detect
 from .get_attributes import Z2MGetAttributes
+from .move import Z2MMove
+from .stop import Z2MStop
 from .turn_on_for import Z2MTurnOnFor
 from ...core.scope import IntegrationInfo
 
@@ -15,4 +17,4 @@ INTEGRATION = IntegrationInfo(
     max_concurrency=4,
 )
 
-ADAPTERS = [Z2MGetAttributes, Z2MTurnOnFor]
+ADAPTERS = [Z2MGetAttributes, Z2MMove, Z2MStop, Z2MTurnOnFor]

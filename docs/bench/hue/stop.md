@@ -3,13 +3,10 @@
 | | |
 |---|---|
 | Result | pass |
-| Date | 2026-10-27 |
-| Source | rig run (`scripts/rig.py`), commit `b3bf589` |
-| Fingerprint | `0c828c17e8ede7f6` (`integrations/hue/stop.py`) |
+| Date | 2026-10-28 |
+| Source | rig run (`scripts/rig.py`), commit `33932a6` |
 | Home Assistant | 2026.10.2 |
 | Device | Hue ambiance lamp (`LTA009`), firmware `1.163.1`; Zone, firmware `unknown` |
-| Capabilities | every capability the adapter addresses |
-| Fields | none |
 
 ## Tests
 
@@ -30,4 +27,4 @@
 | `halts_a_move_to_off_and_warmer[light_ct]` | `light` (light_ct) | pass |
 | `halts_a_move_to_off_and_warmer[group]` | `light` (group) | pass |
 
-Tests marked `not observed` had nobody watching; their fields and capabilities are not listed.
+Tests marked `not observed` had nobody watching.
