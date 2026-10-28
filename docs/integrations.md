@@ -133,6 +133,39 @@ which matches the IEEE-keyed `devices` map before `friendly_name`). A group's ID
 survives a rename: `resolveEntity` falls back to `getGroup`, which matches the ID-keyed `groups` map
 before `friendly_name`.
 
+### What Device Side changes in Zigbee2MQTT
+
+Device Side sets three of Z2M's per-device and per-group options, each logged at info level when it changes:
+
+- **`hue_native_control`**, on a Hue bulb or a group with one, before a timer with a color, so the light comes
+  on in that color rather than its last one (see `turn_on_for`).
+- **`filtered_cache`**, before the first `get_attributes` read of a device, so a read's answer isn't cached and
+  resent in every later message (see `get_attributes`).
+- **`homeassistant.light.supported_color_modes`**, on every full-color light and group, so Home Assistant shows
+  the light's color in either color mode (below).
+
+**Color modes.** A light whose Z2M definition exposes both `color_xy` and `color_hs` can be in either mode, but
+Z2M announces only one of them to Home Assistant, usually `xy`. When the bulb is in the other (after a hue or
+saturation move, a Hue gradient scene, a remote's binding, or a power cut), Z2M reports `color_mode: "hs"`, and
+Home Assistant rejects a mode it wasn't announced: it keeps showing the old color, even as Z2M resends the state
+every few minutes ([Koenkk/zigbee2mqtt#28757](https://github.com/Koenkk/zigbee2mqtt/issues/28757)). Z2M declined
+to announce both modes by default, as some lights handle mixed modes badly
+([#33025](https://github.com/Koenkk/zigbee2mqtt/issues/33025)).
+
+So Device Side sets the light's Home Assistant override in Z2M to `xy`, `hs`, and `color_temp` where the light
+has it. Z2M applies the override to its discovery message at once, Home Assistant keeps the entity, and from
+then on accepts every state Z2M sends. The bulb itself is never touched. A group is changed when every member
+qualifies. Lights exposing one color model, and lights on an endpoint (`light_l1`), are left alone. Device Side
+does this at setup and again whenever Z2M announces a device or group change (a device joining, being
+interviewed, coming back after a power cut, a group's members changing), reading Z2M's settings each time. An
+override of your own is never changed, and a light you excluded from discovery is left alone.
+
+**Opting out.** Turn off "Fix colors of full-color Zigbee2MQTT lights" in Device Side's options, or delete Device
+Side. Z2M's settings can't delete an override (a `null` there strips the setting from Home Assistant's
+announcement instead), so Device Side writes back the modes Z2M announces by itself, wherever the value is still
+the one it set, and Home Assistant goes back to Z2M's single mode. Turning the option back on replaces those
+again.
+
 ### `turn_on_for`
 
 For **light entities without fields**: publishes `{"state":"ON","on_time":<seconds>}` to the

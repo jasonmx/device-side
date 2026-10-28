@@ -30,7 +30,8 @@ automatically and can be switched off.
 
 Decided in the interview (2026-10-28):
 - **On by default, with an opt-out toggle** in device_side's options.
-  - Saving with it off removes the overrides device_side added. It doesn't touch overrides the user set.
+  - Saving with it off puts back what Z2M announces by itself where device_side set the override (amended after
+    probe (a): the API can't delete it). It doesn't touch overrides the user set.
   - Each change is logged at info and documented, as `hue_native_control` is today.
 - **Applied at setup and whenever Z2M announces a new or changed device or group,** not lazily, so lights that
   only HA or remotes use are fixed too.
@@ -68,6 +69,30 @@ Decided in the interview (2026-10-28):
 
    Write the findings into the plan doc. If one contradicts a step below, take it to Jason before writing code.
 
+   **Findings (2026-10-28, unattended script, A60 on Z2M 2.14.2; source read at that tag):**
+   a. The override deep-merges: a dummy `homeassistant.ds_probe` set first survived it. **Removal can't be done
+      through the options API.** `changeEntityOptions` strips nulls everywhere except under `homeassistant`
+      (`NULLABLE_SETTINGS`), where a null has a meaning. `supported_color_modes: null` is kept, and the discovery
+      merge deletes the key from the message, so HA would lose the light's color modes. `light: null` excludes
+      the light from discovery: Z2M cleared it, and HA deleted the entity (restored with `light: {}`, same
+      entity_id). `homeassistant: null` excludes the whole device. **Decided with Jason:** opting out (and
+      deleting device_side) writes back the modes Z2M announces by itself, computed from the exposes as its
+      discovery does (`xy`, or `hs` when a light lists `color_hs` first, plus `color_temp`). Both values are
+      device_side's own; any other is the user's.
+   b. Z2M republished the discovery message at once, with no restart. HA's entity kept its `entity_id` and
+      showed `color_temp`, `hs`, `xy`.
+   c. After `hue_move: 10` and `hue_move: stop`, Z2M published `color_mode: "hs"` (232°, 94 %) and HA took it, with
+      no "Invalid color mode" entry in HA's log. A `{"color": ""}` get then made Z2M publish xy, which HA also
+      took. The bulb's hs and xy disagree (13i's finding), so HA's color moves when Z2M switches between them.
+   d. Watched: not yet run (needs Jason's go).
+   e. On a temporary group holding only the A60: Z2M announced it with `xy`, `color_temp`; the same override on the
+      group's options re-announced it with `xy`, `hs`, `color_temp` at once, and HA's group entity showed all
+      three. Removing the group cleared its discovery message.
+   f. From the source (`lib/extension/bridge.ts`): `bridge/devices` is republished on join, leave, interview,
+      announce (a bulb back from a power cut), network address change and rename; `bridge/groups` on group
+      add, remove and member changes. An options change republishes only `bridge/info`, so watching
+      `devices` and `groups` doesn't re-trigger on device_side's own writes.
+
 2. **Option.**
    - `const.py`: `CONF_Z2M_COLOR_MODES = "z2m_color_modes"` and `Z2M_COLOR_MODES_DEFAULT = True`.
    - `config_flow.py`: a second bool on the options page.
@@ -83,8 +108,8 @@ Decided in the interview (2026-10-28):
      - for each qualifying device and each group whose members all qualify, call `bridge.py:ensure_options`
        (`kind` device or group) with a `wanted` function. When enabled, it returns the override unless the
        user's own `homeassistant.light.supported_color_modes` is already set; device_side never overwrites
-       theirs. When disabled, it removes the value only where it equals exactly what device_side writes, in
-       the form the probe (a) found.
+       theirs. When disabled, it writes Z2M's own modes back only where the value equals exactly what
+       device_side writes (probe (a)).
      - Log each change at info. Never raise: a failure logs a warning and leaves that light as it was.
    - `async_watch(hass, entry)`: subscribe to the topics probe (f) names, and re-run `ensure_color_modes` for
      what changed, debounced. Return the unsubscribe for `entry.async_on_unload`.
@@ -92,9 +117,9 @@ Decided in the interview (2026-10-28):
 4. **Wiring.**
    - `__init__.py:async_setup_entry`: when MQTT is set up and Z2M answers, run `ensure_color_modes` in a
      background task (never blocking setup), then start `async_watch` if the option is on.
-   - Saving the options reloads the entry, so turning the option off runs the removal on the next setup. Never
-     remove on unload, which also runs at HA shutdown.
-   - Add `async_remove_entry`, so deleting device_side removes its overrides.
+   - Saving the options reloads the entry, so turning the option off puts Z2M's modes back on the next setup.
+     Never do that on unload, which also runs at HA shutdown.
+   - Add `async_remove_entry`, so deleting device_side puts Z2M's modes back.
    - With no Z2M (no `bridge/info` within the timeout), do nothing, quietly.
 
 5. **Unit tests** (`tests/integrations/zigbee2mqtt/test_color_modes.py`, using the existing MQTT mocks and
@@ -102,12 +127,12 @@ Decided in the interview (2026-10-28):
    - `qualifies` for both models, one model, and no color;
    - the modes written with and without `color_temp`;
    - a user's own override left untouched;
-   - removal only of device_side's exact value;
+   - Z2M's modes written back only over device_side's exact value;
    - a group with all members qualifying, and one with a mixed member;
    - a new device announced, then fixed;
    - no Z2M present, and a Z2M error reply, each logged and never raised;
    - setup isn't blocked;
-   - the options flow default and the removal on reload;
+   - the options flow default and the write-back on reload;
    - `async_remove_entry`.
 
    New modules need ≥95% coverage.
@@ -164,5 +189,5 @@ Decided in the interview (2026-10-28):
   - the A60 and the group are announced with `hs`;
   - HA shows the halted color after a hue stop, with no "Invalid color mode" warning;
   - Z2M `move` / `stop` still pass;
-  - turning the option off removes the override and the entity goes back to `xy` only.
+  - turning the option off writes Z2M's modes back and the entity goes back to `xy` only.
 - **By eye** (briefed, gated on Jason's go): HA's color picker still drives the A60 correctly in each mode.

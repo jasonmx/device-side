@@ -32,6 +32,8 @@ Details per integration are in [docs/integrations.md](docs/integrations.md), inc
 
 During a Hue fade, Home Assistant shows the brightness Device Side predicts, rather than the end value the bridge reports as the fade starts. This is on by default; turn it off in Device Side's options.
 
+On Zigbee2MQTT, Device Side fixes Home Assistant showing the wrong color for full-color bulbs, by [announcing both of their color modes](docs/integrations.md#what-device-side-changes-in-zigbee2mqtt). This is on by default; turn it off in Device Side's options.
+
 ## Get Started
 Requires at least one core integration to be installed: Matter, ZHA, Z2M via MQTT, Shelly, or Philips Hue.
 
