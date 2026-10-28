@@ -10,16 +10,14 @@ from ..core.action import Action
 from ..core.models import ActionKind, Request
 
 UP, DOWN = "up", "down"
-WARMER, COOLER = "warmer", "cooler"
 
 # Each attribute's direction words, and its limit field (hue is a cycle, so it has none).
 DIRECTIONS = {
     "brightness": (UP, DOWN),
-    "color_temp": (WARMER, COOLER),
     "saturation": (UP, DOWN),
     "hue": (UP, DOWN),
 }
-LIMITS = {"brightness": "brightness_limit", "color_temp": "color_temp_limit", "saturation": "saturation_limit"}
+LIMITS = {"brightness": "brightness_limit", "saturation": "saturation_limit"}
 
 DEFAULT_SWEEP_TIME = 5.0
 
@@ -29,12 +27,10 @@ _PERCENT = probatio.All(probatio.Coerce(float), probatio.Range(min=0, max=100))
 @dataclass(frozen=True, slots=True)
 class MoveRequest(Request):
     brightness: str | None = None
-    color_temp: str | None = None
     saturation: str | None = None
     hue: str | None = None
     sweep_time: float = DEFAULT_SWEEP_TIME
     brightness_limit: float | None = None
-    color_temp_limit: int | None = None
     saturation_limit: float | None = None
 
     def fields_present(self) -> frozenset[str]:
@@ -48,7 +44,7 @@ class MoveRequest(Request):
 
 
 class Move(Action[MoveRequest]):
-    """Start moving brightness, color temperature or saturation toward its range end or a limit; stop halts it.
+    """Start moving brightness or saturation toward its range end or a limit, or cycling hue; stop halts it.
 
     sweep_time is how long a full-range sweep takes, so the speed is the same wherever the move starts.
     """
@@ -62,9 +58,6 @@ class Move(Action[MoveRequest]):
             probatio.Coerce(float), probatio.Range(min=0.1)
         ),
         probatio.Optional("brightness_limit"): _PERCENT,
-        probatio.Optional("color_temp_limit"): probatio.All(
-            probatio.Coerce(int), probatio.Range(min=1000, max=10000)
-        ),
         probatio.Optional("saturation_limit"): _PERCENT,
     }
 

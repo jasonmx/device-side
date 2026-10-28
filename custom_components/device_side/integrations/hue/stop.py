@@ -6,13 +6,13 @@ from typing import TYPE_CHECKING, ClassVar
 from homeassistant.core import HomeAssistant
 
 from .bridge import bridge_api, controller, put, resource_id, stops
-from .move import in_soft_off, light_brightness, light_mirek, lit, reported_brightness, room_lights
+from .move import in_soft_off, light_brightness, lit, reported_brightness, room_lights
 from .report_filter import report_filter
 from .transition_cache import transition_cache
 from ...core.adapter import Adapter
 from ...core.models import EntityResult, Request, Status, Target
 from ...core.scope import AdapterScope
-from ...core.transition import BRIGHTNESS, COLOR_TEMP, TransitionCache
+from ...core.transition import BRIGHTNESS, TransitionCache
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
@@ -23,14 +23,13 @@ if TYPE_CHECKING:
 
 
 class HueStop(Adapter[Request]):
-    """Send a dimming stop to the light or room, with a color temperature stop where a move of ours changed it, and
-    record the predicted values as where it halted. Both stops go in one write.
+    """Send a dimming stop to the light or room, and record the predicted brightness as where it halted.
 
     The bridge refuses a dimming stop during a soft off, so a light our move is fading to off is cut instead with
-    on: true and its predicted brightness, no duration (and its color temperature stop). A room in one is cut light by
-    light, each at its own prediction. A room's halt is recorded per lit light, where predictions live. A light or room
-    with nothing lit (off, or fading off from elsewhere, which can't be predicted) is unchanged with off and nothing is
-    sent. With predicted_state on, HA is shown the halted brightness at once (report_filter).
+    on: true and its predicted brightness, no duration. A room in one is cut light by light, each at its own
+    prediction. A room's halt is recorded per lit light, where predictions live. A light or room with nothing lit (off,
+    or fading off from elsewhere, which can't be predicted) is unchanged with off and nothing is sent. With
+    predicted_state on, HA is shown the halted brightness at once (report_filter).
     """
 
     action: ClassVar[str] = "stop"
@@ -66,20 +65,12 @@ class HueStop(Adapter[Request]):
                 brightness = {rid: cache.value(rid, BRIGHTNESS, reported_brightness(target))} if lights else {}
             if not brightness:
                 return self.result(target, Status.UNCHANGED, detail="off")
-            # Color temperature only where a move of ours changed it: a stop of a light that isn't fading is a no-op.
-            color_temp = {light.id: light_mirek(cache, light) for light in lights if cache.tracks(light.id, COLOR_TEMP)}
-            halts = {BRIGHTNESS: brightness, COLOR_TEMP: color_temp}
-            write = stop_write(cache, api, writer, rid, halts)
-            async with cache.recording(
-                (light_id, attribute) for attribute, values in halts.items() for light_id in values
-            ):
-                for attribute, values in halts.items():
-                    for light_id, value in values.items():
-                        cache.stopped(light_id, attribute, value)
+            write = stop_write(cache, api, writer, rid, brightness)
+            async with cache.recording((light_id, BRIGHTNESS) for light_id in brightness):
+                for light_id, value in brightness.items():
+                    cache.stopped(light_id, BRIGHTNESS, value)
                 await write
-            for attribute, values in halts.items():
-                if values:
-                    reports.halted(attribute, values)
+            reports.halted(BRIGHTNESS, brightness)
             return self.result(target, Status.SENT)
 
         return await self.gather(hass, targets, send)
@@ -90,26 +81,20 @@ def stop_write(
     api: HueBridgeV2,
     writer: LightsController | GroupedLightController,
     rid: str,
-    halts: dict[str, dict[str, float]],
+    brightness: dict[str, float],
 ) -> Awaitable:
     """One write to the light or room, or one per light while any is in our soft off, which the bridge refuses a
     dimming stop for: on: true at its predicted brightness ends it there instead."""
-    brightness, color_temp = halts[BRIGHTNESS], halts[COLOR_TEMP]
     if not (fading_off := {light_id for light_id in brightness if in_soft_off(cache, light_id)}):
-        return put(api, writer, rid, stops([BRIGHTNESS, *([COLOR_TEMP] if color_temp else [])]))
+        return put(api, writer, rid, stops([BRIGHTNESS]))
     return asyncio.gather(
         *(
-            put(
-                api,
-                api.lights,
-                light_id,
-                (
-                    {"on": {"on": True}, "dimming": {"brightness": value}}
-                    if light_id in fading_off
-                    else stops([BRIGHTNESS])
-                )
-                | stops([COLOR_TEMP] if light_id in color_temp else []),
-            )
+            put(api, api.lights, light_id, cut(value) if light_id in fading_off else stops([BRIGHTNESS]))
             for light_id, value in brightness.items()
         )
     )
+
+
+def cut(brightness: float) -> dict:
+    """The PUT body that ends a soft off at this brightness, which the bridge takes in place of a dimming stop."""
+    return {"on": {"on": True}, "dimming": {"brightness": brightness}}

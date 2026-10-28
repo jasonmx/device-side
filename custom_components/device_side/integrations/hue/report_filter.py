@@ -10,7 +10,7 @@ from Home Assistant drops it at once, whatever its value, by watching light and 
 
 With the predicted_state option on, the reports of brightness and on that are ours are hidden from aiohue, and so from
 HA, which instead is sent what device_side predicts: the start value while a fade runs, the halt at a stop, the end once
-it has run. Color temperature reports reach HA as the bridge sends them.
+it has run.
 Hiding works by editing the event's dict in a synchronous subscriber, which runs before aiohue's controllers apply it
 in a task; what device_side sends goes through the same event stream in-process, never to the bridge.
 """
@@ -315,9 +315,7 @@ def _forgotten(hass: HomeAssistant, light_id: str, running: bool) -> None:
 def applies_later(api: HueBridgeV2) -> bool:
     """Whether aiohue's light and grouped_light controllers apply an event in a task, after our subscriber has run:
     hiding a report depends on it. _handle_event is private to aiohue: one without it is taken to apply at once."""
-    return all(
-        iscoroutinefunction(getattr(c, "_handle_event", None)) for c in (api.lights, api.groups.grouped_light)
-    )
+    return all(iscoroutinefunction(getattr(c, "_handle_event", None)) for c in (api.lights, api.groups.grouped_light))
 
 
 @callback

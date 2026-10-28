@@ -304,29 +304,3 @@ async def test_an_aiohue_that_applies_events_at_once_falls_back_to_the_bridge(ha
 
     assert "Hue fades show what the bridge reports" in caplog.text
     assert shown(bridge, "one") == (True, 100.0)
-
-
-async def test_color_temp_reports_reach_ha_while_brightness_is_held(hass, bridge, clock):
-    # Only brightness and on are predicted: HA is shown the bridge's color temperature, the end value at once.
-    await setup_room(hass, bridge)
-    await call(hass, "move", {"entity_id": "light.one", "brightness": "up", "color_temp": "warmer", "sweep_time": 10})
-
-    report(bridge, light_event("one", brightness=100.0, color_temperature={"mirek": 454}))
-    await settle(hass)
-
-    assert shown(bridge, "one") == (True, 20.0)
-    assert bridge.api.lights["one"].color_temperature.mirek == 454
-
-
-async def test_a_color_temp_move_and_stop_show_what_the_bridge_reports(hass, bridge, clock):
-    await setup_room(hass, bridge)
-    await call(hass, "move", {"entity_id": "light.one", "color_temp": "warmer", "sweep_time": 10})
-    report(bridge, light_event("one", color_temperature={"mirek": 454}))
-    await settle(hass)
-    clock.now += 1.0
-
-    await call(hass, "stop", {"entity_id": "light.one"})
-    await settle(hass)
-
-    assert bridge.api.lights["one"].color_temperature.mirek == 454
-    assert shown(bridge, "one") == (True, 20.0)
