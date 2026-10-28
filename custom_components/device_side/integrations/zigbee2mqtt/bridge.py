@@ -29,18 +29,20 @@ async def group_members(hass: HomeAssistant, group: str) -> list[str]:
 
 
 async def has_feature(hass: HomeAssistant, ieees: list[str], name: str) -> bool:
-    """Whether any of these devices' Z2M definitions exposes a feature by this name, from bridge/devices."""
+    """Whether every one of these devices' Z2M definitions exposes a feature by this name, from bridge/devices: Z2M
+    gives a group only the features its members share."""
     payload: asyncio.Future[str] = hass.loop.create_future()
     unsubscribe = await mqtt.async_subscribe(hass, bridge_topic("devices"), first_payload(payload))
     try:
         devices = json.loads(await wait(payload, _RETAINED_TIMEOUT_S, "no bridge/devices from Zigbee2MQTT"))
     finally:
         unsubscribe()
-    return any(
-        _exposes(name, (device.get("definition") or {}).get("exposes", []))
+    exposing = {
+        device.get("ieee_address")
         for device in devices
-        if device.get("ieee_address") in ieees
-    )
+        if _exposes(name, (device.get("definition") or {}).get("exposes", []))
+    }
+    return bool(ieees) and set(ieees) <= exposing
 
 
 def _exposes(name: str, features: list[dict]) -> bool:

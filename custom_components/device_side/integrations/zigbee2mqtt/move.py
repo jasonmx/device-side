@@ -190,7 +190,7 @@ async def start(
 
 
 async def lacked(hass: HomeAssistant, request: MoveRequest, lights: list[Target]) -> frozenset[str]:
-    """Hue and saturation, with its limit, on lights whose Z2M definitions lack color_hs, which the move drops."""
+    """Hue and saturation, with its limit, where a light's Z2M definition lacks color_hs, which the move drops."""
     color = request.fields_present() & {"hue", "saturation", "saturation_limit"}
     if not color or await has_feature(hass, [z2m_address(light.device) for light in lights], COLOR_HS):
         return frozenset()

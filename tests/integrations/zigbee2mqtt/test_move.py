@@ -117,6 +117,16 @@ async def test_hue_and_saturation_are_dropped_without_color_hs(hass, broker):
     assert commands(broker) == [(SET, {"state": "ON", "brightness": 254, "transition": 2.0})]
 
 
+async def test_a_group_with_a_member_without_color_hs_drops_hue(hass, broker):
+    # Z2M gives a group only the features every member shares.
+    room = group(hass, broker, one={}, two={"color_hs": False})
+
+    response = await call(hass, "move", {"entity_id": room, "hue": "up"})
+
+    assert response == {room: {"status": "unchanged", "integration": "zigbee2mqtt", "detail": "fields_dropped"}}
+    assert commands(broker) == []
+
+
 async def test_color_temperature_is_refused(hass, broker):
     entity_id = light(hass, broker)
 

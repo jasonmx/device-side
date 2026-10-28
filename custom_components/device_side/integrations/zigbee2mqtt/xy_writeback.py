@@ -34,7 +34,8 @@ _XY_SCALE = 65535  # ZCL CurrentX and CurrentY are x and y × 65535
 async def write_back_xy(hass: HomeAssistant, target: Target, silent: bool = False) -> None:
     """Bring HA's color for the light, or each of the group's members, in line with the bulb's.
 
-    silent is for a command Z2M publishes nothing after. Never raises: a failed read or write is logged, and HA's color
+    silent is for a command Z2M publishes nothing after, and for a fade's end, where a live read mid-fade may have
+    left HA's color behind. Never raises: a failed read or write is logged, and HA's color
     stays stale.
     """
     try:

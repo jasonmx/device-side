@@ -266,12 +266,12 @@ Hue is Z2M's `hue_move`, a cycle around the color wheel the bulb keeps running u
 `254 / sweep_time` steps of the wheel per second, rounded, so `sweep_time` is one full cycle. ZCL takes 1 to
 254 steps per second, so a `sweep_time` under 1 s or over 254 s is clamped and the result carries `clamped_to`.
 Hue and saturation are dropped, with `fields_dropped`, on a light whose Z2M definition lacks the `color_hs`
-feature (read from `zigbee2mqtt/bridge/devices`).
+feature (read from `zigbee2mqtt/bridge/devices`), and on a group with any such member.
 
 `stop` sends `brightness_move: stop` to a light that is on, `hue_move: stop` where a hue move of Device Side's is
 cycling, and a raw `stopMoveStep` where its saturation move is fading. Z2M's own `saturation_move: stop` halts only
 the saturation attribute and lets the xy fade drift on. Each is its own publish, the color ones first: Z2M reads
-the light back half a second after a brightness stop before it sends the next key of the same message. A light
+the light back about 0.7 s after a brightness stop before it sends the next key of the same message. A light
 that is off, with no soft off of Device Side's fading it, is `unchanged` with `off`.
 
 Z2M publishes a fade's end value at once and reads the light back within a second of a brightness or hue stop.

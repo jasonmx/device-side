@@ -21,7 +21,6 @@ from .runtime import get_runtime
 BRIGHTNESS = "brightness"  # in percent
 COLOR_TEMP = "color_temp"  # in mirek
 SATURATION = "saturation"  # in percent
-SATURATION = "saturation"  # in percent
 
 
 @dataclass(frozen=True, slots=True)
