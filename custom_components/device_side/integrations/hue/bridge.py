@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from ...core.models import Target
 from ...core.resolver import resolve_members
 from ...core.runtime import get_runtime
-from ...core.transition import BRIGHTNESS, COLOR_TEMP
+from ...core.transition import BRIGHTNESS
 
 if TYPE_CHECKING:
     from aiohue.v2 import HueBridgeV2
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from aiohue.v2.controllers.lights import LightsController
 
 # The delta object whose stop halts each attribute's fade.
-DELTAS = {BRIGHTNESS: "dimming_delta", COLOR_TEMP: "color_temperature_delta"}
+DELTAS = {BRIGHTNESS: "dimming_delta"}
 
 
 def bridge_api(target: Target) -> HueBridgeV2 | None:
@@ -76,6 +76,5 @@ def stops(attributes: Iterable[str]) -> dict:
 
 
 async def put(api: HueBridgeV2, writer: LightsController | GroupedLightController, rid: str, body: dict) -> None:
-    """One raw CLIP v2 PUT to the light or grouped_light, for what aiohue has no model of (a color temperature stop).
-    Raises on failure."""
+    """One raw CLIP v2 PUT to the light or grouped_light, its body as given. Raises on failure."""
     await api.request("put", f"clip/v2/resource/{writer.item_type.value}/{rid}", json=body)

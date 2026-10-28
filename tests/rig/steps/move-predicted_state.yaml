@@ -61,13 +61,3 @@ tests:
       watch: The lights at the recall, then HA's card for the zone once the 20 s have passed.
       ask: Did the lights jump to the scene's colors and levels at the recall and stay there, with HA showing the scene
         rather than full brightness?
-
-  - name: color_temp_shows_what_the_bridge_reports  # only brightness is predicted: HA shows the color's end at once
-    roles: [light_ct, group]
-    setup:
-      - set: {state: on, brightness_pct: 20, color_temp_kelvin: 2700}
-    steps:
-      - call: {brightness: up, color_temp: cooler, sweep_time: 10}
-      - expect_response: {status: expected, integration: self}
-      - expect_state: {state: on, color_temp_kelvin: {min: 6400}, within: tol}
-      - sample: {attribute: brightness, for: 2, expect: steady, min: 46, max: 56}

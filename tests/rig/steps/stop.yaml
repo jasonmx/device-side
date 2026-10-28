@@ -39,37 +39,6 @@ tests:
       - expect_response: {status: expected}
       - sample: {attribute: brightness, for: 2, expect: steady}
 
-  - name: halts_a_combined_move  # one write holds both stops
-    roles: [light_ct, group]
-    only: [hue]
-    setup:
-      - set: {state: on, brightness_pct: 10, color_temp_kelvin: 2700}
-    steps:
-      - call: {action: move, brightness: up, color_temp: cooler, sweep_time: 10}
-      - wait: 3
-      - call: {}
-      - expect_response: {status: expected, integration: self}
-      - sample: {attribute: brightness, for: 3, expect: steady, max: 78, source: device_side}
-      - sample: {attribute: color_temp_kelvin, for: 2, expect: steady, min: 2900, max: 4500, source: device_side}
-    observe:
-      see: The light dim and warm, brightening and cooling slowly, stopped after 3 s.
-      watch: 'The stop: both brightness and color hold, with no jump to full or to daylight white.'
-      ask: Did it stop part way in both brightness and color, and hold there?
-
-  - name: halts_a_move_to_off_and_warmer  # the cut carries the color temperature stop
-    roles: [light_ct, group]
-    only: [hue]
-    setup:
-      - set: {state: on, brightness_pct: 100, color_temp_kelvin: 6500}
-    steps:
-      - call: {action: move, brightness: down, color_temp: warmer, sweep_time: 10}
-      - wait: 3
-      - call: {}
-      - expect_response: {status: expected, integration: self}
-      - expect_state: {state: on, within: tol}
-      - sample: {attribute: brightness, for: 3, expect: steady, min: 47, max: 82, source: device_side}
-      - sample: {attribute: color_temp_kelvin, for: 2, expect: steady, min: 3700, max: 4600, source: device_side}
-
   # Zigbee2MQTT publishes a hue stop's color as hs, which HA takes only with z2m_color_modes on (the default).
   - name: hue_cycle_stop
     roles: [light_color]

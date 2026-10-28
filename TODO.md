@@ -22,7 +22,7 @@ v0.1.0 is the next release.
 | 9c | Release gates (tiers later replaced by the release flag) | #33, #35, #36, #37, #94 |
 | 7a | Hue `set_attributes`, `get_attributes`, `set_scene` | #45 |
 | 7b | Hue `move`/`stop` for brightness | #48, #55 |
-| 7c1 | Hue `move`/`stop` for color temp | #95 |
+| 7c1 | Hue `move`/`stop` for color temp (removed in #125) | #95 |
 | 9e | Native groups: decision, ZHA groupcast `turn_on_for`, core `resolve_members` | #97, #104, #106 |
 | 9f | Core-aligned failure behavior | #99 |
 | 13a | Zigbee probe findings | #98, #100 |
@@ -32,6 +32,7 @@ v0.1.0 is the next release.
 | 13e | ZHA `get_attributes` (experimental until the ZHA A60 run) | #114 |
 | 13h | Z2M `get_attributes` | #117 |
 | 13g | ZHA `set_attributes` (experimental until the ZHA A60 run) | #120 |
+| — | Color temperature moves dropped on every integration: no halt of a Hue bulb's fade is clean | #125 |
 
 ## To go, in order
 
@@ -45,7 +46,7 @@ and Hue (from the A60 move on). The rig lock and the bulb moves are shared.
 - [x] **`Transition` to core**: refactor PR moving `hue/transition_cache.py` into `core/`. Unblocks 13i and 13f.
 - [x] **13i** Z2M `move`/`stop`, with the hue/saturation stop probe on the A60.
 - [ ] **13j** Z2M `set_attributes` while off. Z2M code freezes.
-- [ ] **14** Z2M color modes fixed for HA, on by default, and 13i's xy write-back backed out
+- [x] **14** Z2M color modes fixed for HA, on by default, and 13i's xy write-back backed out
   ([`2026-10-28-z2m-color-modes.md`](docs/plans/2026-10-28-z2m-color-modes.md)). Counts toward the Z2M freeze.
 - [ ] **Z2M A60 run** (13k step 1): full Z2M suite, bulb in place. Clears `experimental` on the Z2M adapters it
   proves.
