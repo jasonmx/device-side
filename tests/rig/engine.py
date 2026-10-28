@@ -1243,6 +1243,10 @@ async def run(
         if adapter is None:
             out(f"{suite.integration} / {suite.action}: no adapter, skipped")
             continue
+        if suite.file.options and not adapter.scope.options:
+            # Another integration's option file, such as Hue's predicted_state: this adapter has none to pin.
+            out(f"{suite.integration} / {suite.action}: no options, {suite.file.path.name} skipped")
+            continue
         if unknown := sorted(suite.file.options - adapter.scope.options):
             raise SchemaError(f"{suite.file.path.name}: {suite.integration} {suite.action} has no option {unknown[0]}")
         client = admin if suite.integration in ADMIN_INTEGRATIONS else ha

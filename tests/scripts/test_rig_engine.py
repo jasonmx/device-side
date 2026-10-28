@@ -1338,6 +1338,21 @@ async def test_an_option_outside_the_adapters_scope_is_a_schema_error(tmp_path):
         )
 
 
+
+async def test_an_option_file_skips_an_adapter_without_the_option(tmp_path):
+    # move-predicted_state.yaml is Hue's: Zigbee2MQTT's move has no predicted_state.
+    out: list[str] = []
+    result = await run(
+        [suite(tmp_path, option_file("predicted_state"), "zigbee2mqtt")],
+        inventory("zigbee2mqtt", light_ct="light.a"),
+        REGISTRY,
+        FakeAdmin({"light.a": {}}),
+        tolerance=TOLERANCE,
+        out=out.append,
+    )
+    assert result.suites == []
+    assert "zigbee2mqtt / move: no options, steps.yaml skipped" in out
+
 def test_a_step_file_lists_options_by_name(tmp_path):
     path = tmp_path / "steps.yaml"
     path.write_text(option_file().replace("rig_seconds: 5", "rig_seconds: 5\noptions: predicted_state"))
