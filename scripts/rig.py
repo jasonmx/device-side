@@ -17,6 +17,7 @@ journaled first (next to the lock), so whatever a killed run leaves changed, the
 Usage: scripts/rig.py [--dry-run] [--no-deploy] [--unattended] [--integration KEY ...]
                       [--action NAME ...] [-k TEXT]
        scripts/rig.py --recover
+       scripts/rig.py --wait-free
 """
 
 import argparse
@@ -226,6 +227,23 @@ def lock_holder(entry: str) -> str:
     return f'{held_by}, Claude Code session "{name}" (SendMessage reaches it)'
 
 
+def wait_for_lock(handle: TextIO, operation: int, out: Callable[[str], None]) -> bool:
+    """Take `operation` (LOCK_EX or LOCK_SH) on `handle`, polling while a run holds the lock and saying who holds it,
+    and again whenever that changes. Returns whether it had to wait."""
+    waiting_on = None
+    while True:
+        try:
+            fcntl.flock(handle, operation | fcntl.LOCK_NB)
+            return waiting_on is not None
+        except BlockingIOError:
+            handle.seek(0)
+            held_by = lock_holder(handle.read())
+            if held_by != waiting_on:
+                out(f"Another rig run holds the lock: {held_by}. Waiting for it to finish (Ctrl-C to give up)...")
+                waiting_on = held_by
+            time.sleep(LOCK_POLL_S)
+
+
 def lock_rig(path: Path, holder: str, out: Callable[[str], None] = print) -> TextIO:
     """Hold an exclusive lock on `path` for the process's life, waiting while another run has it.
 
@@ -235,24 +253,23 @@ def lock_rig(path: Path, holder: str, out: Callable[[str], None] = print) -> Tex
     release goes next.
     """
     handle = path.open("a+")
-    waiting_on = None
-    while True:
-        try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            break
-        except BlockingIOError:
-            handle.seek(0)
-            held_by = lock_holder(handle.read())
-            if held_by != waiting_on:
-                out(f"Another rig run holds the lock: {held_by}. Waiting for it to finish (Ctrl-C to give up)...")
-                waiting_on = held_by
-            time.sleep(LOCK_POLL_S)
-    if waiting_on is not None:
+    if wait_for_lock(handle, fcntl.LOCK_EX, out):
         out("Rig lock acquired.")
     handle.truncate(0)
     handle.write(lock_entry(holder))
     handle.flush()
     return handle
+
+
+def wait_free(path: Path, out: Callable[[str], None] = print) -> None:
+    """Return once no run holds the lock on `path`, without taking it: a shared lock, dropped at once.
+
+    It says only that the rig was free at that moment; another run may take the lock before the caller's own run does.
+    """
+    with path.open("a+") as handle:
+        wait_for_lock(handle, fcntl.LOCK_SH, out)
+        fcntl.flock(handle, fcntl.LOCK_UN)
+    out("The rig lock is free.")
 
 
 def gate(prompt: Callable[[str], str] = input) -> bool:
@@ -359,7 +376,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("-k", dest="keyword", help="run only test cases whose id contains this text")
     parser.add_argument("--unattended", action="store_true", help="skip observed tests, reporting them not observed")
     parser.add_argument("--recover", action="store_true", help="put back what an aborted run left changed, then stop")
+    parser.add_argument(
+        "--wait-free",
+        action="store_true",
+        help="wait until no rig run holds the lock, without taking it; another run may take it first",
+    )
     args = parser.parse_args(argv)
+    if args.wait_free:
+        wait_free(common_dir() / LOCK_NAME)
+        return 0
 
     _held, journal = hold_rig(args.dry_run)  # the lock is held until exit
     try:
@@ -465,9 +490,14 @@ def handling_signals(handler: Callable[[int, object], None]) -> Iterator[None]:
 def hold_rig(dry_run: bool) -> tuple[TextIO | None, Journal]:
     """The rig lock, unless it is a dry run, and the journal, read once the lock is held: whoever last held it has
     exited, so the journal is what it left."""
-    common_dir = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir"))
-    lock = None if dry_run else lock_rig(common_dir / LOCK_NAME, git("rev-parse", "--abbrev-ref", "HEAD"))
-    return lock, Journal(common_dir / JOURNAL_NAME)
+    shared = common_dir()
+    lock = None if dry_run else lock_rig(shared / LOCK_NAME, git("rev-parse", "--abbrev-ref", "HEAD"))
+    return lock, Journal(shared / JOURNAL_NAME)
+
+
+def common_dir() -> Path:
+    """The git common dir, shared by every worktree, where the lock and the journal live."""
+    return Path(git("rev-parse", "--path-format=absolute", "--git-common-dir"))
 
 
 def run_tests(rig_run: Coroutine[Any, Any, int]) -> int:
