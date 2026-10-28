@@ -12,10 +12,15 @@ ON_TIME = 0x4001
 
 
 def gateway(hass: HomeAssistant) -> Any:
-    """The zha library's gateway. The zha library is installed only where ZHA runs, hence the import here."""
-    from homeassistant.components.zha.helpers import get_zha_gateway
+    """The zha library's gateway, read from hass.data as zha's get_zha_gateway does; raises ValueError without one.
 
-    return get_zha_gateway(hass)
+    Not imported from homeassistant.components.zha: hassfest would then require zha in after_dependencies, and HA
+    holds an integration's setup until its after_dependencies' entries finish setting up, so a ZHA stuck in setup
+    would take device_side's actions down for every integration.
+    """
+    if (data := hass.data.get("zha")) is None or (proxy := data.gateway_proxy) is None:
+        raise ValueError("No ZHA gateway")
+    return proxy.gateway
 
 
 async def read_attributes(
