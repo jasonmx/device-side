@@ -1,8 +1,9 @@
-"""Read ZCL attributes from a ZHA device through the zha integration's gateway."""
+"""Send ZCL commands to a ZHA device through the zha integration's cluster command action, and read its attributes
+through the zha integration's gateway."""
 
 from typing import Any
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Context, HomeAssistant
 
 from .addressing import Address
 
@@ -12,6 +13,7 @@ ON_TIME = 0x4001
 
 LEVEL_CLUSTER = 0x0008
 CURRENT_LEVEL = 0x0000
+MOVE_TO_LEVEL = 0x00
 
 COLOR_CLUSTER = 0x0300
 CURRENT_HUE = 0x0000
@@ -22,6 +24,40 @@ COLOR_TEMPERATURE = 0x0007
 COLOR_MODE = 0x0008
 ENHANCED_CURRENT_HUE = 0x4000
 ENHANCED_COLOR_MODE = 0x4001
+MOVE_TO_HUE_AND_SATURATION = 0x06
+MOVE_TO_COLOR = 0x07
+MOVE_TO_COLOR_TEMP = 0x0A
+
+
+async def command(
+    hass: HomeAssistant,
+    addr: Address,
+    cluster_id: int,
+    command_id: int,
+    params: dict[str, Any],
+    context: Context | None,
+) -> None:
+    """Send a server command to the device's in cluster through zha.issue_zigbee_cluster_command; params by zigpy name.
+
+    The action is admin-only, so it carries the caller's context: a non-admin caller gets Unauthorized from ZHA rather
+    than Device Side's own rights. The zha library raises on a delivery failure or a non-success ZCL status, so a call
+    that returns was accepted.
+    """
+    await hass.services.async_call(
+        "zha",
+        "issue_zigbee_cluster_command",
+        {
+            "ieee": addr.ieee,
+            "endpoint_id": addr.endpoint_id,
+            "cluster_id": cluster_id,
+            "cluster_type": "in",
+            "command": command_id,
+            "command_type": "server",
+            "params": params,
+        },
+        blocking=True,
+        context=context,
+    )
 
 
 def gateway(hass: HomeAssistant) -> Any:

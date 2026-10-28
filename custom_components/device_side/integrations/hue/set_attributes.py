@@ -9,6 +9,7 @@ from .bridge import bridge_api, resource_id, write_light
 from .report_filter import write_forgetting
 from ...actions.set_attributes import SetAttributesRequest
 from ...core.adapter import Adapter
+from ...core.color import color_xy
 from ...core.models import EntityResult, Status, Target
 from ...core.scope import AdapterScope
 
@@ -46,7 +47,7 @@ def _write_for(light: Light, request: SetAttributesRequest) -> tuple[dict, bool]
             dropped = True
         else:
             write["color_temp_mirek"] = mirek
-    if (xy := colors.color_xy(fields)) is not None:
+    if (xy := color_xy(fields)) is not None:
         if light.color is None:
             dropped = True
         else:

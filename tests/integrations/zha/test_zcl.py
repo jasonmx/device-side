@@ -1,10 +1,13 @@
-"""zcl.read_attributes against a fake zha gateway, since the zha library isn't a dev dependency."""
+"""zcl.command against a mock service, and zcl.read_attributes against a fake zha gateway, since the zha library
+isn't a dev dependency."""
 
 import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from homeassistant.core import Context
+from pytest_homeassistant_custom_component.common import async_mock_service
 
 from custom_components.device_side.integrations.zha import zcl
 from custom_components.device_side.integrations.zha.addressing import Address
@@ -82,3 +85,21 @@ async def test_optional_attribute_rides_the_request_and_is_left_out_when_missing
 
     assert read == {zcl.ON_OFF: True}
     cluster.read_attributes.assert_awaited_once_with([0x0000, 0x4001], allow_cache=False, only_cache=False)
+
+
+async def test_command_issues_a_server_command_to_the_in_cluster_with_the_callers_context(hass):
+    commands = async_mock_service(hass, "zha", "issue_zigbee_cluster_command")
+    context = Context()
+
+    await zcl.command(hass, ADDR, zcl.LEVEL_CLUSTER, zcl.MOVE_TO_LEVEL, {"level": 40}, context)
+
+    assert commands[0].data == {
+        "ieee": IEEE,
+        "endpoint_id": 11,
+        "cluster_id": 0x0008,
+        "cluster_type": "in",
+        "command": 0x00,
+        "command_type": "server",
+        "params": {"level": 40},
+    }
+    assert commands[0].context is context

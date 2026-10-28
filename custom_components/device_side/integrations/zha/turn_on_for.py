@@ -89,24 +89,13 @@ class ZHATurnOnFor(Adapter[TurnOnForRequest]):
         if request.light.present():
             await self._turn_on(hass, request, target.entity_id)
         try:
-            await hass.services.async_call(
-                "zha",
-                "issue_zigbee_cluster_command",
-                {
-                    "ieee": addr.ieee,
-                    "endpoint_id": addr.endpoint_id,
-                    "cluster_id": zcl.ON_OFF_CLUSTER,
-                    "cluster_type": "in",
-                    "command": _ON_WITH_TIMED_OFF,
-                    "command_type": "server",
-                    "params": {
-                        "on_off_control": 0,
-                        "on_time": on_time,
-                        "off_wait_time": 0,
-                    },
-                },
-                blocking=True,
-                context=request.context,
+            await zcl.command(
+                hass,
+                addr,
+                zcl.ON_OFF_CLUSTER,
+                _ON_WITH_TIMED_OFF,
+                {"on_off_control": 0, "on_time": on_time, "off_wait_time": 0},
+                request.context,
             )
         except Unauthorized:
             return self.result(target, Status.REJECTED, detail="admin_required")

@@ -112,6 +112,8 @@ set_attributes:
     entity:
       - domain: light
         integration: hue
+      - domain: light
+        integration: zha
   fields:
     brightness:
       example: 50
