@@ -72,12 +72,15 @@ tests:
     steps:
       - expect_state: {supported_color_modes: [color_temp, hs, xy], within: 10}
 
+  # Hue native control sends a hue and saturation as an xy command, so the bulb is put in hs mode with it off.
   - name: keeps_and_reads_hs_while_off
     roles: [light_color]
     only: [zigbee2mqtt]
     steps:
+      - z2m_option: {hue_native_control: false}
       - set: {state: on, hs_color: [240, 90]}
       - expect_state: {color_mode: hs, within: 2 * tol}  # without both modes, HA drops it and stays in xy
+      - z2m_option: {hue_native_control: true}
       - set: {state: off}
       - call: {}
       - expect_response: {attributes: {hs_color.0: {min: 235, max: 245}, hs_color.1: {min: 85, max: 95}}}
