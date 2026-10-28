@@ -9,8 +9,8 @@ from homeassistant.core import HomeAssistant
 
 from .addressing import topic, z2m_address
 from .bridge import has_feature, publish
+from .color_refresh import refresh_color
 from .members import member_lights
-from .xy_writeback import write_back_xy
 from ...actions.move import UP, MoveRequest
 from ...core import transition
 from ...core.adapter import Adapter
@@ -105,7 +105,7 @@ class Z2MMove(Adapter[MoveRequest]):
     one with only lights that are off to move is unchanged with off.
 
     Z2M publishes the end value at once. Once a fade has run, its attributes are read back, and a saturation move's
-    color brought in line (xy_writeback), so HA ends right even after a live read mid-fade.
+    color refreshed (color_refresh), so HA ends right even after a live read mid-fade.
     """
 
     action: ClassVar[str] = "move"
@@ -256,11 +256,11 @@ def hue_rate(request: MoveRequest) -> HueMove:
 
 
 def end_read(hass: HomeAssistant, target: Target, lights: list[Target], attribute: str) -> Job:
-    """The read-back once a fade has run: each light's state and brightness, or the target's color in line."""
+    """The read-back once a fade has run: each light's state and brightness, or the target's color refreshed."""
 
     async def read() -> None:
         if attribute == SATURATION:
-            await write_back_xy(hass, target, silent=True)
+            await refresh_color(hass, target, silent=True)
             return
         for light in lights:
             try:

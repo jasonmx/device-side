@@ -315,16 +315,16 @@ the light halted. Once a fade has run, the light's state and brightness are read
 ""}` on its get topic), so Home Assistant ends right even if a `get_attributes` read mid-fade overwrote the end
 value. A new move or a stop replaces the pending read.
 
-**Color after a stop.** Z2M announces a color light to Home Assistant with `xy` or `hs`, never both, and after a
-hue or saturation command publishes the color as `hs`, which Home Assistant drops for a light announced with `xy`
-([Koenkk/zigbee2mqtt#28757](https://github.com/Koenkk/zigbee2mqtt/issues/28757)). So 1 s after a hue or saturation
-stop, and at the end of a saturation move, Device Side reads such a light's `colorMode`, `currentX` and `currentY`
-(as `get_attributes` reads them). If the bulb is in hs mode, it writes the bulb's own x/y back with `transition: 0`:
-the bulb doesn't change, Z2M then publishes `xy`, and the bulb stays in xy mode. Otherwise it asks Z2M for the
-color (`{"color": ""}` on the get topic): after a stop of an xy fade, Z2M's own read-back carries the fade's end
-point. A light announced with `hs` gets the color get after a saturation stop only, which Z2M doesn't read back.
-A read or write that fails is logged as a warning and leaves Home Assistant's color stale; the result is still
+**Color after a stop.** A saturation stop is a raw command, which Z2M doesn't read back, and after a stop of an
+xy fade Z2M's own read-back carries its cached x/y, the fade's end point. So 1 s after a saturation stop, and at the
+end of a saturation move, Device Side asks Z2M for the color (`{"color": ""}` on the get topic), and Z2M publishes
+what it reads. A get that fails is logged as a warning and leaves Home Assistant's color stale; the result is still
 `sent`.
+
+After a hue or saturation command the bulb is in hs mode, and Z2M publishes the color as `hs`. Home Assistant takes
+it because Device Side announces the light with both color modes (see [What Device Side changes in
+Zigbee2MQTT](#what-device-side-changes-in-zigbee2mqtt)). With that option off, it drops the color and keeps showing
+the old one until the bulb is next in xy mode.
 
 **Groups.** A group gets one publish per attribute to its group topic, so its members fade together. Its start is
 the mean of its members that are on, and each member's fade is remembered from its own start. Z2M reads a group's
