@@ -1,12 +1,14 @@
 # hue_dimmer tests/RELEASE_CHECKLIST.md §4 as steps.
 # On the group role the set gives every member the same values, so the room's own row reads them back too.
 action: get_attributes
-rig_seconds: 240
+rig_seconds: 300
 tests:
   - name: reads_while_off  # §4.1
     roles: [light_ct, group]
     steps:
       - set: {state: on, brightness: 102, color_temp_kelvin: 2700}
+      # set waits only for on. Z2M sends color temperature after on, and a bulb drops it if the off lands first.
+      - wait: 2
       - set: {state: off}
       - wait: 2  # ZHA reads the bulb live, and it fades its level down while turning off
       - call: {}
@@ -32,6 +34,35 @@ tests:
       - set: {state: off}
       - call: {}
       - expect_response: {attributes: {rgb_color: [255, 0, 0], hs_color: [0, 100], color_temp_kelvin: null}}
+
+  # Zigbee2MQTT reads the bulb live, and it keeps xy while off. An in-gamut point, so it reads back as set.
+  - name: reads_xy_while_off
+    roles: [light_color]
+    only: [zigbee2mqtt]
+    steps:
+      - set: {state: on, xy_color: [0.3, 0.5]}
+      - wait: 2  # as in reads_while_off
+      - set: {state: off}
+      - call: {}
+      - expect_response:
+          attributes:
+            xy_color.0: {min: 0.29, max: 0.31}
+            xy_color.1: {min: 0.49, max: 0.51}
+            hs_color.0: {min: 0, max: 360}
+            color_temp_kelvin: null
+
+  # Zigbee2MQTT reads each member: a group has a timer only when every member that is on runs one.
+  - name: reads_a_group_timer
+    roles: [group]
+    only: [zigbee2mqtt]
+    steps:
+      - set: {state: off}
+      - call: {action: turn_on_for, duration: 20}
+      - call: {}
+      - expect_response: {attributes: {timer.turns: "off", timer.remaining_s: {min: 15, max: 20}}}
+      - expect_state: {state: off, within: 20 + 2 * tol}
+      - call: {}
+      - expect_response: {attributes: {timer: null}}
 
   # ZHA reads the bulb's color live, and the bulb keeps it while off. Lists compare whole, so hs is read by index.
   - name: reads_color_while_off

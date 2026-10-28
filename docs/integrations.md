@@ -206,6 +206,46 @@ Device Side turns `hue_native_control` on as an option of the group itself when 
 bulb (members read from `zigbee2mqtt/bridge/groups`). A group takes a color only when every member
 can show one, as Z2M exposes the features its members share.
 
+### `get_attributes`
+
+Reads each light live from the bulb, not from Z2M's or Home Assistant's state: Hue bulbs on Z2M don't report, so
+both can be stale. For each cluster the light has, Device Side publishes Z2M's generic read,
+`{"read": {"cluster", "attributes", "state_property": "device_side_read"}}`, to `zigbee2mqtt/<ieee>/set` and takes
+the answer Z2M publishes on the light's state topic:
+
+- `genOnOff` (`onOff`, `onTime`): a running `turn_on_for` timer, as `timer` with `turns: off`. `onTime` is the
+  time the bulb has left, in tenths of a second.
+- `genLevelCtrl` (`currentLevel`), when the light dims and is on: `brightness` in percent, as Hue's is. An off
+  light's `brightness` is Z2M's instead, from the state the `genOnOff` answer carries: the level the light comes
+  back at. The bulb's own isn't. After an off with a transition it holds the minimum (0.4%) while Z2M keeps the
+  level it restores on the next on, and for about a second after a plain off a Hue bulb's own fade still dims it.
+  Reading it would also overwrite Z2M's `brightness`, which takes every level read. With no `brightness` in Z2M's
+  state, an off light's row has none.
+- `lightingColorCtrl`, when it has a color mode: `colorMode`, plus `colorTemperature` for `color_temp`, `currentX`
+  and `currentY` for `xy`, and `currentHue` and `currentSaturation` for `hs`. Only the active mode's color is
+  returned, `color_temp_kelvin` or `xy_color`/`hs_color` with the others derived from it. A read that asks for
+  one attribute the bulb lacks fails as a whole, so only the light's own color modes' attributes are asked for.
+
+Bulbs keep their color and timer while off, so those read then too. Each cluster is one Zigbee round trip, a
+quarter of a second or less, read one after another: up to three per light per call. A read the bulb doesn't answer raises: at once
+when Z2M logs the failure on `zigbee2mqtt/bridge/logging`, else after 5 s.
+
+**Z2M's `filtered_cache`.** Z2M deep-merges a read's answer into the device's cached state, and every message it
+publishes for the device carries that whole cache, so a cached answer would ride in every later message and look
+like a fresh one. Before the first read of a device, Device Side adds `device_side_read` to its per-device
+`filtered_cache` option, after any entries of yours, and logs it at info level. Z2M then publishes the answer
+once, in the read's own message, and never caches it. It checks Z2M's settings on every call, and if the option
+can't be set, the call raises rather than read. Removing the entry is harmless; it comes back at the next call.
+
+**Groups.** A group returns one entry, averaged the way the Hue integration averages a room: brightness, color
+temperature and color over the members that are on, or over all of them when every member is off. It has a
+`timer` only when every member that is on runs one, and then it is the one with the most time left. Members come
+from `zigbee2mqtt/bridge/groups` and are read one after another, so a group costs its members' reads. An
+unavailable member is left out, a member that doesn't answer fails the group, and a group with no members is
+skipped.
+
+Lights only, as for `turn_on_for`.
+
 ### Cancelling
 
 Send a regular `turn_on` or `turn_off` through Home Assistant. This publishes `{"state":"ON"}` or
@@ -236,6 +276,10 @@ firmware. Most Z2M-supported lights cancel the timer on any state change.
   commanded.
 - **Zigbee traffic.** Each call adds up to three Zigbee reads per target, spread over the timer.
   A group read is one groupcast that every member answers.
+- **Large groups on a busy mesh.** `get_attributes` reads a group's members one after another, up to three
+  round trips each, and a call has 30 s for all its targets. A healthy read takes a quarter of a second or less,
+  but a group of many bulbs on a slow mesh can run out the 30 s, and then every target in that call fails with
+  `timeout`. Read a large group's members by area or label instead, which reads them four at a time.
 - **No confirmation.** Z2M's MQTT interface does not synchronously confirm the timer started.
   The result is always `sent`, never `confirmed`, regardless of whether the device accepted the
   command.

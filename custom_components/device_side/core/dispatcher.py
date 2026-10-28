@@ -97,7 +97,8 @@ class Dispatcher:
     @staticmethod
     def _respond(action: type[Action], call: ServiceCall, results: list[EntityResult]) -> ServiceResponse:
         """Log the skipped targets, raise on a device failure or an empty response, else answer for those that ran."""
-        if skipped := [result for result in results if result.status is Status.UNSUPPORTED]:
+        # An empty group is skipped silently, whether planning found it so or an adapter that reads membership did.
+        if skipped := [r for r in results if r.status is Status.UNSUPPORTED and r.detail != EMPTY_GROUP]:
             _LOGGER.warning(
                 "%s skipped targets that can't take it: %s",
                 action.key,

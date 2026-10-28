@@ -1,102 +1,20 @@
 """Zigbee2MQTT turn_on_for: turning on hue_native_control before a timer with a color."""
 
-import asyncio
-import json
 import logging
-from types import SimpleNamespace
 
 import pytest
-from homeassistant.core import ServiceCall, callback
 from pytest_homeassistant_custom_component.common import async_mock_service
 
-from custom_components.device_side.integrations.zigbee2mqtt import native_control
-
 from ...conftest import call
-from ...fixtures.z2m import IEEE, add_z2m_entity, add_z2m_group, z2m_entry
+from ...fixtures.z2m import GROUPS, IEEE, INFO, add_z2m_entity, add_z2m_group, z2m_entry
 
 SENT = {"status": "sent", "integration": "zigbee2mqtt"}
-INFO = "zigbee2mqtt/bridge/info"
-GROUPS = "zigbee2mqtt/bridge/groups"
 DEVICE_REQUEST = "zigbee2mqtt/bridge/request/device/options"
 DEVICE_RESPONSE = "zigbee2mqtt/bridge/response/device/options"
 GROUP_REQUEST = "zigbee2mqtt/bridge/request/group/options"
 GROUP_RESPONSE = "zigbee2mqtt/bridge/response/group/options"
 MEMBER = "0x00124b00aaaaaaaa"
 LOGGER = "custom_components.device_side.integrations.zigbee2mqtt"
-
-
-class Broker:
-    """MQTT as the adapter sees it, and Z2M answering options requests.
-
-    Like HA's client, a subscription goes live only when its debounced batch reaches the broker (here, on the next
-    loop turn), and a retained message is delivered then. A reply published before that is lost.
-    """
-
-    def __init__(self) -> None:
-        self.retained: dict[str, object] = {}
-        self.pending: list[tuple[str, object]] = []
-        self.subscribers: dict[str, list] = {}
-        self.topics: list[str] = []  # every topic ever subscribed
-        self.published: list[dict] = []
-        self.reply: dict | str | None = {"status": "ok"}  # merged with the transaction; a str is sent as is
-
-    async def subscribe(self, hass, topic, msg_callback):
-        if not self.pending:
-            asyncio.get_running_loop().call_soon(self.flush)
-        self.pending.append((topic, msg_callback))
-        self.topics.append(topic)
-
-        def unsubscribe() -> None:
-            if (topic, msg_callback) in self.pending:
-                self.pending.remove((topic, msg_callback))
-            else:
-                self.subscribers[topic].remove(msg_callback)
-
-        return unsubscribe
-
-    def flush(self) -> None:
-        batch, self.pending = self.pending, []
-        for topic, msg_callback in batch:
-            self.subscribers.setdefault(topic, []).append(msg_callback)
-        for topic, msg_callback in batch:
-            if topic in self.retained:
-                msg_callback(SimpleNamespace(topic=topic, payload=json.dumps(self.retained[topic])))
-
-    def deliver(self, topic: str, payload: str) -> None:
-        for msg_callback in list(self.subscribers.get(topic, [])):
-            msg_callback(SimpleNamespace(topic=topic, payload=payload))
-
-    def listening(self, topic: str) -> bool:
-        return bool(self.subscribers.get(topic)) or any(t == topic for t, _ in self.pending)
-
-    @callback
-    def publish(self, service: ServiceCall) -> None:
-        topic, payload = service.data["topic"], json.loads(service.data["payload"])
-        self.published.append({"topic": topic, "payload": payload})
-        if topic.startswith("zigbee2mqtt/bridge/request/") and self.reply is not None:
-            response = topic.replace("/request/", "/response/")
-            self.deliver(response, json.dumps({"transaction": "someone else's", "status": "error"}))
-            if isinstance(self.reply, str):
-                self.deliver(response, self.reply)
-            else:
-                self.deliver(response, json.dumps({**self.reply, "transaction": payload["transaction"]}))
-
-    def requests(self) -> list[dict]:
-        return [p for p in self.published if p["topic"].startswith("zigbee2mqtt/bridge/request/")]
-
-    def timers(self) -> list[dict]:
-        return [p for p in self.published if p["payload"].get("on_time") is not None]
-
-
-@pytest.fixture
-def broker(hass, monkeypatch):
-    fake = Broker()
-    fake.retained[INFO] = {"config": {"devices": {IEEE: {"friendly_name": "bulb"}}, "groups": {}}}
-    monkeypatch.setattr(native_control.mqtt, "async_subscribe", fake.subscribe)
-    monkeypatch.setattr(native_control, "_RETAINED_TIMEOUT_S", 0.01)
-    monkeypatch.setattr(native_control, "_REPLY_TIMEOUT_S", 0.01)
-    hass.services.async_register("mqtt", "publish", fake.publish)
-    return fake
 
 
 @pytest.fixture
