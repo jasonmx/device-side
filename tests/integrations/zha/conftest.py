@@ -2,8 +2,22 @@ from types import SimpleNamespace
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
+from pytest_homeassistant_custom_component.common import async_mock_service
 
 from custom_components.device_side.integrations.zha import zcl
+from custom_components.device_side.integrations.zha.move import transition_cache
+
+from ...fixtures.zha import IEEE, add_zha_entity, zha_entry, zha_group
+
+SENT = {"status": "sent", "integration": "zha"}
+A, B = "00:00:00:00:00:00:00:0a", "00:00:00:00:00:00:00:0b"
+COLOR_MODES = ["color_temp", "xy"]
+
+
+def unchanged(detail: str) -> dict:
+    return {"status": "unchanged", "integration": "zha", "detail": detail}
 
 
 @pytest.fixture(autouse=True)
@@ -20,3 +34,70 @@ def zha_groups(monkeypatch) -> dict:
     groups: dict = {}
     monkeypatch.setattr(zcl, "gateway", lambda hass: SimpleNamespace(get_group=groups.get))
     return groups
+
+
+class Clock:
+    """A transition cache clock the test moves by hand."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+@pytest.fixture
+def clock(hass, setup_production) -> Clock:
+    clock = Clock()
+    transition_cache(hass).clock = clock
+    return clock
+
+
+@pytest.fixture
+def group_commands(hass):
+    return async_mock_service(hass, "zha", "issue_zigbee_group_command")
+
+
+@pytest.fixture
+def refreshes(hass):
+    return async_mock_service(hass, "homeassistant", "update_entity")
+
+
+def bulb(
+    hass,
+    entity_id: str = "light.bulb",
+    ieee: str = IEEE,
+    *,
+    state: str = "on",
+    brightness: int = 153,  # 60 %
+    hs: tuple[float, float] = (200.0, 60.0),
+    modes: list[str] | None = None,
+    model: str | None = None,
+) -> str:
+    entries = hass.config_entries.async_entries("zha")
+    entry = entries[0] if entries else zha_entry(hass)
+    attributes: dict = {"supported_color_modes": COLOR_MODES if modes is None else modes}
+    if state == "on":
+        attributes |= {"brightness": brightness, "hs_color": hs}
+    add_zha_entity(hass, entry, entity_id, ieee=ieee, state=state, attributes=attributes)
+    if model is not None:
+        device_id = er.async_get(hass).async_get(entity_id).device_id
+        dr.async_get(hass).async_update_device(device_id, model=model)
+    return entity_id
+
+
+def sent(commands) -> list[tuple[int, int, dict]]:
+    return [(command.data["cluster_id"], command.data["command"], command.data["params"]) for command in commands]
+
+
+def to(commands) -> list[str]:
+    return [command.data["ieee"] for command in commands]
+
+
+@pytest.fixture
+def two_light_group(hass, zha_groups):
+    """light.zha_group, ZHA group 2, of light.a and light.b."""
+    entry = zha_entry(hass)
+    add_zha_entity(hass, entry, "light.zha_group", unique_id="light_zha_group_0x0002")
+    zha_groups[2] = zha_group((A, 11), (B, 11))
+    return entry

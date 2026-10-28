@@ -152,6 +152,8 @@ move:
         integration: hue
       - domain: light
         integration: mqtt
+      - domain: light
+        integration: zha
   fields:
     brightness:
       example: up
@@ -211,6 +213,8 @@ stop:
         integration: hue
       - domain: light
         integration: mqtt
+      - domain: light
+        integration: zha
 
 get_attributes:
   target:

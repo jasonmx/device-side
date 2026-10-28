@@ -3,7 +3,9 @@
 from .addressing import is_zha_group
 from .get_attributes import ZHAGetAttributes
 from .groups import expand_group
+from .move import ZHAMove
 from .set_attributes import ZHASetAttributes
+from .stop import ZHAStop
 from .turn_on_for import ZHATurnOnFor
 from ...core.scope import IntegrationInfo
 
@@ -16,4 +18,4 @@ INTEGRATION = IntegrationInfo(
     max_concurrency=2,
 )
 
-ADAPTERS = [ZHAGetAttributes, ZHASetAttributes, ZHATurnOnFor]
+ADAPTERS = [ZHAGetAttributes, ZHAMove, ZHASetAttributes, ZHAStop, ZHATurnOnFor]

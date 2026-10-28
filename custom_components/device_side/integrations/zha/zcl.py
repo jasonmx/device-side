@@ -1,11 +1,14 @@
 """Send ZCL commands to a ZHA device through the zha integration's cluster command action, and read its attributes
 through the zha integration's gateway."""
 
+import logging
 from typing import Any
 
 from homeassistant.core import Context, HomeAssistant
 
 from .addressing import Address
+
+_LOGGER = logging.getLogger(__name__)
 
 ON_OFF_CLUSTER = 0x0006
 ON_OFF = 0x0000
@@ -135,3 +138,22 @@ async def read_attributes(
         if attribute not in success:
             raise LookupError(f"Attribute 0x{attribute:04x} not read: {failure.get(attribute)}")
     return {attribute: success[attribute] for attribute in wanted if attribute in success}
+
+
+async def enhanced_hue(hass: HomeAssistant, addr: Address) -> bool:
+    """Whether the light's ColorCapabilities report enhanced hue, so it takes EnhancedMoveHue; False without a Color
+    cluster or an answer.
+
+    Read from zigpy's attribute cache, as it never changes, else once off the device.
+    """
+    from zigpy.types import EUI64
+
+    try:
+        device = gateway(hass).get_device(EUI64.convert(addr.ieee))
+        cluster = device.async_get_cluster(addr.endpoint_id, COLOR_CLUSTER, cluster_type="in")
+        if (capabilities := cluster.get(COLOR_CAPABILITIES)) is None:
+            capabilities = (await read_attributes(hass, addr, COLOR_CLUSTER, (COLOR_CAPABILITIES,)))[COLOR_CAPABILITIES]
+    except Exception as err:  # noqa: BLE001 - zha and zigpy errors can't be imported here; read_attributes says why
+        _LOGGER.debug("ColorCapabilities of %s not read: %s", addr.ieee, err)
+        return False
+    return bool(capabilities & ENHANCED_HUE)

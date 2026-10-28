@@ -103,3 +103,43 @@ async def test_command_issues_a_server_command_to_the_in_cluster_with_the_caller
         "params": {"level": 40},
     }
     assert commands[0].context is context
+
+
+@pytest.mark.parametrize(("capabilities", "expected"), [(31, True), (16, False)])
+async def test_enhanced_hue_from_zigpys_cache(hass, gateway, cluster, capabilities, expected):
+    """The A60 reports 31 (enhanced hue among them), a color temperature bulb 16 (probe 13a)."""
+    cluster.get = MagicMock(return_value=capabilities)
+
+    assert await zcl.enhanced_hue(hass, ADDR) is expected
+    cluster.get.assert_called_once_with(zcl.COLOR_CAPABILITIES)
+    gateway.get_device.return_value.async_get_cluster.assert_called_once_with(11, 0x0300, cluster_type="in")
+    cluster.read_attributes.assert_not_awaited()
+
+
+async def test_enhanced_hue_read_once_when_not_cached(hass, gateway, cluster):
+    cluster.get = MagicMock(return_value=None)
+    cluster.read_attributes.return_value = ({zcl.COLOR_CAPABILITIES: 31}, {})
+
+    assert await zcl.enhanced_hue(hass, ADDR) is True
+    cluster.read_attributes.assert_awaited_once_with([0x400A], allow_cache=False, only_cache=False)
+
+
+async def test_no_color_cluster_is_no_enhanced_hue(hass, gateway):
+    gateway.get_device.return_value.async_get_cluster.side_effect = KeyError(0x0300)
+
+    assert await zcl.enhanced_hue(hass, ADDR) is False
+
+
+async def test_group_command_sends_positional_args(hass):
+    calls = async_mock_service(hass, "zha", "issue_zigbee_group_command")
+    context = Context()
+
+    await zcl.group_command(hass, 2, zcl.LEVEL_CLUSTER, zcl.STOP, [], context)
+
+    assert [call.data for call in calls] == [{"group": 2, "cluster_id": 8, "command": 3, "args": []}]
+    assert calls[0].context is context
+
+
+@pytest.mark.parametrize(("percent", "level"), [(0, 1), (0.1, 1), (50, 127), (100, 254)])
+def test_level(percent, level):
+    assert zcl.level(percent) == level

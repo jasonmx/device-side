@@ -6,7 +6,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.device_side.core.resolver import resolve
 from custom_components.device_side.core.runtime import get_runtime
 from custom_components.device_side.integrations.zha.addressing import group_id
-from custom_components.device_side.integrations.zha.groups import expand_group
+from custom_components.device_side.integrations.zha.groups import expand_group, light_members
 
 from ...fixtures.zha import add_zha_entity, zha_entry, zha_group
 
@@ -48,6 +48,17 @@ async def test_a_group_zha_no_longer_knows_is_empty(hass, setup_production, zha_
     add_zha_entity(hass, zha_entry(hass), "light.zha_group", unique_id="light_zha_group_0x0002")
 
     assert expand_group(hass, _group_target(hass)) == []
+
+
+async def test_light_members_are_every_light_the_group_holds(hass, setup_production, zha_groups):
+    """Whether a call targets them or not: a groupcast reaches them all."""
+    entry = zha_entry(hass)
+    add_zha_entity(hass, entry, "light.a", ieee=A)
+    add_zha_entity(hass, entry, "switch.plug", ieee=C, unique_id=f"{C}-1")
+    zha_groups[2] = zha_group((A, 11), (C, 1), (B, 11))
+
+    assert light_members(hass, 2) == {"light.a"}
+    assert light_members(hass, 3) == frozenset()
 
 
 @pytest.mark.parametrize(
