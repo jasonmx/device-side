@@ -15,7 +15,6 @@ own; any other value is the user's and is left alone.
 
 import logging
 from collections.abc import Callable
-from functools import partial
 
 from homeassistant.components import mqtt
 from homeassistant.config_entries import ConfigEntry
@@ -157,17 +156,23 @@ def _entities(devices: list[dict], groups: list[dict]) -> list[tuple[str, str, l
     return entities
 
 
-async def async_watch(hass: HomeAssistant) -> Callable[[], None]:
+async def async_watch(hass: HomeAssistant, entry: ConfigEntry) -> Callable[[], None]:
     """Run the enabled pass now and whenever Z2M announces a device or group change; returns the unsubscribe.
 
-    The retained messages each subscription gets at once start the first pass.
+    The retained messages each subscription gets at once start the first pass. Each pass is the entry's background
+    task, so unloading cancels one in flight: turning the option off reloads the entry, and a pass finishing after
+    that would set the modes the reload's own pass has just put back.
     """
+
+    async def run_pass() -> None:
+        await entry.async_create_background_task(hass, ensure_color_modes(hass, True), "z2m color modes pass")
+
     debouncer = Debouncer(
         hass,
         _LOGGER,
         cooldown=_SETTLE_S,
         immediate=False,
-        function=partial(ensure_color_modes, hass, True),
+        function=run_pass,
         background=True,
     )
 
@@ -195,7 +200,7 @@ async def async_setup(hass: HomeAssistant, entry: ConfigEntry, enabled: bool) ->
     if not await mqtt.async_wait_for_mqtt_client(hass):
         return
     if enabled:
-        entry.async_on_unload(await async_watch(hass))
+        entry.async_on_unload(await async_watch(hass, entry))
     else:
         await ensure_color_modes(hass, False)
 

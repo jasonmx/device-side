@@ -203,8 +203,10 @@ async def test_unexpected_bridge_devices_warns_and_does_nothing(hass, z2m, caplo
 
 
 async def test_watch_runs_at_once_and_again_when_z2m_announces_a_device(hass, z2m):
+    entry = MockConfigEntry(domain=DOMAIN)
+    entry.add_to_hass(hass)
     start = wall_clock_now()
-    stop = await color_modes.async_watch(hass)
+    stop = await color_modes.async_watch(hass, entry)
     await settle(hass)  # the retained messages, which start the first pass
     await advance(hass, start, 3)
     assert len(z2m.requests()) == 3
@@ -232,6 +234,14 @@ def mqtt_ready(monkeypatch):
     return ready
 
 
+@pytest.fixture
+def no_mqtt(monkeypatch):
+    async def no_client(hass):
+        return False
+
+    monkeypatch.setattr(color_modes.mqtt, "async_wait_for_mqtt_client", no_client)
+
+
 async def setup_entry(hass, options: dict | None = None) -> MockConfigEntry:
     entry = MockConfigEntry(domain=DOMAIN, options=options or {})
     entry.add_to_hass(hass)
@@ -254,6 +264,32 @@ async def test_setup_watches_z2m_by_default(hass, z2m, mqtt_ready):
     assert len(z2m.requests()) == 3  # unloading, which HA's shutdown does too, puts nothing back
 
 
+async def test_unloading_cancels_a_pass_in_flight(hass, z2m, mqtt_ready, monkeypatch):
+    # Turning the option off reloads the entry: a pass finishing after that would undo the reload's own.
+    started, cancelled = asyncio.Event(), asyncio.Event()
+
+    async def slow_pass(hass, enabled):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    monkeypatch.setattr(color_modes, "ensure_color_modes", slow_pass)
+    start = wall_clock_now()
+    entry = await setup_entry(hass)
+    await hass.async_block_till_done()
+    async_fire_time_changed(hass, start + timedelta(seconds=3))
+    async with asyncio.timeout(1):
+        await started.wait()
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+    async with asyncio.timeout(1):
+        await cancelled.wait()
+
+
 async def test_setup_isnt_held_back_while_mqtt_comes_up(hass, z2m, mqtt_ready):
     mqtt_ready.clear()
 
@@ -264,12 +300,7 @@ async def test_setup_isnt_held_back_while_mqtt_comes_up(hass, z2m, mqtt_ready):
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_setup_without_mqtt_does_nothing(hass, z2m, monkeypatch):
-    async def no_client(hass):
-        return False
-
-    monkeypatch.setattr(color_modes.mqtt, "async_wait_for_mqtt_client", no_client)
-
+async def test_setup_without_mqtt_does_nothing(hass, z2m, no_mqtt):
     await setup_entry(hass)
     await settle(hass)
 
@@ -304,11 +335,7 @@ async def test_deleting_device_side_puts_back_z2m_defaults(hass, z2m, mqtt_ready
     assert sent(z2m) == {("device", IEEE): OFF}
 
 
-async def test_deleting_device_side_without_mqtt_does_nothing(hass, z2m, monkeypatch):
-    async def no_client(hass):
-        return False
-
-    monkeypatch.setattr(color_modes.mqtt, "async_wait_for_mqtt_client", no_client)
+async def test_deleting_device_side_without_mqtt_does_nothing(hass, z2m, no_mqtt):
     entry = await setup_entry(hass)
 
     assert await hass.config_entries.async_remove(entry.entry_id)
