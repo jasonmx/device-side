@@ -18,14 +18,19 @@ _REPLY_TIMEOUT_S = 5.0
 
 async def group_members(hass: HomeAssistant, group: str) -> list[str]:
     """The IEEE addresses of a Z2M group's members, from bridge/groups; none for a group it doesn't list."""
-    payload: asyncio.Future[str] = hass.loop.create_future()
-    unsubscribe = await mqtt.async_subscribe(hass, bridge_topic("groups"), first_payload(payload))
-    try:
-        groups = json.loads(await wait(payload, _RETAINED_TIMEOUT_S, "no bridge/groups from Zigbee2MQTT"))
-    finally:
-        unsubscribe()
+    groups = await retained(hass, "groups")
     members = next((g.get("members", []) for g in groups if str(g.get("id")) == group), [])
     return [member["ieee_address"] for member in members if member.get("ieee_address")]
+
+
+async def retained(hass: HomeAssistant, suffix: str) -> Any:
+    """The parsed retained message on bridge/<suffix>; raises TimeoutError when Z2M hasn't published one."""
+    payload: asyncio.Future[str] = hass.loop.create_future()
+    unsubscribe = await mqtt.async_subscribe(hass, bridge_topic(suffix), first_payload(payload))
+    try:
+        return json.loads(await wait(payload, _RETAINED_TIMEOUT_S, f"no bridge/{suffix} from Zigbee2MQTT"))
+    finally:
+        unsubscribe()
 
 
 async def ensure_options(

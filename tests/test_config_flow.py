@@ -8,7 +8,7 @@ from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.setup import async_set_domains_to_be_loaded, async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry, MockModule, mock_integration
 
-from custom_components.device_side.const import CONF_PREDICTED_STATE, DOMAIN, NAME
+from custom_components.device_side.const import CONF_PREDICTED_STATE, CONF_Z2M_COLOR_MODES, DOMAIN, NAME
 from custom_components.device_side.core.resolver import resolve
 from custom_components.device_side.core.runtime import get_runtime
 
@@ -88,14 +88,14 @@ async def test_saving_the_option_reloads_the_entry_with_it(hass: HomeAssistant):
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] is FlowResultType.FORM
-    assert result["data_schema"]({}) == {CONF_PREDICTED_STATE: True}
+    assert result["data_schema"]({}) == {CONF_PREDICTED_STATE: True, CONF_Z2M_COLOR_MODES: True}
     result = await hass.config_entries.options.async_configure(result["flow_id"], {CONF_PREDICTED_STATE: False})
     await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert entry.options == {CONF_PREDICTED_STATE: False}
+    assert entry.options == {CONF_PREDICTED_STATE: False, CONF_Z2M_COLOR_MODES: True}
     assert entry.state is ConfigEntryState.LOADED
     assert get_runtime(hass).predicted_state is False
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    assert result["data_schema"]({}) == {CONF_PREDICTED_STATE: False}
+    assert result["data_schema"]({}) == {CONF_PREDICTED_STATE: False, CONF_Z2M_COLOR_MODES: True}

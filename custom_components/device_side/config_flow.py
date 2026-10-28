@@ -2,7 +2,14 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 
-from .const import CONF_PREDICTED_STATE, DOMAIN, NAME, PREDICTED_STATE_DEFAULT
+from .const import (
+    CONF_PREDICTED_STATE,
+    CONF_Z2M_COLOR_MODES,
+    DOMAIN,
+    NAME,
+    PREDICTED_STATE_DEFAULT,
+    Z2M_COLOR_MODES_DEFAULT,
+)
 
 
 class DeviceSideConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -33,8 +40,17 @@ class DeviceSideOptionsFlow(config_entries.OptionsFlowWithReload):
         if user_input is not None:
             return self.async_create_entry(data=user_input)
 
-        predicted_state = self.config_entry.options.get(CONF_PREDICTED_STATE, PREDICTED_STATE_DEFAULT)
+        options = self.config_entry.options
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema({vol.Required(CONF_PREDICTED_STATE, default=predicted_state): bool}),
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_PREDICTED_STATE, default=options.get(CONF_PREDICTED_STATE, PREDICTED_STATE_DEFAULT)
+                    ): bool,
+                    vol.Required(
+                        CONF_Z2M_COLOR_MODES, default=options.get(CONF_Z2M_COLOR_MODES, Z2M_COLOR_MODES_DEFAULT)
+                    ): bool,
+                }
+            ),
         )
