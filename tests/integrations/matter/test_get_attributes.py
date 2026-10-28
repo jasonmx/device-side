@@ -4,8 +4,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
 from ...conftest import call, refusal
@@ -66,13 +64,7 @@ async def test_light_is_out_of_scope(hass):
 
 async def test_unparsable_unique_id_is_refused(hass):
     entry, _, read_attr = matter_device(hass, endpoint_id=EP)
-    device = dr.async_get(hass).async_get_or_create(
-        config_entry_id=entry.entry_id, identifiers={("matter", "deviceid_bad")}
-    )
-    er.async_get(hass).async_get_or_create(
-        "switch", "matter", "bad-uid", suggested_object_id="broken", config_entry=entry, device_id=device.id
-    )
-    hass.states.async_set("switch.broken", "off", {})
+    add_matter_entity(hass, entry, "switch.broken", unique_id="bad-uid")
 
     assert await refusal(hass, "get_attributes", {"entity_id": "switch.broken"}) == "not_addressable"
     read_attr.assert_not_awaited()

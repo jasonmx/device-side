@@ -48,6 +48,16 @@ tests:
       - call: {}
       - expect_response: {attributes: {timer: null}}
 
+  # A turn_off cancels the timer, so the row must not report one left over on a plug that is off.
+  - name: reads_no_timer_after_a_turn_off
+    roles: [switch_plug]
+    steps:
+      - set: {state: off}
+      - call: {action: turn_on_for, duration: 20}
+      - set: {state: off}
+      - call: {}
+      - expect_response: {attributes: {timer: null}}
+
   - name: reads_a_turn_off_for_timer
     roles: [switch_plug]
     only: [shelly]  # Matter has no OffWithTimedOn
