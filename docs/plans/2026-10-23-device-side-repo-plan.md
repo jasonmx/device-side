@@ -289,7 +289,7 @@ custom_components/device_side/
   __init__.py            async_setup: registry discovery in import executor, register services;
                          async_setup_entry/unload no-op; CONFIG_SCHEMA = config_entry_only_config_schema
   manifest.json          domain device_side; config_flow; single_config_entry;
-                         after_dependencies [mqtt, zha, matter, shelly, hue]; requirements [];
+                         after_dependencies [mqtt] (imported; the rest resolve at call time); requirements [];
                          integration_type service; iot_class local_push
   config_flow.py         single-instance empty flow (copy of hue_dimmer/config_flow.py)
   const.py               DOMAIN, NAME, LIGHT_FIELDS
