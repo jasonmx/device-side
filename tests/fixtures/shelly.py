@@ -12,23 +12,33 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 MAC = "AABBCCDDEEFF"
 
 
-def timer_running():
-    """call_rpc side effect: Set returns the API's result, GetStatus reports the timer that Set started."""
-    outputs: dict[tuple[str, int], bool] = {}
+# When a fixture timer starts, on the device's clock: 2026-10-27T12:00:00Z.
+TIMER_STARTED_AT = 1793102400.0
+
+
+def timer_running(status: dict | None = None):
+    """call_rpc side effect: Set returns the API's result; GetStatus reports `status` (an RGBCCT bulb's brightness,
+    mode, ct and rgb, say) under the output and any timer the last Set started, at TIMER_STARTED_AT."""
+    sets: dict[tuple[str, int], dict] = {}
 
     def respond(method: str, params: dict) -> dict:
         component, _, verb = method.partition(".")
+        key = (component, params["id"])
         if verb == "GetStatus":
-            return {"id": params["id"], "output": outputs[(component, params["id"])], "timer_duration": 5.0}
-        outputs[(component, params["id"])] = params["on"]
+            return {"id": params["id"], "output": False, **(status or {}), **sets.get(key, {})}
+        sets[key] = {"output": params["on"]}
+        if "toggle_after" in params:
+            sets[key] |= {"timer_started_at": TIMER_STARTED_AT, "timer_duration": params["toggle_after"]}
         return {"was_on": not params["on"]}
 
     return respond
 
 
-def shelly_device(hass: HomeAssistant, gen1: bool = False, mac: str = MAC) -> tuple[MockConfigEntry, AsyncMock]:
-    """A loaded Shelly entry whose runtime_data.rpc.device.call_rpc is the returned mock."""
-    call_rpc = AsyncMock(side_effect=timer_running())
+def shelly_device(
+    hass: HomeAssistant, gen1: bool = False, mac: str = MAC, status: dict | None = None
+) -> tuple[MockConfigEntry, AsyncMock]:
+    """A loaded Shelly entry whose runtime_data.rpc.device.call_rpc is the returned mock; status as timer_running's."""
+    call_rpc = AsyncMock(side_effect=timer_running(status))
     entry = MockConfigEntry(domain="shelly", unique_id=mac)
     entry.add_to_hass(hass)
     entry.mock_state(hass, ConfigEntryState.LOADED)

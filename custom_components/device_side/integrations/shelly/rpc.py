@@ -41,6 +41,12 @@ def light_params(light: LightFields, component: str, state: State | None) -> dic
     return params
 
 
+async def get_status(target: Target) -> dict[str, Any]:
+    """The target's <Component>.GetStatus; an error propagates."""
+    rpc = address(target)
+    return await rpc_device(target).call_rpc(f"{rpc.component}.GetStatus", {"id": rpc.id})
+
+
 async def set_with_timer(adapter: Adapter, target: Target, params: dict[str, Any]) -> EntityResult:
     """Send the Set (an error propagates, so gather() reports it rejected), then confirm the timer is running.
 
@@ -49,7 +55,7 @@ async def set_with_timer(adapter: Adapter, target: Target, params: dict[str, Any
     device, rpc = rpc_device(target), address(target)
     await device.call_rpc(f"{rpc.component}.Set", {"id": rpc.id, **params})
     try:
-        status = await device.call_rpc(f"{rpc.component}.GetStatus", {"id": rpc.id})
+        status = await get_status(target)
     except Exception as err:  # noqa: BLE001 - aioshelly's errors can't be imported here; see addressing.py
         _LOGGER.debug("%s read-back failed for %s: %s", adapter.action, target.entity_id, err)
         return adapter.result(target, Status.SENT, detail="readback_failed")

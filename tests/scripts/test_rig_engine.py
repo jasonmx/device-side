@@ -220,6 +220,50 @@ tests:
     assert outcomes(result)["reads[light_ct]"][0] is outcome
 
 
+@pytest.mark.parametrize(
+    ("row", "outcome"),
+    [
+        ({"timer": {"turns": "off", "remaining_s": 18.0}}, Outcome.PASS),
+        ({"timer": {"turns": "on", "remaining_s": 18.0}}, Outcome.FAIL),
+        ({"timer": {"turns": "off", "remaining_s": 10.0}}, Outcome.FAIL),
+        ({}, Outcome.FAIL),  # no timer: each dotted name reads as absent
+    ],
+)
+async def test_a_dotted_name_reads_a_nested_response_key(tmp_path, row, outcome):
+    ha = FakeHA({"switch.plug": {"state": "on"}}, lambda ha, action, data: {data["entity_id"]: row})
+    text = """
+action: get_attributes
+rig_seconds: 5
+tests:
+  - name: reads
+    roles: [switch_plug]
+    steps:
+      - call: {}
+      - expect_response: {attributes: {timer.turns: "off", timer.remaining_s: {min: 15, max: 20}}}
+"""
+    result = await run_one(ha, suite(tmp_path, text, "shelly"), inventory("shelly", switch_plug="switch.plug"))
+
+    assert outcomes(result)["reads[switch_plug]"][0] is outcome
+
+
+@pytest.mark.parametrize(("row", "outcome"), [({}, Outcome.PASS), ({"timer": {"turns": "off"}}, Outcome.FAIL)])
+async def test_a_null_expectation_asserts_the_key_is_absent(tmp_path, row, outcome):
+    ha = FakeHA({"switch.plug": {"state": "off"}}, lambda ha, action, data: {data["entity_id"]: row})
+    text = """
+action: get_attributes
+rig_seconds: 5
+tests:
+  - name: reads
+    roles: [switch_plug]
+    steps:
+      - call: {}
+      - expect_response: {attributes: {timer: null}}
+"""
+    result = await run_one(ha, suite(tmp_path, text, "shelly"), inventory("shelly", switch_plug="switch.plug"))
+
+    assert outcomes(result)["reads[switch_plug]"][0] is outcome
+
+
 async def test_an_off_light_gets_its_device_side_attributes_back(tmp_path):
     def device_side(ha, action, data):
         entity_id = data["entity_id"]

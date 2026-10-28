@@ -723,6 +723,16 @@ def _value(state: dict, name: str) -> Any:
     return state["state"] if name == "state" else state["attributes"].get(name)
 
 
+def _lookup(row: dict, name: str) -> Any:
+    """A response attribute by dotted name (`timer.turns`); None where any part is absent."""
+    value: Any = row
+    for part in name.split("."):
+        if not isinstance(value, dict):
+            return None
+        value = value.get(part)
+    return value
+
+
 def _matches(actual: Any, want: Any) -> bool:
     if isinstance(want, dict):
         if isinstance(actual, bool) or not isinstance(actual, int | float):
@@ -1051,7 +1061,7 @@ class _CaseRun:
                     continue
                 if name == "attributes":
                     got = entry if self.query else entry.get("attributes") or {}
-                    if bad := [attr for attr, value in want.items() if not _matches(got.get(attr), value)]:
+                    if bad := [attr for attr, value in want.items() if not _matches(_lookup(got, attr), value)]:
                         raise StepFailure(f"{key}: attributes {bad} are {got}, expected {want}")
                 elif not _matches(entry.get(name), expected := self.expected(name, want)):
                     raise StepFailure(f"{key}: {name} is {entry.get(name)!r}, expected {expected!r}: {entry}")
