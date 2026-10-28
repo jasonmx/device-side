@@ -201,6 +201,8 @@ async def test_end_refresh_once_the_fade_has_run(hass, commands, refreshes):
 
 
 async def test_a_failed_refresh_is_only_logged(hass, commands, caplog):
+    caplog.set_level("DEBUG")
+
     async def fail(call: ServiceCall) -> None:
         raise HomeAssistantError("unavailable")
 
@@ -208,10 +210,10 @@ async def test_a_failed_refresh_is_only_logged(hass, commands, caplog):
     bulb(hass)
     start = wall_clock_now()
 
-    await call(hass, "move", {"entity_id": "light.bulb", "saturation": "up"})
+    assert await call(hass, "move", {"entity_id": "light.bulb", "saturation": "up"}) == {"light.bulb": SENT}
     await advance(hass, start, 3.5)
 
-    assert len(commands) == 1
+    assert "update_entity for light.bulb failed: unavailable" in caplog.text
 
 
 async def test_a_hue_move_is_tracked_and_a_saturation_move_ends_it(hass, commands):
@@ -375,3 +377,26 @@ async def test_a_failed_groupcast_rejects_its_members(hass, two_light_group):
         await call(hass, "move", {"entity_id": "light.zha_group", "brightness": "up"})
 
     assert raised.value.translation_placeholders["summary"] == "light.a: error, light.b: error"
+
+
+async def test_a_later_failure_keeps_the_restore_of_a_soft_off_already_sent(hass, on_off_read):
+    """The soft off went out, the color didn't: the light still gets its level back once it reads off."""
+    sent_commands: list[ServiceCall] = []
+
+    async def first_only(call: ServiceCall) -> None:
+        if call.data["cluster_id"] == 0x0300:
+            raise HomeAssistantError("no route")
+        sent_commands.append(call)
+
+    hass.services.async_register("zha", "issue_zigbee_cluster_command", first_only)
+    async_mock_service(hass, "homeassistant", "update_entity")
+    bulb(hass)
+    start = wall_clock_now()
+
+    with pytest.raises(HomeAssistantError):
+        await call(hass, "move", {"entity_id": "light.bulb", "brightness": "down", "saturation": "down"})
+    await advance(hass, start, 4.5)
+
+    assert [command[:2] for command in sent(sent_commands)] == [(0x0008, 0x04), (0x0008, 0x00)]
+    assert transition_cache(hass).tracks("light.bulb", BRIGHTNESS)
+    assert not transition_cache(hass).tracks("light.bulb", SATURATION)

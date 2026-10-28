@@ -214,35 +214,41 @@ def plan(cache: TransitionCache, move: MoveRequest, lights: list[Target]) -> lis
 async def start(
     hass: HomeAssistant, context: Context | None, cache: TransitionCache, gid: int | None, made: list[Fade | HueMove]
 ) -> float | None:
-    """Send each fade and hue move, recording them, and schedule each light's end refresh; the clamped sweep_time."""
+    """Send each fade and hue move, recording them, and schedule each light's end refresh; the clamped sweep_time.
+
+    The jobs of what was sent are scheduled even when a later send fails, so a soft off already under way still gets
+    its restore; a light whose send failed keeps its previous move's jobs.
+    """
     clamped_to = None
     jobs: dict[str, tuple[Target, list[tuple[float, Job]]]] = {}
-    for outcome in made:
-        for light in outcome.movers:
-            jobs.setdefault(light.entity_id, (light, []))
-        if isinstance(outcome, HueMove):
-            await send(hass, gid, outcome.movers, outcome.command, context)
-            hue_moves(hass).update(light.entity_id for light in outcome.movers)
-            clamped_to = outcome.clamped_to
-            continue
-        if outcome.attribute == SATURATION:
-            hue_moves(hass).difference_update(outcome.starts)  # a color write ends the bulb's hue cycle
-        async with cache.recording((light_id, outcome.attribute) for light_id in outcome.starts):
-            for light_id, begin in outcome.starts.items():
-                cache.moving(light_id, outcome.attribute, begin, outcome.ends[light_id], outcome.duration)
-            # Unicast: each concerns one light's own stored level.
-            for light in outcome.presets:
-                bottom = {"level": 1, **zcl.execute_if_off(0)}
-                await zcl.command(
-                    hass, address(light.entry.unique_id), zcl.LEVEL_CLUSTER, zcl.MOVE_TO_LEVEL, bottom, context
-                )
-            await send(hass, gid, outcome.movers, outcome.command, context)
-        for light in outcome.movers:
-            restore = outcome.restores.get(light.entity_id)
-            jobs[light.entity_id][1].append((outcome.duration + END_REFRESH_S, end_job(hass, light, restore, context)))
-    # A new move replaces the light's pending refresh and restore, a hue move's included.
-    for light, light_jobs in jobs.values():
-        get_runtime(hass).schedule(hass, job_key(light), light_jobs)
+    try:
+        for outcome in made:
+            if isinstance(outcome, HueMove):
+                await send(hass, gid, outcome.movers, outcome.command, context)
+                hue_moves(hass).update(light.entity_id for light in outcome.movers)
+                clamped_to = outcome.clamped_to
+                for light in outcome.movers:
+                    jobs.setdefault(light.entity_id, (light, []))
+                continue
+            if outcome.attribute == SATURATION:
+                hue_moves(hass).difference_update(outcome.starts)  # a color write ends the bulb's hue cycle
+            async with cache.recording((light_id, outcome.attribute) for light_id in outcome.starts):
+                for light_id, begin in outcome.starts.items():
+                    cache.moving(light_id, outcome.attribute, begin, outcome.ends[light_id], outcome.duration)
+                # Unicast: each concerns one light's own stored level.
+                for light in outcome.presets:
+                    bottom = {"level": 1, **zcl.execute_if_off(0)}
+                    await zcl.command(
+                        hass, address(light.entry.unique_id), zcl.LEVEL_CLUSTER, zcl.MOVE_TO_LEVEL, bottom, context
+                    )
+                await send(hass, gid, outcome.movers, outcome.command, context)
+            for light in outcome.movers:
+                job = end_job(hass, light, outcome.restores.get(light.entity_id), context)
+                jobs.setdefault(light.entity_id, (light, []))[1].append((outcome.duration + END_REFRESH_S, job))
+    finally:
+        # A new move replaces the light's pending refresh and restore, a hue move's included.
+        for light, light_jobs in jobs.values():
+            get_runtime(hass).schedule(hass, job_key(light), light_jobs)
     return clamped_to
 
 
@@ -257,9 +263,14 @@ async def lacked(hass: HomeAssistant, request: MoveRequest, lights: list[Target]
     return frozenset()
 
 
+def fade_seconds(distance: float, sweep_time: float) -> float:
+    """How long a fade over `distance` percent takes at the sweep_time's speed, at most the longest ZCL transition: a
+    longer fade runs at that, faster."""
+    return min(distance / 100 * sweep_time, _MAX_TENTHS / 10)
+
+
 def transition_tenths(duration: float) -> int:
-    """A fade's ZCL transition time; a fade longer than the most a transition holds runs at that, faster."""
-    return min(round(duration * 10), _MAX_TENTHS)
+    return round(duration * 10)
 
 
 def brightness_fade(cache: TransitionCache, request: MoveRequest, lights: list[Target]) -> Fade | str:
@@ -275,7 +286,7 @@ def brightness_fade(cache: TransitionCache, request: MoveRequest, lights: list[T
     current = mean(starts[light.entity_id] for light in lit_lights or lights)
     if (limit - current if up else current - limit) < MIN_STEP:
         return "at_limit"
-    duration = abs(limit - current) / 100 * request.sweep_time
+    duration = fade_seconds(abs(limit - current), request.sweep_time)
     tenths = transition_tenths(duration)
     presets: list[Target] = []
     restores: dict[str, int] = {}
@@ -309,7 +320,7 @@ def saturation_fade(cache: TransitionCache, request: MoveRequest, lights: list[T
     if (limit - current if up else current - limit) < MIN_STEP:
         return "at_limit"
     x, y = color_hs_to_xy(hs_color(movers[0])[0], limit)
-    duration = abs(limit - current) / 100 * request.sweep_time
+    duration = fade_seconds(abs(limit - current), request.sweep_time)
     params = {"color_x": round(x * 65535), "color_y": round(y * 65535), "transition_time": transition_tenths(duration)}
     command = (zcl.COLOR_CLUSTER, zcl.MOVE_TO_COLOR, params)
     return Fade(SATURATION, command, movers, starts, dict.fromkeys(starts, limit), duration)
