@@ -1166,6 +1166,9 @@ class Z2MHA(FakeHA):
 
 def native_control(turns_it_on: bool) -> Callable:
     def respond(ha, action, data):
+        # Z2M has get_attributes and set_attributes, so the snapshot reads the off light first; it stores nothing.
+        if action == "get_attributes":
+            return {}
         if turns_it_on:
             ha.options["hue_native_control"] = True
         return timer_on(ha, action, data)

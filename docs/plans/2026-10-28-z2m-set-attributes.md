@@ -146,3 +146,29 @@ Decided in the 2026-10-28 interview:
 - Rig: in a passing `set_attributes` run, the CT bulb, the group's members and the A60 stay off when written and
   come on at 40 % / 2700 K (red on the A60) in HA after a plain turn on. The min/max steps clamp lights that are
   on, and the response is `confirmed`.
+
+## Step 1 findings (probe, 2026-10-29)
+
+Unattended, from a scratchpad script: raw `command` payloads with the override, then Z2M's generic `read` with a
+`state_property`, and HA's state. Both Z2M bulbs had `hue_native_control` on unless stated.
+
+Herdsman's parameter names are as assumed: `level`, `colortemp`, `colorx`/`colory`, `hue`/`saturation`,
+`transtime`, `optionsMask`, `optionsOverride` (`src/zspec/zcl/definition/cluster.ts`).
+
+- **(a) HA off: passes on both bulbs.** With the light turned off through HA, a raw write of level 102 and 370 mireds
+  leaves it off, and HA shows nothing new. The live read returns 102 and 370, and Z2M's published state takes them
+  (`brightness: 102`, `color_temp: 370`) while HA still shows the light off. A plain HA `light.turn_on` then comes on
+  showing 102 and 370, and the bulb reads 102 and 370.
+- **(b) After a soft off: fails for brightness, on both `hue_native_control` settings.** After an HA off with a 2 s
+  transition, the write and the read go as in (a), and Z2M publishes `brightness: 102`. The plain on comes on at
+  254, the level from before the off, and the bulb reads 253; the color temperature is the stored 370. Cause:
+  Z2M's `light_onoff_brightness` converter keeps the pre-off brightness and a `turnedOffWithTransition` flag in its
+  `globalStore` on an off with a transition, and an on without a brightness restores that level with
+  `moveToLevelWithOnOff`. A raw command and a read update Z2M's published state, not that store; only an on or a
+  brightness through the converter does, and both turn the light on.
+- **(c) Groupcast: not run.** Both members of the rig's Z2M group were `unavailable` in HA for the whole probe.
+- **(d) Read-back values.** While on, the level and mireds read back exactly as written at every delay tried, from
+  0.2 s after the write (inside the 0.4 s fade) to 1.5 s: a Hue bulb on Z2M answers a read with the target, not the
+  mid-fade value, like the Hue bridge. So no fade wait is needed for the comparison. While off, they read back
+  exactly too. Red (xy 45914/19615) on the A60 reads back as 45317/20204, clamped to the gamut, on and off, so
+  color can't be compared.

@@ -92,37 +92,53 @@ class Reader:
     async def read(self, target: Target) -> dict:
         """The light's attributes from every cluster `clusters` names, merged, read one cluster after another.
 
-        An off light's CurrentLevel is not read but taken from Z2M's brightness, which the OnOff reply carries: that
-        is the level the light comes back at. The bulb's own isn't. After an off with a transition it holds the
-        minimum, and Z2M restores the level it kept on the next on; just after a plain off, a Hue bulb's own fade
-        still dims it. Reading it would also overwrite Z2M's brightness with it.
-
-        Raises when a read fails: at once when Z2M logs the error, else after the timeout.
+        CurrentLevel is the light's level as `_level` takes it. Raises when a read fails: at once when Z2M logs the
+        error, else after the timeout.
         """
         attributes: dict = {}
         state: dict = {}
-        # HA's light entity already subscribes to the state topic, so this subscription is live at once.
-        unsubscribe = await mqtt.async_subscribe(self.hass, state_topic(target), self._on_state)
-        try:
+        async with self._subscribed(target):
             for cluster, names in clusters(target).items():
-                if cluster == "genLevelCtrl" and not attributes["onOff"]:
-                    if (brightness := state.get("brightness")) is not None:
-                        attributes["currentLevel"] = brightness
+                if cluster == "genLevelCtrl":
+                    if (level := await self._level(target, attributes["onOff"], state)) is not None:
+                        attributes["currentLevel"] = level
                     continue
                 reply, state = await self._read(target, cluster, names)
                 attributes |= reply
-        finally:
-            unsubscribe()
         return attributes
+
+    async def level(self, target: Target) -> int | None:
+        """The light's level as `_level` takes it, after reading whether it is on; raises when a read fails."""
+        async with self._subscribed(target):
+            reply, state = await self._read(target, "genOnOff", ["onOff"])
+            return await self._level(target, reply["onOff"], state)
 
     async def read_cluster(self, target: Target, cluster: str, names: list[str]) -> dict:
         """These attributes of one cluster; raises when the read fails, as read does."""
+        async with self._subscribed(target):
+            reply, _state = await self._read(target, cluster, names)
+        return reply
+
+    async def _level(self, target: Target, on: bool, state: dict) -> int | None:
+        """CurrentLevel read live while the light is on; while off, Z2M's brightness from the state of the OnOff reply.
+
+        Z2M's brightness is the level an off light comes back at; the bulb's own isn't. After an off with a transition
+        it holds the minimum, and Z2M restores the level it kept on the next on; just after a plain off, a Hue bulb's
+        own fade still dims it. Reading it would also overwrite Z2M's brightness with it.
+        """
+        if not on:
+            return state.get("brightness")
+        reply, _state = await self._read(target, "genLevelCtrl", ["currentLevel"])
+        return reply["currentLevel"]
+
+    @asynccontextmanager
+    async def _subscribed(self, target: Target) -> AsyncIterator[None]:
+        # HA's light entity already subscribes to the state topic, so this subscription is live at once.
         unsubscribe = await mqtt.async_subscribe(self.hass, state_topic(target), self._on_state)
         try:
-            reply, _state = await self._read(target, cluster, names)
+            yield
         finally:
             unsubscribe()
-        return reply
 
     async def _read(self, target: Target, cluster: str, names: list[str]) -> tuple[dict, dict]:
         """The cluster's reply and the state Z2M published it in, over a subscription to the state topic."""
