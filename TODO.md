@@ -32,6 +32,9 @@ v0.1.0 is the next release.
 | 13e | ZHA `get_attributes` (experimental until the ZHA A60 run) | #114 |
 | 13h | Z2M `get_attributes` | #117 |
 | 13g | ZHA `set_attributes` (experimental until the ZHA A60 run) | #120 |
+| — | `Transition` cache moved to core, kept per integration | #118, #119 |
+| 13i | Z2M `move`/`stop` | #124 |
+| 14 | Z2M color modes fixed for HA, on by default | #126 |
 | — | Color temperature moves dropped on every integration: no halt of a Hue bulb's fade is clean | #125 |
 
 ## To go, in order
