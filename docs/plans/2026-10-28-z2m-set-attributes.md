@@ -181,3 +181,33 @@ Herdsman's parameter names are as assumed: `level`, `colortemp`, `colorx`/`color
   soft group off does the same for every member; without it, the group's plain on came back at 254.
 
 **Decision (2026-10-29):** the adapter publishes that payload after every level it writes, to the same topic.
+
+## Handoff (2026-10-29)
+
+Branch `wt/z2m-set-attributes` (worktree `.worktrees/z2m-set-attributes`), not pushed. Steps 0–4 are done.
+
+**Done, beyond what the steps say:**
+- The adapter publishes `{"state": null, "brightness": L, "transition": 0.4}` after every level it writes
+  (`_kept_level`), to the same topic as the raw commands (finding e).
+- There is no fade wait before the read-back: the bulbs answer with the target mid-fade (finding d).
+- `Reader.level(target)` is factored out of `Reader.read`, and the old `read_cluster`/`read` subscriptions share
+  `Reader._subscribed`.
+- Other changes:
+  - `services.yaml`: the `set_attributes` target filter lists `mqtt`.
+  - `tests/fixtures/z2m.py`: the `Broker` fake stores raw MoveTo commands, sent to a device or a group, unless the
+    IEEE is in `ignores_override`.
+  - `tests/scripts/test_rig_engine.py`: the Z2M option tests' fake answers `get_attributes`, because Z2M now has
+    both adapters, so the snapshot reads off lights.
+- New rig case `sets_after_a_soft_off` (light_ct and group). It also runs on Hue and ZHA, where it has never been
+  tried. ZHA's HA light may keep its own pre-off brightness the same way, unverified.
+- Full suite passes. Coverage: the Z2M adapter 99%, `core/zcl_write.py` 100%, and `check_release.py --coverage`
+  passes.
+
+**Left:**
+- **Step 5, the rig run.** Ask Jason first: rig runs are not pre-authorized after 2026-10-28. Then run
+  `scripts/rig.py --action set_attributes` in the background. If `sets_after_a_soft_off` fails on Hue or ZHA,
+  that is a new finding for Jason, not this slice's to fix. Write `docs/bench/zigbee2mqtt/set_attributes.md`.
+- **Step 6, the docs.** In `docs/integrations.md`'s Z2M `set_attributes` section, add the kept-level payload and
+  why (finding b/e). A soft off is no longer a sharp edge for Z2M.
+- **Step 7, landing it.** Run `/audit-code` on the diff, then open the PR into `release/v0.0.2` and merge with
+  `merge-green`. Tick 13j in `TODO.md` and add its "Done since v0.0.1" row.

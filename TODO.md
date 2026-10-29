@@ -46,6 +46,8 @@ and Hue (from the A60 move on). The rig lock and the bulb moves are shared.
 - [x] **`Transition` to core**: refactor PR moving `hue/transition_cache.py` into `core/`. Unblocks 13i and 13f.
 - [x] **13i** Z2M `move`/`stop`, with the hue/saturation stop probe on the A60.
 - [ ] **13j** Z2M `set_attributes` while off. Z2M code freezes.
+  In progress on `wt/z2m-set-attributes`: steps 0–4 done; rig run, docs and PR left (handoff in
+  [`2026-10-28-z2m-set-attributes.md`](docs/plans/2026-10-28-z2m-set-attributes.md)).
 - [x] **14** Z2M color modes fixed for HA, on by default, and 13i's xy write-back backed out
   ([`2026-10-28-z2m-color-modes.md`](docs/plans/2026-10-28-z2m-color-modes.md)). Counts toward the Z2M freeze.
 - [ ] **Z2M A60 run** (13k step 1): full Z2M suite, bulb in place. Clears `experimental` on the Z2M adapters it
