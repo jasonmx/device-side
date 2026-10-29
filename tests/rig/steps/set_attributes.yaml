@@ -2,12 +2,26 @@
 # A room is written light by light, so on the group role the response and expect_state cover every member.
 # Color steps run on the light_color role only.
 action: set_attributes
-rig_seconds: 85
+rig_seconds: 105
 tests:
   - name: sets_while_off  # §3.1
     roles: [light_ct, group]
     steps:
       - set: {state: off}
+      - call: {brightness: 40, color_temp_kelvin: 2700}
+      - expect_response: {status: expected, integration: self}
+      - wait: 1
+      - expect_state: {state: off}
+      - set: {state: on}
+      - expect_state: {brightness: {min: 100, max: 104}, color_temp_kelvin: {min: 2650, max: 2750}, within: tol}
+
+  # After an off with a transition, Zigbee2MQTT keeps the level from before it for the next plain on (probe 13j).
+  - name: sets_after_a_soft_off
+    roles: [light_ct, group]
+    steps:
+      - set: {state: on, brightness_pct: 100}
+      - set: {state: off, transition: 2}
+      - wait: 3
       - call: {brightness: 40, color_temp_kelvin: 2700}
       - expect_response: {status: expected, integration: self}
       - wait: 1
