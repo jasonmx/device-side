@@ -62,6 +62,46 @@ point the ramp had reached (timed at the middle of the read's round trip), and r
 says has nothing to do is planned again from HA's state. A live read before every move (about 0.2 s) was rejected
 for its latency.
 
+## Status and handoff (2026-10-29)
+
+Steps 1–7 are built and pushed on `wt/zha-move-stop` (`655693f`, base `release/v0.0.2` with #124 and #125 merged
+in): 995 tests pass, ZHA modules at 100 % coverage, `/audit-code` done and its fixes in `a538aa5`. The ramp fit
+(`sync_to_bulb` in `zha/move.py`) and the rig's group sample fix (`reading()` in `tests/rig/engine.py` averages an
+expanded ZHA group's members) came after the audit, so give those two commits a short re-audit. Step 8 is open: no
+passing rig run, no bench records, no PR. Watched probes (b) and (c) were never run.
+
+**Second rig run (2026-10-29, `move` and `stop` on ZHA, `655693f`):** every `light_ct` case that failed on
+2026-10-28 passes. 12 cases failed:
+
+- **All 10 `group` failures: the E11-G13 member stopped answering.** It stays "available" and is seen now and
+  then, but a live OnOff read times out (15 s; HA logged `get_attributes on zha timed out after 30s` five times), and
+  the coordinator at times refused sends with `Failed to enqueue message: <sl_Status.BUSY: 4>`, likely from retries
+  to that bulb. Not a code fault. Jason to power-cycle or re-pair it; confirm it answers reads (a scratchpad read,
+  or `get_attributes` on the member) before the next run.
+- **Two `light_ct` cases, not yet explained:** `raise_from_off` predicted about 75 % at its first sample, where it
+  should start near 0 (`max: 50`); `halts_a_move` (10 %, up over a 10 s sweep, stop at 3 s, `max: 78`) held at 85 %.
+  Both mean the ramp fit set the start well above where the case's setup left the bulb. Two candidate causes:
+  1. The radio jam above delayed the commands and the read, so the read's midpoint timing was wrong and the fit
+     (which divides by `1 − f`) amplified it. Then a rerun with a healthy group fixes it.
+  2. The fit is right: the setup's own HA fade (to off, or to 10 %) was still running when the move started, so
+     the bulb really was that high. Then the cases need a settle wait after setup, or the fit must not trust a read
+     while a fade from elsewhere runs. The first run passed only because the prediction ignored the bulb.
+
+**Next, in order:**
+
+1. Ask Jason before any rig run or probe (pre-authorization covered 2026-10-27/28 only).
+2. With his OK, a short single-bulb probe on `light_ct` (about 2 min, unattended): replay the two setups, then the
+   move, logging the live CurrentLevel every 0.2 s against the prediction. It tells cause 1 from cause 2. Fix
+   accordingly; ask Jason if the fit's design has to change.
+3. Once the E11-G13 answers reads: rerun `scripts/rig.py --action move --action stop --integration zha` in the
+   background. The `light_color` cases skip until the A60 is on ZHA. Investigate `stop_when_idle[group]` if it fails
+   again (2026-10-28: brightness moved 128 → 84; 2026-10-29: 128 → 191 → 149), which suggests the group's refresh
+   on a stop with nothing moving changes its reading.
+4. On a pass: write `docs/bench/zha/move.md` and `stop.md` (non-color scope, citing the commit HA loaded), tick 13f
+   in `TODO.md`, pytest and pre-commit, PR into `release/v0.0.2`, `merge-green <n> --squash --delete-branch` in the
+   background, then remove the worktree and fast-forward the main checkout.
+5. Optional, at Jason's go: watched (b) and (c).
+
 ## 1. `zha/zcl.py` helpers
 
 Add the constants: `MOVE_TO_LEVEL_WITH_ON_OFF = 0x04`, `STOP = 0x03`, `ENHANCED_MOVE_HUE = 0x41`,
