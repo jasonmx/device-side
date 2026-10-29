@@ -166,9 +166,18 @@ Herdsman's parameter names are as assumed: `level`, `colortemp`, `colorx`/`color
   `globalStore` on an off with a transition, and an on without a brightness restores that level with
   `moveToLevelWithOnOff`. A raw command and a read update Z2M's published state, not that store; only an on or a
   brightness through the converter does, and both turn the light on.
-- **(c) Groupcast: not run.** Both members of the rig's Z2M group were `unavailable` in HA for the whole probe.
+- **(c) Groupcast: passes.** With every member off after a plain group off, one raw command per field to the group
+  topic is stored by each member (each reads 102 and 370), and the group's plain on brings both members up at them.
 - **(d) Read-back values.** While on, the level and mireds read back exactly as written at every delay tried, from
   0.2 s after the write (inside the 0.4 s fade) to 1.5 s: a Hue bulb on Z2M answers a read with the target, not the
   mid-fade value, like the Hue bridge. So no fade wait is needed for the comparison. While off, they read back
   exactly too. Red (xy 45914/19615) on the A60 reads back as 45317/20204, clamped to the gamut, on and off, so
   color can't be compared.
+- **(e) The fix for (b): Z2M's own brightness with the state kept.** The converter's documented way to keep the
+  state is `"state": null`. `{"state": null, "brightness": 102, "transition": 0.4}`, published after the raw write,
+  replaces the kept level and clears `turnedOffWithTransition`. The plain `moveToLevel` it sends carries no override,
+  so the off bulb ignores it and stays off (`onOff` reads 0). The plain on after a soft off then comes on at 102 and
+  370, on both bulbs, with `hue_native_control` on and off. On the group, the same payload to the group topic after a
+  soft group off does the same for every member; without it, the group's plain on came back at 254.
+
+**Decision (2026-10-29):** the adapter publishes that payload after every level it writes, to the same topic.

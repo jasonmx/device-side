@@ -63,6 +63,15 @@ def sent(broker) -> list[tuple[str, dict]]:
     return [(p["topic"], p["payload"]) for p in broker.published if "command" in p["payload"]]
 
 
+def kept(broker) -> list[tuple[str, dict]]:
+    """Each brightness sent through Z2M's own converter, to replace the level it keeps."""
+    return [(p["topic"], p["payload"]) for p in broker.published if "brightness" in p["payload"]]
+
+
+def keep(value: int) -> dict:
+    return {"state": None, "brightness": value, "transition": 0.4}
+
+
 def reads(broker) -> list[tuple[str, str, list]]:
     return [(topic, read["cluster"], read["attributes"]) for topic, read in broker.reads()]
 
@@ -112,6 +121,23 @@ async def test_writes_with_the_override_and_reads_it_back(hass, broker, data, mo
     assert response == {"light.lamp": CONFIRMED}
     assert sent(broker) == [(SET, payload) for payload in expected]
     assert reads(broker) == [(SET, cluster, names) for cluster, names in read_back]
+
+
+async def test_a_level_also_replaces_the_level_z2m_keeps(hass, broker):
+    bulb(hass, broker, modes=CT, on=False)
+
+    await call(hass, "set_attributes", {"entity_id": "light.lamp", "brightness": 40, "color_temp_kelvin": 2700})
+
+    published = [p["payload"] for p in broker.published if p["topic"] == SET and "read" not in p["payload"]]
+    assert published == [level(102), mireds(370), keep(102)]
+
+
+async def test_no_level_keeps_nothing(hass, broker):
+    bulb(hass, broker, modes=CT, on=False)
+
+    await call(hass, "set_attributes", {"entity_id": "light.lamp", "color_temp_kelvin": 2700})
+
+    assert kept(broker) == []
 
 
 async def test_the_read_back_puts_the_stored_values_into_z2ms_state(hass, broker):
@@ -271,6 +297,7 @@ async def test_a_group_is_one_groupcast_read_back_from_every_member(hass, broker
 
     assert response == {"light.room": CONFIRMED}
     assert sent(broker) == [(GROUP_SET, level(102)), (GROUP_SET, mireds(370))]
+    assert kept(broker) == [(GROUP_SET, keep(102))]
     assert reads(broker) == [
         ("zigbee2mqtt/0x01/set", "genLevelCtrl", ["currentLevel"]),
         ("zigbee2mqtt/0x01/set", "lightingColorCtrl", ["colorMode", "colorTemperature"]),
@@ -296,6 +323,7 @@ async def test_a_group_clamps_each_member_from_its_own_level(hass, broker):
     assert response == {"light.room": CONFIRMED}
     # light.one at 127 is within the limit; light.two comes back at 254, so it is lowered.
     assert sent(broker) == [("zigbee2mqtt/0x02/set", level(152))]
+    assert kept(broker) == [("zigbee2mqtt/0x02/set", keep(152))]
 
 
 async def test_a_group_whose_members_are_all_within_limits_is_unchanged(hass, broker):

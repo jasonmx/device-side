@@ -48,6 +48,16 @@ def _wire(command: Command) -> dict:
     return {"command": {"cluster": cluster, "command": name, "payload": {**params, **_EXECUTE_IF_OFF}}}
 
 
+def _kept_level(level: int) -> dict:
+    """Z2M's own brightness payload with the state kept (null), so the next plain on comes on at the level written.
+
+    After an off with a transition, Z2M keeps the level from before it and restores it on the next on that carries no
+    brightness; a raw command doesn't touch what it keeps. This payload replaces the kept level and sends a MoveToLevel
+    without the override, which a light that is off ignores, so it stays off (probe 13j, either hue_native_control).
+    """
+    return {"state": None, "brightness": level, "transition": 0.4}
+
+
 def _modes(target: Target) -> set[str]:
     # supported_color_modes stays in the state while the light is off.
     return set((target.state and target.state.attributes.get("supported_color_modes")) or ())
@@ -173,5 +183,7 @@ class Z2MSetAttributes(Adapter[SetAttributesRequest]):
             return False, True, dropped
         for command in sent:
             await publish(hass, topic(to, "set"), _wire(command))
+        if (level := next((c.level for c in sent if isinstance(c, MoveToLevel)), None)) is not None:
+            await publish(hass, topic(to, "set"), _kept_level(level))
         stored = [await _stored(reading, light, sent) for light in lights]
         return True, all(stored), dropped
