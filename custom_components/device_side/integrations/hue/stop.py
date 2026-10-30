@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, ClassVar
 from homeassistant.core import HomeAssistant
 
 from .bridge import bridge_api, controller, put, resource_id, stops
-from .move import in_soft_off, light_brightness, lit, reported_brightness, room_lights
+from .fade import in_soft_off, light_brightness, lit, reported_brightness, room_lights
 from .report_filter import report_filter
 from .transition_cache import transition_cache
 from ...core.adapter import Adapter

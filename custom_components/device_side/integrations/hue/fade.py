@@ -1,4 +1,5 @@
-"""Hue move: one brightness write to the light or room, with the end point and a duration the bridge runs alone."""
+"""Hue raise_brightness and lower_brightness: one brightness write to the light or room, with the end point and a
+duration the bridge runs alone."""
 
 from dataclasses import dataclass
 from statistics import mean
@@ -9,7 +10,7 @@ from homeassistant.core import HomeAssistant
 from .bridge import bridge_api, controller, resource_id
 from .report_filter import report_filter
 from .transition_cache import MIN_BRIGHTNESS_STEP, transition_cache
-from ...actions.move import UP, MoveRequest
+from ...actions.ramp import RampRequest
 from ...core.adapter import Adapter
 from ...core.models import EntityResult, Status, Target
 from ...core.scope import AdapterScope
@@ -21,7 +22,6 @@ if TYPE_CHECKING:
     from aiohue.v2 import HueBridgeV2
     from aiohue.v2.controllers.groups import GroupedLightController
     from aiohue.v2.controllers.lights import LightsController
-    from aiohue.v2.models.grouped_light import GroupedLight
     from aiohue.v2.models.light import Light
 
 
@@ -63,7 +63,7 @@ class Fade:
     duration: float
 
 
-class HueMove(Adapter[MoveRequest]):
+class HueBrightnessFade(Adapter[RampRequest]):
     """Write the brightness limit (or range end) with a duration for the distance left; the bridge runs the fade.
 
     Predictions live per light (transition_cache), so a move after a stop continues from where the light halted. A
@@ -71,29 +71,28 @@ class HueMove(Adapter[MoveRequest]):
     transition is recorded from its own start, and the room's start is the average of its lit lights, so moving one
     light mid room-move starts from where it really is.
 
-    Up turns the light on. Down to 0 % is a plain soft off, on: false with the duration and no brightness, so the
-    bridge keeps the stored brightness for the next plain on. A light the bridge says can't dim drops brightness. A
-    light already at or past the limit is unchanged with at_limit and nothing is sent. With predicted_state on, HA
-    holds the start brightness while the fade runs and shows the end once it has (report_filter).
+    Raising turns the light on. Lowering to 0 % is a plain soft off, on: false with the duration and no brightness, so
+    the bridge keeps the stored brightness for the next plain on. A light the bridge says can't dim is unchanged with
+    fields_dropped. A light already at or past the limit is unchanged with at_limit and nothing is sent. With
+    predicted_state on, HA holds the start brightness while the fade runs and shows the end once it has (report_filter).
     """
 
-    action: ClassVar[str] = "move"
     integration: ClassVar[str] = "hue"
     scope: ClassVar[AdapterScope] = AdapterScope(
         experimental=True,
-        fields=frozenset({"brightness", "brightness_limit"}),
+        fields=frozenset({BRIGHTNESS}),
         options=frozenset({"predicted_state"}),
         native_groups=True,
     )
 
-    def supports(self, hass: HomeAssistant, request: MoveRequest, target: Target) -> str | None:
+    def supports(self, hass: HomeAssistant, request: RampRequest, target: Target) -> str | None:
         if (reason := super().supports(hass, request, target)) is not None:
             return reason
         if bridge_api(target) is None:
             return "bridge_v1"
         return None
 
-    async def execute(self, hass: HomeAssistant, request: MoveRequest, targets: list[Target]) -> list[EntityResult]:
+    async def execute(self, hass: HomeAssistant, request: RampRequest, targets: list[Target]) -> list[EntityResult]:
         cache = transition_cache(hass)
 
         async def send(target: Target) -> EntityResult:
@@ -102,29 +101,19 @@ class HueMove(Adapter[MoveRequest]):
             rid = resource_id(target)
             if (resource := writer.get(rid)) is None:
                 return self.result(target, Status.REJECTED, detail="not_on_bridge")
-            dropped = lacked(request, resource)
-            move = request.without(dropped)
-            if not move.brightness:
+            if resource.dimming is None:
                 return self.result(target, Status.UNCHANGED, detail="fields_dropped")
-            if isinstance(fade := brightness_fade(cache, move, target, api), str):
+            if isinstance(fade := brightness_fade(cache, request, target, api), str):
                 return self.result(target, Status.UNCHANGED, detail=fade)
-            write = fade_write(writer, rid, fade, move.brightness == UP)
+            write = fade_write(writer, rid, fade, request.up)
             async with cache.recording((light_id, fade.attribute) for light_id in fade.starts):
                 for light_id, start in fade.starts.items():
                     cache.moving(light_id, fade.attribute, start, fade.ends[light_id], fade.duration)
                 await write
             report_filter(hass, target).fading(fade.attribute, fade.ends, fade.duration)
-            return self.result(target, Status.SENT, detail="fields_dropped" if dropped else None)
+            return self.result(target, Status.SENT)
 
         return await self.gather(hass, targets, send)
-
-
-def lacked(request: MoveRequest, resource: Light | GroupedLight) -> frozenset[str]:
-    """The attributes the bridge says the light or room can't move, with their limits, which the move drops."""
-    lacked: set[str] = set()
-    if resource.dimming is None:
-        lacked |= {"brightness", "brightness_limit"}
-    return request.fields_present() & lacked
 
 
 def fade_write(writer: LightsController | GroupedLightController, rid: str, fade: Fade, up: bool) -> Awaitable:
@@ -134,14 +123,13 @@ def fade_write(writer: LightsController | GroupedLightController, rid: str, fade
     return writer.set_state(rid, on=True if up else None, brightness=fade.target, transition_time=transition_time)
 
 
-def brightness_fade(cache: TransitionCache, request: MoveRequest, target: Target, api: HueBridgeV2) -> Fade | str:
+def brightness_fade(cache: TransitionCache, request: RampRequest, target: Target, api: HueBridgeV2) -> Fade | str:
     """The brightness fade toward the limit, or at_limit when there is none left to make."""
-    up = request.brightness == UP
-    limit = request.brightness_limit if request.brightness_limit is not None else (100.0 if up else 0.0)
+    up, limit = request.up, request.end()
     if target.is_group:
         lights = room_lights(api, target)
         starts = {light.id: light_brightness(cache, light) for light in lights}
-        # Up turns every light on, so the off ones fade in from the bottom; other moves pass them by.
+        # Raising turns every light on, so the off ones fade in from the bottom; lowering passes them by.
         lit_lights = lit(cache, lights)
         moving = [light.id for light in (lights if up else lit_lights)]
         current = mean(starts[light.id] for light in lit_lights or lights) if lights else 0.0

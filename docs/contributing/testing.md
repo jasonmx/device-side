@@ -53,7 +53,7 @@ ZHA and Zigbee2MQTT are the exceptions. ZHA's cluster command is an admin-only a
 the caller's context through to it, so a non-admin token is refused. The Zigbee2MQTT suites set and read Z2M
 device options over MQTT, which only an admin may. Put an admin user's token in `HA_ADMIN_TOKEN`: those suites run
 on it and every other suite stays on `HA_TOKEN`. Without it, a run that includes either stops before the gate;
-`--integration` or `--action` leaves them out. Suites whose adapter has options (Hue `move` and `stop`) need it too, to set them
+`--integration` or `--action` leaves them out. Suites whose adapter has options (Hue `raise_brightness`, `lower_brightness` and `stop`) need it too, to set them
 (below).
 
 ### Writing a step file
@@ -82,7 +82,7 @@ tests:
 | `expect_state` | Checks state and attributes now, or `within` seconds. `unchanged` is the state before the test. A `{min, max}` range fits values that drift. On a `group` it checks every member. |
 | `expect_matches_read` | Checks that HA's state of each of `attributes` (dotted: `xy_color.0`) is within `tolerance` of a live `device_side.get_attributes` read, now or `within` seconds. On a `group` it checks every member. |
 | `wait` | Sleeps. |
-| `sample` | Polls `attribute` for `for` seconds and expects it `rising`, `falling` or `steady` (brightness may spread one Zigbee level step, 1/254, as a bulb settles after a stop), optionally within `min`/`max`. `source: device_side` reads `device_side.get_attributes` instead of HA's state, in its units (brightness in percent), for a fade HA shows only the end of. |
+| `sample` | Polls `attribute` (dotted: `hs_color.1`) for `for` seconds and expects it `rising`, `falling` or `steady` (brightness may spread one Zigbee level step, 1/254, as a bulb settles after a stop), optionally within `min`/`max`. `source: device_side` reads `device_side.get_attributes` instead of HA's state, in its units (brightness in percent), for a fade HA shows only the end of. |
 | `do` | Prints an instruction for the person and waits for Enter. Only in the `setup` of an observed test. |
 | `restore` | Puts back the state from before the test. It also runs after every test, pass or fail. |
 | `bridge` | Hue only: writes to the Hue bridge directly, bypassing Home Assistant, as another actor (the Hue app) would. `put: {...}` sends that CLIP v2 body to the target's light (a `group` target's grouped_light); `recall: true` recalls the `scene` target. In an observed run it runs as written. It needs `HUE_BRIDGE_HOST` and `HUE_APP_KEY` in `.env.rig`, and fails in any other integration's suite. |
@@ -99,7 +99,7 @@ An adapter with options runs each file for its action with them pinned through D
 Its record is `<action>-<name>.md`, with an `Options` row. The rig's own options are put back when the run ends.
 
 An integration in `SETTLE_S` (`tests/rig/inventory.py`) predicts a light's brightness for a while after a
-`move` or `stop`, so a later test on that light waits until it reads the device again.
+raise, lower or `stop`, so a later test on that light waits until it reads the device again.
 
 ### Observed tests
 

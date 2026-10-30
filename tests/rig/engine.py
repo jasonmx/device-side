@@ -50,10 +50,13 @@ SETUP_SETTLE_S = 2.0
 # How long after saving options the engine waits before checking the entry has reloaded.
 OPTIONS_RELOAD_S = 1.0
 
-# Actions whose calls leave a prediction behind (SETTLE_S), and move's default sweep_time (actions/move.py
-# DEFAULT_SWEEP_TIME), the longest a move without one can run.
-_PREDICTED = frozenset({"move", "stop"})
-MOVE_SWEEP_TIME_S = 5.0
+# Actions whose calls leave a prediction behind (SETTLE_S): the raises and lowers, which run for up to their
+# sweep_time (default: actions/ramp.py DEFAULT_SWEEP_TIME), and stop.
+_RAMPS = frozenset(
+    f"{direction}_{attribute}" for direction in ("raise", "lower") for attribute in ("brightness", "saturation", "hue")
+)
+_PREDICTED = _RAMPS | {"stop"}
+SWEEP_TIME_S = 5.0
 
 
 class SchemaError(ValueError):
@@ -1052,10 +1055,10 @@ class _CaseRun:
         await self.mark_busy(action, data)
 
     async def mark_busy(self, action: str, data: dict) -> None:
-        """After a move or stop, hold its lights until the predictions it left expire (see await_settled)."""
+        """After a raise, lower or stop, hold its lights until the predictions it left expire (see await_settled)."""
         if not self.settle or action not in _PREDICTED:
             return
-        sweep = data.get("sweep_time", MOVE_SWEEP_TIME_S) if action == "move" else 0.0
+        sweep = data.get("sweep_time", SWEEP_TIME_S) if action in _RAMPS else 0.0
         until = asyncio.get_running_loop().time() + sweep + self.settle
         for member in await self.members(data["entity_id"]):
             self.busy[member] = max(self.busy.get(member, 0.0), until)
@@ -1156,7 +1159,8 @@ class _CaseRun:
         await asyncio.sleep(max(seconds.eval(self.names), 0))
 
     async def _sample(self, args: dict, _following: str | None) -> None:
-        """Poll an attribute for `for` seconds; an absent attribute (a light that is off) reads as 0.
+        """Poll an attribute (dotted, as _lookup reads one) for `for` seconds; an absent attribute (a light that is
+        off) reads as 0.
 
         `source: device_side` reads device_side.get_attributes instead of HA's state, in its units (brightness in
         percent): mid-move it predicts where the light is, where HA shows a Hue fade's end value at once.
@@ -1191,11 +1195,11 @@ class _CaseRun:
     async def reading(self, entity_id: str, attribute: str, source: str) -> Any:
         if source == "ha":
             state = await self.ha.get_state(entity_id)
-            return state["attributes"].get(attribute) if state else None
+            return _lookup(state["attributes"], attribute) if state else None
         response = await self.ha.call_service(
             "device_side", "get_attributes", {"entity_id": entity_id}, return_response=True
         )
-        return ((response or {}).get(entity_id) or {}).get(attribute)
+        return _lookup((response or {}).get(entity_id) or {}, attribute)
 
     async def _do(self, instruction: str, _following: str | None) -> None:
         await self.answer(f"    {instruction} Press Enter when done... ")

@@ -1,26 +1,26 @@
-# hue_dimmer tests/RELEASE_CHECKLIST.md §2.5 and §2.6 from the stop side; move.yaml checks the move that follows.
-# Samples after a move read device_side (Hue's prediction, Zigbee2MQTT's live read), in percent: HA shows a fade's
-# end value at once.
+# hue_dimmer tests/RELEASE_CHECKLIST.md §2.5 and §2.6 from the stop side; raise_brightness.yaml and
+# lower_brightness.yaml check the move that follows. Samples after a raise or lower read device_side (Hue's
+# prediction, Zigbee2MQTT's live read), in percent: HA shows a fade's end value at once.
 action: stop
-rig_seconds: 320
+rig_seconds: 360
 tests:
-  - name: halts_a_move  # §2.5; the hold is watched in move.yaml's raise_stop_raise
+  - name: halts_a_raise  # §2.5; the hold is watched in raise_brightness.yaml's raise_stop_raise
     roles: [light_ct, group]
     setup:
       - set: {state: on, brightness_pct: 10}
     steps:
-      - call: {action: move, brightness: up, sweep_time: 10}
+      - call: {action: raise_brightness, sweep_time: 10}
       - wait: 3
       - call: {}
       - expect_response: {status: expected, integration: self}
       - sample: {attribute: brightness, for: 4, expect: steady, max: 78, source: device_side}
 
-  - name: halts_a_move_to_off  # Hue refuses a dimming stop during a soft off, so it is cut with on + brightness
+  - name: halts_a_lower_to_off  # Hue refuses a dimming stop during a soft off, so it is cut with on + brightness
     roles: [light_ct, group]
     setup:
       - set: {state: on, brightness_pct: 100}
     steps:
-      - call: {action: move, brightness: down, sweep_time: 10}
+      - call: {action: lower_brightness, sweep_time: 10}
       - wait: 3
       - call: {}
       - expect_response: {status: expected, integration: self}
@@ -46,7 +46,7 @@ tests:
     setup:
       - set: {state: on, brightness_pct: 70, hs_color: [30, 90]}
     steps:
-      - call: {action: move, hue: up, sweep_time: 20}  # 18° a second: about 84° after 3 s
+      - call: {action: raise_hue, sweep_time: 20}  # 18° a second: about 84° after 3 s
       - wait: 3
       - call: {}
       - expect_response: {status: expected, integration: self}
@@ -64,7 +64,7 @@ tests:
     setup:
       - set: {state: on, brightness_pct: 70, hs_color: [200, 90]}
     steps:
-      - call: {action: move, saturation: down, sweep_time: 10}  # 9 % a second: about 63 % after 3 s
+      - call: {action: lower_saturation, sweep_time: 10}  # 9 % a second: about 63 % after 3 s
       - wait: 3
       - call: {}
       - expect_response: {status: expected, integration: self}
@@ -75,3 +75,52 @@ tests:
       see: 'The light at hue 200° (sky blue), 90 % saturation, paling at 9 % a second, stopped after 3 s near 63 %.'
       watch: 'The stop: it holds, with no drift on toward white and no jump a second later.'
       ask: Did it stop part way pale and hold there, with no drift or jump?
+
+  # One stop halting a brightness and a color move. A Hue bulb's brightness and color temperature stop let the color
+  # carry on (docs/plans/2026-10-28-z2m-move-stop.md), so each attribute is held to its own halt. The color move starts
+  # 1 s after the brightness one, as a second button would.
+  - name: halts_brightness_and_saturation
+    roles: [light_color]
+    only: [zigbee2mqtt]
+    setup:
+      - set: {state: on, brightness_pct: 20, hs_color: [200, 90]}
+    steps:
+      # 10 % a second for 3 s and 2 s: about 50 % brightness and 70 % saturation at the stop
+      - call: {action: raise_brightness, sweep_time: 10}
+      - wait: 1
+      - call: {action: lower_saturation, sweep_time: 10}
+      - wait: 2
+      - call: {}
+      - expect_response: {status: expected, integration: self}
+      - expect_matches_read: {attributes: [xy_color.0, xy_color.1], tolerance: 0.01, within: 3}
+      - expect_state: {state: on, hs_color.1: {min: 60, max: 82}}
+      - sample: {attribute: brightness, for: 3, expect: steady, min: 38, max: 70, source: device_side}
+      - expect_matches_read: {attributes: [xy_color.0, xy_color.1], tolerance: 0.01}
+      - expect_state: {state: on, hs_color.1: {min: 60, max: 82}}
+    observe:
+      see: 'The light at 20 % (level 51), hue 200° (sky blue) at 90 % saturation, brightening 10 % a second; 1 s in it starts paling 10 % a second. Both stop at 3 s, near 50 % (level 128) and 70 % saturation.'
+      watch: 'The stop and the 2 s after it: brightness and color both freeze at once, with no color carrying on, no flash and no jump a second later.'
+      ask: Did brightness and color both stop together and hold, with no drift, flash or jump?
+
+  - name: halts_brightness_and_hue
+    roles: [light_color]
+    only: [zigbee2mqtt]
+    setup:
+      - set: {state: on, brightness_pct: 20, hs_color: [30, 90]}
+    steps:
+      # 5 % a second for 3 s and 18° a second for 2 s: about 35 % brightness and hue 66° at the stop
+      - call: {action: raise_brightness, sweep_time: 20}
+      - wait: 1
+      - call: {action: raise_hue, sweep_time: 20}
+      - wait: 2
+      - call: {}
+      - expect_response: {status: expected, integration: self}
+      - expect_matches_read: {attributes: [xy_color.0, xy_color.1], tolerance: 0.01, within: 3}
+      - expect_state: {state: on, hs_color.0: {min: 54, max: 78}}
+      - sample: {attribute: brightness, for: 3, expect: steady, min: 25, max: 50, source: device_side}
+      - expect_matches_read: {attributes: [xy_color.0, xy_color.1], tolerance: 0.01}
+      - expect_state: {state: on, hs_color.0: {min: 54, max: 78}}
+    observe:
+      see: 'The light at 20 % (level 51), hue 30° (orange) at 90 % saturation, brightening 5 % a second; 1 s in it starts turning toward yellow at 18° a second. Both stop at 3 s, near 35 % (level 89) and hue 66° (yellow).'
+      watch: 'The stop and the 2 s after it: brightness and hue both freeze at once, with no hue carrying on, no flash and no jump a second later.'
+      ask: Did brightness and hue both stop together and hold, with no drift, flash or jump?

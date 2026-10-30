@@ -1,0 +1,88 @@
+# hue_dimmer tests/RELEASE_CHECKLIST.md §2 as steps, raising; lower_brightness.yaml has the rest, and stop.yaml stopping
+# a lower to off. Each test runs on a lamp and then a room; on the room, expect_state checks every member light.
+# HA shows a fade's end value at once, so samples read device_side: Hue's prediction, Zigbee2MQTT's live read, in
+# percent. Zigbee2MQTT doesn't notice a change from elsewhere mid-fade.
+action: raise_brightness
+rig_seconds: 520
+tests:
+  - name: raise  # §2.1
+    roles: [light_ct, group]
+    setup:
+      - set: {state: on, brightness_pct: 20}
+    steps:
+      - call: {sweep_time: 5}
+      - expect_response: {status: expected, integration: self}
+      - sample: {attribute: brightness, for: 3, expect: rising, source: device_side}
+      # HA may end on a bulb's mid-ramp report (Tested behavior), so read the prediction.
+      - wait: 1 + tol
+      - sample: {attribute: brightness, for: 0.5, expect: steady, min: 99, source: device_side}
+    observe:
+      see: The light at 20 %, climbing to full over 5 s.
+      watch: Steps or flashes on the way up.
+      ask: Did brightness climb smoothly to 100%, with no steps or flashes?
+
+  - name: raise_from_off  # §2.3; the start is watched in raise_after_soft_off
+    roles: [light_ct, group]
+    setup:
+      - set: {state: off}
+    steps:
+      - call: {sweep_time: 5}
+      - sample: {attribute: brightness, for: 1, expect: rising, max: 50, source: device_side}
+
+  - name: raise_after_soft_off  # a plain soft off keeps the stored brightness: does the next raise start there?
+    roles: [light_ct, group]
+    setup:
+      - set: {state: on, brightness_pct: 60}
+      - call: {action: lower_brightness, sweep_time: 3}
+      - expect_state: {state: off, within: 2 + tol}
+      - wait: 2
+    steps:
+      - call: {sweep_time: 10}
+      - wait: 3
+      - call: {action: stop}
+    observe:
+      see: The light, just faded off from 60 %, climbing slowly, stopped after 3 s.
+      watch: 'Where it holds: about a third of full means it climbed from the bottom; about three quarters means it jumped to 60 % first.'
+      ask: Did it light low and hold at about a third of full, rather than jump up first and hold near three quarters?
+
+  - name: raise_stop_raise  # §2.5
+    roles: [light_ct, group]
+    setup:
+      - set: {state: on, brightness_pct: 10}
+    steps:
+      - call: {sweep_time: 10}
+      - wait: 3
+      - call: {action: stop}
+      - expect_response: {status: expected}
+      - sample: {attribute: brightness, for: 4, expect: steady, source: device_side}
+      - call: {sweep_time: 10}
+      - sample: {attribute: brightness, for: 2, expect: rising, max: 78, source: device_side}
+    observe:
+      see: 'The light at 10 %: a slow climb for 3 s, a 4 s hold, then the climb again.'
+      watch: 'The hold and the restart: no drift while held, no jump when it resumes.'
+      ask: Did it hold where it stopped, then continue from that point?
+
+  - name: ha_change_mid_raise  # a light.turn_on from HA drops the prediction, so the next lower starts from it
+    roles: [light_ct, group]
+    only: [hue]
+    setup:
+      - set: {state: on, brightness_pct: 20}
+    steps:
+      - call: {sweep_time: 10}
+      - wait: 2
+      - set: {state: on, brightness_pct: 80}
+      - call: {action: lower_brightness, sweep_time: 10}
+      - sample: {attribute: brightness, for: 1.5, expect: falling, min: 60, source: device_side}
+
+  - name: late_stop_report  # the bulb's late report of where it halted keeps the prediction: no jump on the next raise
+    roles: [light_ct, group]
+    only: [hue]
+    setup:
+      - set: {state: on, brightness_pct: 10}
+    steps:
+      - call: {sweep_time: 10}
+      - wait: 3
+      - call: {action: stop}
+      - wait: 10
+      - call: {sweep_time: 10}
+      - sample: {attribute: brightness, for: 2, expect: rising, min: 30, max: 65, source: device_side}
