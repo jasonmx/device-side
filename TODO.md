@@ -36,6 +36,7 @@ v0.1.0 is the next release.
 | 13i | Z2M `move`/`stop` | #124 |
 | 14 | Z2M color modes fixed for HA, on by default | #126 |
 | — | Color temperature moves dropped on every integration: no halt of a Hue bulb's fade is clean | #125 |
+| — | Six raise and lower actions replace `move` | #128 |
 
 ## To go, in order
 
