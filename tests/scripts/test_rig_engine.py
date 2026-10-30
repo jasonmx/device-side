@@ -972,6 +972,14 @@ def test_the_default_sweep_time_matches_the_ramp_actions():
     assert engine.SWEEP_TIME_S == DEFAULT_SWEEP_TIME
 
 
+def test_the_engine_knows_every_raise_and_lower_action():
+    # Their cases wait out the predictions the calls leave behind.
+    from custom_components.device_side.actions import discover
+    from custom_components.device_side.actions.ramp import Ramp
+
+    assert {action.key for action in discover() if issubclass(action, Ramp)} == engine._RAMPS
+
+
 async def test_duration_before_any_call_fails_the_step(tmp_path):
     text = "action: turn_on_for\nrig_seconds: 5\ntests:\n  - name: early\n    roles: [switch_plug]\n    steps:\n"
     text += "      - wait: duration\n"
