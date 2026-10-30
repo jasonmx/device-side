@@ -10,7 +10,7 @@ from homeassistant.exceptions import Unauthorized
 
 from . import zcl
 from .addressing import unsupported_reason
-from .move import has_color, hue_moves, job_key, refresh, send, transition_cache, units
+from .fade import end_key, has_color, hue_moves, refresh, send, transition_cache, units
 from ...core.adapter import Adapter
 from ...core.models import EntityResult, Request, Status, Target
 from ...core.runtime import get_runtime
@@ -27,10 +27,10 @@ class ZHAStop(Adapter[Request]):
     """Send level Stop to each lit light, with StopMoveStep where a saturation or hue move of ours runs, record the
     predicted values as where it halted, and refresh HA at once.
 
-    Members from one ZHA group get one groupcast per command, as in move. The stop replaces the light's pending end
-    refresh and soft off restore, so a halted soft off leaves the light on at the halted level, as on Hue. Raw commands
-    leave ZHA's transitioning flag down, so the refresh reads the halted values. A light with nothing lit (off, and no
-    soft off of ours fading it) is unchanged with off and nothing is sent to it.
+    Members from one ZHA group get one groupcast per command, as in a raise or lower. The stop replaces the light's
+    pending end refreshes and soft off restore, so a halted soft off leaves the light on at the halted level, as on
+    Hue. Raw commands leave ZHA's transitioning flag down, so the refresh reads the halted values. A light with nothing
+    lit (off, and no soft off of ours fading it) is unchanged with off and nothing is sent to it.
     """
 
     action: ClassVar[str] = "stop"
@@ -90,7 +90,9 @@ class ZHAStop(Adapter[Request]):
             _LOGGER.warning("stop on zha failed for %s: %s", ", ".join(sorted(halting_ids)), err)
             return [*off, *(self.result(light, Status.REJECTED, detail="error") for light in halting)]
         cycling.difference_update(halting_ids)
+        runtime = get_runtime(hass)
         for light in halting:
-            get_runtime(hass).schedule(hass, job_key(light), [])  # cancels the move's end refresh and restore
+            for attribute in (BRIGHTNESS, SATURATION):
+                runtime.schedule(hass, end_key(light, attribute), [])  # cancels the fades' end refreshes and restore
         await asyncio.gather(*(refresh(hass, light, request.context) for light in halting))
         return [*off, *(self.result(light, Status.SENT) for light in halting)]

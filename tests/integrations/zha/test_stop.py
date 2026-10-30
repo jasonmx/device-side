@@ -6,11 +6,10 @@ import pytest
 from homeassistant.core import Context, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.service import async_register_admin_service
-from pytest_homeassistant_custom_component.common import async_mock_service
 
 from custom_components.device_side.const import DOMAIN
 from custom_components.device_side.core.transition import BRIGHTNESS, SATURATION
-from custom_components.device_side.integrations.zha.move import hue_moves, transition_cache
+from custom_components.device_side.integrations.zha.fade import hue_moves, transition_cache
 
 from .conftest import SENT, A, B, bulb, sent, unchanged
 from ...conftest import advance, call, wall_clock_now
@@ -19,11 +18,6 @@ pytestmark = pytest.mark.usefixtures("setup_production", "clock")
 
 LEVEL_STOP = (0x0008, 0x03, {})
 STOP_MOVE_STEP = (0x0300, 0x47, {"options_mask": 0, "options_override": 0})
-
-
-@pytest.fixture
-def commands(hass):
-    return async_mock_service(hass, "zha", "issue_zigbee_cluster_command")
 
 
 @pytest.fixture(autouse=True)
@@ -41,7 +35,7 @@ async def test_a_lit_light_gets_level_stop_and_a_refresh_at_once(hass, commands,
 
 async def test_a_brightness_move_halts_where_it_is_predicted(hass, commands, clock):
     bulb(hass)
-    await call(hass, "move", {"entity_id": "light.bulb", "brightness": "up"})
+    await call(hass, "raise_brightness", {"entity_id": "light.bulb"})
     clock.now += 1
 
     await call(hass, "stop", {"entity_id": "light.bulb"})
@@ -54,7 +48,7 @@ async def test_a_brightness_move_halts_where_it_is_predicted(hass, commands, clo
 
 async def test_a_saturation_move_also_gets_stop_move_step(hass, commands, clock):
     bulb(hass)
-    await call(hass, "move", {"entity_id": "light.bulb", "saturation": "up"})
+    await call(hass, "raise_saturation", {"entity_id": "light.bulb"})
     clock.now += 1
 
     await call(hass, "stop", {"entity_id": "light.bulb"})
@@ -65,7 +59,7 @@ async def test_a_saturation_move_also_gets_stop_move_step(hass, commands, clock)
 
 async def test_a_hue_cycle_gets_stop_move_step_and_ends(hass, commands):
     bulb(hass)
-    await call(hass, "move", {"entity_id": "light.bulb", "hue": "up"})
+    await call(hass, "raise_hue", {"entity_id": "light.bulb"})
 
     await call(hass, "stop", {"entity_id": "light.bulb"})
 
@@ -86,7 +80,7 @@ async def test_a_halted_soft_off_keeps_the_light_on(hass, commands, clock):
     """The stop cancels the restore: the light stays on at the halted level, as on Hue."""
     bulb(hass)
     start = wall_clock_now()
-    await call(hass, "move", {"entity_id": "light.bulb", "brightness": "down"})
+    await call(hass, "lower_brightness", {"entity_id": "light.bulb"})
     clock.now += 1
     hass.states.async_set("light.bulb", "off", {"supported_color_modes": ["color_temp", "xy"]})  # reported early
 
@@ -95,6 +89,18 @@ async def test_a_halted_soft_off_keeps_the_light_on(hass, commands, clock):
 
     assert sent(commands)[1:] == [LEVEL_STOP]
     assert transition_cache(hass).value("light.bulb", BRIGHTNESS, 0) == pytest.approx(40)
+
+
+async def test_cancels_each_attributes_end_refresh(hass, commands, refreshes):
+    bulb(hass)
+    start = wall_clock_now()
+    await call(hass, "raise_brightness", {"entity_id": "light.bulb"})
+    await call(hass, "raise_saturation", {"entity_id": "light.bulb"})
+
+    await call(hass, "stop", {"entity_id": "light.bulb"})
+    await advance(hass, start, 10)
+
+    assert len(refreshes) == 1  # the stop's own
 
 
 async def test_an_off_light_is_unchanged(hass, commands, refreshes):
@@ -154,7 +160,7 @@ async def test_non_admin_caller_is_refused(hass, hass_read_only_user, refreshes)
 
 async def test_a_failed_stop_rejects_and_keeps_the_move(hass, commands, clock):
     bulb(hass)
-    await call(hass, "move", {"entity_id": "light.bulb", "brightness": "up"})
+    await call(hass, "raise_brightness", {"entity_id": "light.bulb"})
 
     async def fail(call: ServiceCall) -> None:
         raise HomeAssistantError("no route")

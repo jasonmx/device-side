@@ -5,16 +5,19 @@ import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util.color import color_hs_to_xy
 from pytest_homeassistant_custom_component.common import async_mock_service
 
 from custom_components.device_side.integrations.zha import zcl
-from custom_components.device_side.integrations.zha.move import transition_cache
+from custom_components.device_side.integrations.zha.fade import transition_cache
 
 from ...fixtures.zha import IEEE, add_zha_entity, zha_entry, zha_group
 
 SENT = {"status": "sent", "integration": "zha"}
 A, B = "00:00:00:00:00:00:00:0a", "00:00:00:00:00:00:00:0b"
 COLOR_MODES = ["color_temp", "xy"]
+# MoveToLevel to 1 with ExecuteIfOff: a light that is off, put at the bottom before a raise.
+BOTTOM = (0x0008, 0x00, {"level": 1, "transition_time": 0, "options_mask": 1, "options_override": 1})
 
 
 def unchanged(detail: str) -> dict:
@@ -52,6 +55,11 @@ def clock(hass, setup_production) -> Clock:
     clock = Clock()
     transition_cache(hass).clock = clock
     return clock
+
+
+@pytest.fixture
+def commands(hass):
+    return async_mock_service(hass, "zha", "issue_zigbee_cluster_command")
 
 
 @pytest.fixture
@@ -105,8 +113,8 @@ def two_light_group(hass, zha_groups):
 
 
 class Bulbs:
-    """zcl.read_attributes for move and stop: OnOff reads off (a soft off has run), and CurrentLevel answers only
-    where a test sets `levels`, so a move's ramp is fitted to a read only then."""
+    """zcl.read_attributes for raise, lower and stop: OnOff reads off (a soft off has run), and CurrentLevel answers
+    only where a test sets `levels`, so a fade's ramp is fitted to a read only then."""
 
     def __init__(self) -> None:
         self.on = False
@@ -127,3 +135,13 @@ def bulbs(monkeypatch) -> Bulbs:
     monkeypatch.setattr(zcl, "read_attributes", fake.read)
     monkeypatch.setattr(zcl, "enhanced_hue", AsyncMock(return_value=True))
     return fake
+
+
+def on_off_reads(read) -> list:
+    """The OnOff reads among the reads, leaving out the Level reads each brightness fade fits its ramp to."""
+    return [call for call in read.await_args_list if call.args[2] == zcl.ON_OFF_CLUSTER]
+
+
+def xy(hue: float, saturation: float) -> dict:
+    x, y = color_hs_to_xy(hue, saturation)
+    return {"color_x": round(x * 65535), "color_y": round(y * 65535)}

@@ -384,7 +384,194 @@ firmware. Most Z2M-supported lights cancel the timer on any state change.
 Zigbee devices on the core `zha` integration's own coordinator. Device Side calls ZHA's
 `zha.issue_zigbee_cluster_command` action, which sends a Zigbee command to the device:
 `OnWithTimedOff` for a timer, which then runs on the device, the `MoveTo…` commands for
-`set_attributes`, and the Level and Color cluster moves and stops for `move` and `stop`.
+`set_attributes`, and the Level and Color cluster moves and stops for raise, lower and `stop`.
+
+### How targets resolve
+
+An entity belongs to this integration when its entity registry entry comes from `zha`. The IEEE
+address and endpoint are parsed from the unique ID, which ZHA writes as `{ieee}-{endpoint_id}` for
+a light. An entity with a longer unique ID on the same endpoint (a quirk's extra entity, such as a
+child lock) is refused with `not_addressable`, so a timer never lands on the wrong entity.
+
+A ZHA group entity (unique ID `{platform}_zha_group_0x{group_id:04x}`) expands to its members in
+the group entity's domain: a light group to its lights. Each member gets its own result; the group
+entity gets none. A group ZHA no longer knows is skipped, like an empty group.
+
+### `turn_on_for`
+
+Sends `OnWithTimedOff` (OnOff cluster `0x0006`, command `0x42`) with `on_off_control: 0`,
+`on_time` in tenths of a second and `off_wait_time: 0`. With a light field, Device Side first calls
+`light.turn_on`, then sends the timer.
+
+ZHA raises when the device can't be reached or answers with a failure status, and that target is
+`rejected`. Otherwise Device Side reads the OnOff (`0x0000`) and OnTime (`0x4001`) attributes
+straight back in one uncached request. OnTime counts down live and a new timer replaces an old one,
+so the result is `confirmed` when the device reads on and OnTime is above 0, at most the requested
+tenths, and no more than 3 s under them. Otherwise it is `sent`, with detail `not_on` (the device
+reads off), `timer_not_reported` (OnTime holds some other value) or `readback_failed` (the read
+itself failed).
+
+Members of a ZHA group share one command, so they start and stop together: with a light field,
+one `light.turn_on` on the group entity, then one `OnWithTimedOff` to the group through
+`zha.issue_zigbee_group_command`. One command per member would start them a slot apart, about
+0.7 s across 8 lights. A group command gets no reply, and a member that can't run the timer
+ignores it without a word, so each member is still read back as above. A light without the OnTime
+attribute reads as no timer: `not_on`, or `timer_not_reported` once a field has turned it on. A
+light slow to take the group's `light.turn_on` (the rig's Sengled, a Zigbee end device) still reads
+off and reports `not_on`, then comes on and stays on. The measurements are in `docs/plans/2026-10-27-zha-groups-probe.md`.
+
+Lights only, with `brightness` and `color_temp_kelvin` as the fields, until more are tested on
+hardware. Zigbee plugs and switches are unsupported, as on Zigbee2MQTT: the one tested, a Tuya
+TS011F, stores OnTime as its own countdown and never switches on, so it reads back `not_on`.
+
+### `set_attributes`
+
+Sends each light the Level and Color cluster `MoveTo…` commands, one after another, never the
+`…WithOnOff` ones, so a light that is off stays off and comes on with the new settings. Each
+command carries the ZCL `ExecuteIfOff` override (`options_mask: 1, options_override: 1`), which
+makes a light that is off take it, and a 0.4 s transition, the Hue bridge's default, so a light
+that is on fades as it would on Hue. Then Device Side calls `homeassistant.update_entity` on the
+light, since ZHA never applies a color temperature report.
+
+The fields, units and names are Hue's (below). `brightness` is a percent of level 254, and `0`
+sends level 1, the lowest; `min_brightness` and `max_brightness` read the light's CurrentLevel
+live and clamp it, so they work while off, and a light already inside them is `unchanged` with
+`within_limits`. `color_temp_kelvin` goes as mireds, clamped to the light's range. A color goes as
+xy (`MoveToColor`), or as hue and saturation (`MoveToHueAndSaturation`) on a light without xy;
+the light clamps it to its own gamut. Given a color and a color temperature, only the color is
+sent, as both set the light's color; a color light without color temperature takes it as a color,
+as core's `light.turn_on` does. A field the light can't take is dropped, as on Hue.
+
+A light whose commands return is `sent`: ZHA raises when one can't be delivered or fails, and that
+light is `rejected`. Nothing is read back, so a bulb that ignores the override reports `sent` too.
+A model shown to mishandle a write while off (tested behavior, below) is refused with
+`execute_if_off_unsupported`. A ZHA group expands to its members, written one at a time. Lights
+only.
+
+### `get_attributes`
+
+Reads each light live, never from zigpy's attribute cache: ZHA doesn't apply color temperature
+reports, so the cache goes stale after a raw command or a bound remote. One uncached request per
+cluster per light, one after another: OnOff and OnTime always, Level when the light's
+`supported_color_modes` go beyond on/off, and Color when they include a color mode. That is slower
+than reading Home Assistant's state, but right mid-transition and after commands HA didn't send.
+The bulb keeps these values while off, so they read then too.
+
+`brightness` is a percent (CurrentLevel / 254), as Hue's is, so a read can be written back. Color
+is the active mode only (EnhancedColorMode where the light has it, else ColorMode):
+`color_temp_kelvin`, or `xy_color` or `hs_color` with the other two color keys derived from it. A
+running timer is returned as `timer`, the shared row, from OnTime, and only while the light reads
+on: a TS011F counts OnTime down while off. A ZHA group expands to its members, one entry each.
+Lights only, as for `turn_on_for`. A light that doesn't answer raises.
+
+### Raise, lower and `stop`
+
+All six raise and lower actions, as on Zigbee2MQTT (above), which also says why no integration moves color
+temperature.
+
+Brightness and saturation are each one command to the end point (the limit, or the end of the range) with a
+transition of `sweep_time` × the fraction of the range left, which the bulb then runs on its own. A brightness
+call and a saturation call can overlap, and the bulb runs both.
+
+- **`raise_brightness`** is `MoveToLevelWithOnOff`, which turns the light on. An off bulb keeps its level and would
+  fade up from there, so a light that is off first gets `MoveToLevel` to level 1 with the `ExecuteIfOff` override
+  and no transition: it stays off, then fades in from the bottom.
+- **`lower_brightness` to a limit** is `MoveToLevel`, which a light that is off ignores.
+- **`lower_brightness` to 0 %** is `MoveToLevelWithOnOff` to 0, a soft off that leaves the bulb at level 1. 1 s
+  after the fade should have ended, Device Side reads OnOff, and if the light is off, sends `MoveToLevel` back to
+  the level the fade started from, with `ExecuteIfOff` and no transition. The light stays off and comes back at its
+  old level from anything that turns it on, as on Hue and Zigbee2MQTT. A stop or a new brightness call before then
+  cancels it; a saturation or hue call doesn't.
+- **Saturation** is `MoveToColor` to the xy of the light's current hue at the end saturation, on lights that are
+  on and in color.
+- **`raise_hue` and `lower_hue`** are `EnhancedMoveHue`, a cycle around the color wheel the bulb keeps running
+  until a stop. Its rate is `65535 / sweep_time` steps of the wheel per second, rounded, so `sweep_time` is one full
+  cycle. ZCL takes 1 to 65535 steps per second, so a `sweep_time` under 1 s or over 65535 s is clamped and the
+  result carries `clamped_to`. A hue call is `unchanged` with `fields_dropped` on a light whose ColorCapabilities
+  attribute lacks enhanced hue (zigpy's cached value, else one live read), and on a group with any such member.
+
+Saturation and hue move only a light that is on, so on a light that is off, as for `lower_brightness`, the result
+is `unchanged` with `off`. A call already at its limit is `unchanged` with `at_limit`. A transition longer than
+ZCL's 6553.4 s runs at that, so faster than asked.
+
+`stop` sends Level `Stop` to each light that is on or that a soft off of Device Side's is fading, with
+`StopMoveStep` first where a saturation fade or hue cycle of Device Side's runs on a color light. It cancels the
+pending refreshes and restore, so a stopped soft off leaves the light on where it halted, as on Hue. A light with
+nothing to stop is `unchanged` with `off`.
+
+The bulb reports its brightness during a fade and ZHA applies it, but never a color. So Device Side calls
+`homeassistant.update_entity` on each light 1 s after a fade should have ended, and straight after a stop. Raw
+commands leave ZHA's own transition guard down, so the read is the bulb's. Device Side remembers each raise, lower
+and stop for its duration plus 2 seconds, so the next one after a stop starts from where the light halted. A new
+call for the same attribute, or a stop, replaces the pending refresh.
+
+ZHA can't tell a brightness change made elsewhere (Home Assistant, an app, a remote) from the bulb's own reports
+during a fade, so the remembered value can go stale. To keep hold-to-dim instant, a brightness fade is sent first
+and each light's CurrentLevel read just after. The read is timed at the middle of its round trip and lies on the
+bulb's ramp to the end point, so Device Side fits the ramp's real start to it and remembers that: the next raise or
+lower, a stop and the soft off's restore start from where the bulb really is. The one fade sent from a stale value
+runs at the speed worked out from it. A brightness call that the remembered value says has nothing to do
+(`at_limit` or `off`) is planned again from Home Assistant's state, which ZHA keeps from the bulb's reports.
+
+**Groups.** Members of a ZHA group get one command to the group (`zha.issue_zigbee_group_command`), so they fade
+and halt together, when every light the group holds moves. Otherwise, such as `lower_brightness` with a member
+off, each moving member gets its own command: a soft off sent to the group would still drop an off member's stored
+level. The bottom level before `raise_brightness`, and the restore after a soft off, are each member's own. A
+group's start is the mean of its members that are on, and each member's fade is remembered from its own start.
+
+Lights only, as for `turn_on_for`.
+
+### Cancelling
+
+Send a regular `turn_on` or `turn_off` through Home Assistant. This publishes `{"state":"ON"}` or
+`{"state":"OFF"}` to the device topic, which Z2M forwards to the device. Whether the Zigbee device
+cancels its running `OnWithTimedOff` timer on a plain `On` command depends on the device's
+firmware. Most Z2M-supported lights cancel the timer on any state change.
+
+### Sharp edges
+
+- **Duration limits.** Zigbee `on_time` is a uint16 in tenths of a second, so the maximum is
+  65534 tenths = 6553.4 s (about 1.8 hours). A duration over 6553.4 s is clamped and the result
+  carries `clamped_to`. Durations under 50 ms are floored to 50 ms.
+- **Custom base topic.** A group's identifier carries its base topic, so a group on any base
+  topic other than `zigbee2mqtt` is refused as `not_addressable`. A device's identifier doesn't,
+  so for a device the command topic is wrong and the publish reaches nothing, while the result
+  still says `sent`. Check your Z2M configuration; there is no workaround yet.
+- **A device named after a group's ID.** Z2M accepts a purely numeric friendly name and looks up
+  devices before groups, so a device whose friendly name is exactly a group's ID takes that
+  group's command. Don't name a device with a bare number.
+- **Other brands' color bulbs.** Hue native control is Philips-only, so a color bulb of any other
+  brand, timed with a color from off, may light at its last color for a moment first. Untested;
+  if yours does, open an issue.
+- **Old color shown at first.** With Hue native control on, a Hue light may report its old color
+  for the first seconds of a timer while it shows the new one, so Home Assistant shows the old
+  color until the next report.
+- **Restart during a timer.** Pending state reads are lost when Home Assistant restarts or Device
+  Side unloads, so the light's state stays stale until the device next reports or is next
+  commanded.
+- **Zigbee traffic.** Each call adds up to three Zigbee reads per target, spread over the timer.
+  A group read is one groupcast that every member answers.
+- **Large groups on a busy mesh.** `get_attributes` reads a group's members one after another, up to three
+  round trips each, and a call has 30 s for all its targets. A healthy read takes a quarter of a second or less,
+  but a group of many bulbs on a slow mesh can run out the 30 s, and then every target in that call fails with
+  `timeout`. Read a large group's members by area or label instead, which reads them four at a time.
+- **A color stop costs a read and a write.** On a light Home Assistant lists with `xy`, each hue or saturation
+  stop adds a Zigbee read and a write or get, 1 s later, and leaves the bulb in xy mode (Color after a stop, above).
+- **A change from elsewhere mid-fade.** A brightness or saturation change made outside Device Side within a fade's
+  duration plus 2 seconds isn't noticed, so a raise or lower started then begins from the prediction, not from the
+  change.
+- **No confirmation.** Z2M's MQTT interface does not synchronously confirm the timer started.
+  The result is always `sent`, never `confirmed`, regardless of whether the device accepted the
+  command.
+
+## ZHA
+
+### What it talks to
+
+Zigbee devices on the core `zha` integration's own coordinator. Device Side calls ZHA's
+`zha.issue_zigbee_cluster_command` action, which sends a Zigbee command to the device:
+`OnWithTimedOff` for a timer, which then runs on the device, the `MoveTo…` commands for
+`set_attributes`, and the Level and Color cluster moves and stops for raise, lower and `stop`.
 
 ### How targets resolve
 
@@ -557,7 +744,7 @@ them (`docs/plans/2026-10-27-zigbee-probe.md`). A Sengled E11-G13, firmware `0x0
 `MoveToLevel` while on, but while off, with the override or without, its CurrentLevel jumped to 255
 and it came on at full brightness, so `set_attributes` refuses that model.
 
-For `move` and `stop`, on the LTA004 (`docs/plans/2026-10-28-zha-move-stop.md`): a Level `Stop` 3 s into a 6 s
+For raise, lower and `stop`, on the LTA004 (`docs/plans/2026-10-28-zha-move-stop.md`): a Level `Stop` 3 s into a 6 s
 soft off from level 200 halted it at 100 with the bulb on, and it held; Home Assistant showed 100 from the bulb's
 own report. A 4 s fade read its end level by 3.9 s, and a 4 s soft off read off, at level 1, by 4.3 s. A group
 `MoveToLevelWithOnOff` and a group `Stop` fade and halt a member as the unicast ones do.
@@ -568,8 +755,8 @@ own report. A 4 s fade read its end level by 3.9 s, and a 4 s soft off read off,
   admin-only actions, and Device Side passes the caller's identity through to them. A call made as a non-admin user is `rejected` with
   detail `admin_required`. Automations run without a user, so they pass.
 - **The Sengled E11-G13 and the soft off.** It drops a level sent while off, so it gets neither the bottom level
-  before a move up nor the restore after a soft off: a move up from off starts at its stored level, and after a
-  soft off it comes back on at level 1.
+  before `raise_brightness` nor the restore after a soft off: a raise from off starts at its stored level, and
+  after a soft off it comes back on at level 1.
 - **A restart during a soft off.** The restore is scheduled in Home Assistant, so a restart before the fade ends
   loses it, and the light comes back on at level 1.
 - **Duration limits.** `on_time` is a uint16 in tenths of a second, so the maximum is 6553.4 s
