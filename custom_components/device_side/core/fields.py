@@ -13,9 +13,9 @@ from .models import Request, Target
 
 # Each action's fields by the light capability they need. Core converts between color forms before it filters, so a
 # color is lacked only without any color mode, and a color temperature only without that or a color mode.
-BRIGHTNESS = frozenset({"brightness", "min_brightness", "max_brightness", "brightness_limit"})
+BRIGHTNESS = frozenset({"brightness", "min_brightness", "max_brightness"})
 COLOR_TEMP = frozenset({"color_temp_kelvin"})
-COLOR = frozenset({"hs_color", "rgb_color", "xy_color", "hue", "saturation", "saturation_limit"})
+COLOR = frozenset({"hs_color", "rgb_color", "xy_color", "hue", "saturation"})
 TRANSITION = frozenset({"transition"})
 
 

@@ -145,8 +145,8 @@ set_attributes:
     hs_color: *hs_color
     xy_color: *xy_color
 
-move:
-  target:
+raise_brightness:
+  target: &hue_mqtt_zha
     entity:
       - domain: light
         integration: hue
@@ -155,28 +155,7 @@ move:
       - domain: light
         integration: zha
   fields:
-    brightness:
-      example: up
-      filter: *dimmable
-      selector:
-        select:
-          options: [up, down]
-          translation_key: brightness_direction
-    saturation:
-      example: up
-      filter: *color_modes
-      selector:
-        select:
-          options: [up, down]
-          translation_key: saturation_direction
-    hue:
-      example: up
-      filter: *color_modes
-      selector:
-        select:
-          options: [up, down]
-          translation_key: hue_direction
-    sweep_time:
+    sweep_time: &sweep_time
       default: 5
       selector:
         number:
@@ -185,36 +164,69 @@ move:
           step: any
           unit_of_measurement: s
           mode: box
-    limits:
-      collapsed: true
-      fields:
-        brightness_limit:
-          example: 30
-          filter: *dimmable
-          selector:
-            number:
-              min: 0
-              max: 100
-              step: 0.2
-              unit_of_measurement: "%"
-        saturation_limit:
-          example: 50
-          filter: *color_modes
-          selector:
-            number:
-              min: 0
-              max: 100
-              unit_of_measurement: "%"
+    limit:
+      example: 80
+      filter: *dimmable
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 0.2
+          unit_of_measurement: "%"
 
-stop:
-  target:
+lower_brightness:
+  target: *hue_mqtt_zha
+  fields:
+    sweep_time: *sweep_time
+    limit:
+      example: 30
+      filter: *dimmable
+      selector:
+        number:
+          min: 0
+          max: 99
+          step: 0.2
+          unit_of_measurement: "%"
+
+raise_saturation:
+  target: &mqtt_zha
     entity:
-      - domain: light
-        integration: hue
       - domain: light
         integration: mqtt
       - domain: light
         integration: zha
+  fields:
+    sweep_time: *sweep_time
+    limit:
+      example: 80
+      filter: *color_modes
+      selector: &saturation
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+
+lower_saturation:
+  target: *mqtt_zha
+  fields:
+    sweep_time: *sweep_time
+    limit:
+      example: 30
+      filter: *color_modes
+      selector: *saturation
+
+raise_hue:
+  target: *mqtt_zha
+  fields:
+    sweep_time: *sweep_time
+
+lower_hue:
+  target: *mqtt_zha
+  fields:
+    sweep_time: *sweep_time
+
+stop:
+  target: *hue_mqtt_zha
 
 get_attributes:
   target:

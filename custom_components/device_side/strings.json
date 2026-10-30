@@ -19,10 +19,12 @@
       "init": {
         "title": "Device Side options",
         "data": {
-          "predicted_state": "Show predicted brightness during Hue fades"
+          "predicted_state": "Show predicted brightness during Hue fades",
+          "z2m_color_modes": "Fix colors of full-color Zigbee2MQTT lights"
         },
         "data_description": {
-          "predicted_state": "A Hue bridge reports a fade's end brightness as soon as it starts, and where a stopped fade halted late or never. With this on, Home Assistant shows the brightness at the start, where a stop halted it, and the end once the fade has run. Turn it off to show what the bridge reports."
+          "predicted_state": "A Hue bridge reports a fade's end brightness as soon as it starts, and where a stopped fade halted late or never. With this on, Home Assistant shows the brightness at the start, where a stop halted it, and the end once the fade has run. Turn it off to show what the bridge reports.",
+          "z2m_color_modes": "Zigbee2MQTT tells Home Assistant a full-color light has one color mode, so Home Assistant keeps showing the old color whenever the bulb reports in the other. With this on, device_side sets each such light's and group's Home Assistant override in Zigbee2MQTT's settings to announce both. Turn it off to remove those overrides."
         }
       }
     }
@@ -48,12 +50,6 @@
     },
     "nothing_to_set": {
       "message": "Nothing to set. Give a brightness, a color temperature, a color, or a brightness limit."
-    },
-    "nothing_to_move": {
-      "message": "Nothing to move. Give a direction for brightness, saturation or hue."
-    },
-    "limit_without_direction": {
-      "message": "A limit needs a direction for the same attribute: {limits}."
     }
   },
   "services": {
@@ -61,38 +57,79 @@
       "name": "Get attributes",
       "description": "Get brightness, color temp, and color (RGB, HS, XY), even if lights are off, and any running on/off timer. Returns one record per target."
     },
-    "move": {
-      "name": "Move: dim, brighten, warm or cool",
-      "description": "Starts brightness or saturation moving at a steady speed until it reaches its range end or a limit, or hue cycling. Stop halts it where it is. Built for hold-to-dim buttons.",
+    "lower_brightness": {
+      "name": "Lower brightness",
+      "description": "Starts brightness falling at a steady speed until it reaches 0% or the minimum. Stop halts it where it is. Built for hold-to-dim buttons.",
       "fields": {
-        "brightness": {
-          "name": "Brightness",
-          "description": "Direction to move brightness. Moving up turns the light on; moving down to 0% turns it off."
-        },
-        "saturation": {
-          "name": "Saturation",
-          "description": "Direction to move saturation: up is a richer color, down is paler, toward white."
-        },
-        "hue": {
-          "name": "Hue",
-          "description": "Direction to move around the color wheel: up is red to yellow to green."
-        },
         "sweep_time": {
           "name": "Sweep time",
-          "description": "Seconds a full sweep takes, such as 0% to 100% brightness, or once around the color wheel for hue. The speed is the same wherever the move starts."
+          "description": "Seconds a full range takes: 0% to 100%, or once around the color wheel for hue. The speed is the same wherever the move starts."
         },
-        "brightness_limit": {
-          "name": "Brightness limit",
-          "description": "Brightness to stop at instead of the range end, in percent. Moving down to 0% turns the light off."
-        },
-        "saturation_limit": {
-          "name": "Saturation limit",
-          "description": "Saturation to stop at instead of the range end, in percent."
+        "limit": {
+          "name": "Minimum brightness",
+          "description": "Brightness to stop at instead of 0%, in percent. The light turns off at 0%. Choose 0.4% or more to keep it on."
         }
-      },
-      "sections": {
-        "limits": {
-          "name": "Limits"
+      }
+    },
+    "lower_hue": {
+      "name": "Lower hue",
+      "description": "Starts the hue angle decreasing at a steady speed: red to magenta to blue to green, wrapping at 360°. It cycles until stop halts it.",
+      "fields": {
+        "sweep_time": {
+          "name": "Sweep time",
+          "description": "Seconds a full range takes: 0% to 100%, or once around the color wheel for hue. The speed is the same wherever the move starts."
+        }
+      }
+    },
+    "lower_saturation": {
+      "name": "Lower saturation",
+      "description": "Starts saturation falling at a steady speed, paler toward white, until it reaches 0% or the minimum. Stop halts it where it is.",
+      "fields": {
+        "sweep_time": {
+          "name": "Sweep time",
+          "description": "Seconds a full range takes: 0% to 100%, or once around the color wheel for hue. The speed is the same wherever the move starts."
+        },
+        "limit": {
+          "name": "Minimum saturation",
+          "description": "Saturation to stop at instead of 0%, in percent."
+        }
+      }
+    },
+    "raise_brightness": {
+      "name": "Raise brightness",
+      "description": "Starts brightness rising at a steady speed until it reaches 100% or the maximum, turning the light on. Stop halts it where it is. Built for hold-to-brighten buttons.",
+      "fields": {
+        "sweep_time": {
+          "name": "Sweep time",
+          "description": "Seconds a full range takes: 0% to 100%, or once around the color wheel for hue. The speed is the same wherever the move starts."
+        },
+        "limit": {
+          "name": "Maximum brightness",
+          "description": "Brightness to stop at instead of 100%, in percent."
+        }
+      }
+    },
+    "raise_hue": {
+      "name": "Raise hue",
+      "description": "Starts the hue angle increasing at a steady speed: red to yellow to green to blue, wrapping at 360°. It cycles until stop halts it.",
+      "fields": {
+        "sweep_time": {
+          "name": "Sweep time",
+          "description": "Seconds a full range takes: 0% to 100%, or once around the color wheel for hue. The speed is the same wherever the move starts."
+        }
+      }
+    },
+    "raise_saturation": {
+      "name": "Raise saturation",
+      "description": "Starts saturation rising at a steady speed, toward a richer color, until it reaches 100% or the maximum. Stop halts it where it is.",
+      "fields": {
+        "sweep_time": {
+          "name": "Sweep time",
+          "description": "Seconds a full range takes: 0% to 100%, or once around the color wheel for hue. The speed is the same wherever the move starts."
+        },
+        "limit": {
+          "name": "Maximum saturation",
+          "description": "Saturation to stop at instead of 100%, in percent."
         }
       }
     },
@@ -136,7 +173,7 @@
     },
     "stop": {
       "name": "Stop",
-      "description": "Stops every move in flight on the target, where it is now."
+      "description": "Stops every raise and lower in flight on the target, whichever attribute, where it is now."
     },
     "turn_off_for": {
       "name": "Turn off for",
@@ -180,26 +217,6 @@
           "name": "Transition",
           "description": "Seconds the light takes to reach the brightness and color above. Lights only."
         }
-      }
-    }
-  },
-  "selector": {
-    "brightness_direction": {
-      "options": {
-        "up": "Brighten",
-        "down": "Dim"
-      }
-    },
-    "saturation_direction": {
-      "options": {
-        "up": "Richer",
-        "down": "Paler"
-      }
-    },
-    "hue_direction": {
-      "options": {
-        "up": "Up (red to yellow to green)",
-        "down": "Down (red to magenta to blue)"
       }
     }
   }

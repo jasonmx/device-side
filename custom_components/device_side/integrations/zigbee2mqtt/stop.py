@@ -1,4 +1,4 @@
-"""Zigbee2MQTT stop: halt the bulb's fades and hue cycle, remember where they halted, and bring HA's color in line."""
+"""Zigbee2MQTT stop: halt the bulb's fades and hue cycle, remember where they halted, and refresh HA's color."""
 
 from typing import ClassVar
 
@@ -6,8 +6,8 @@ from homeassistant.core import HomeAssistant
 
 from .addressing import topic
 from .bridge import publish
-from .move import hue_moves, lights_of, read_back_key, transition_cache
-from .xy_writeback import DELAY_S, write_back_xy
+from .color_refresh import DELAY_S, refresh_color
+from .fade import hue_moves, lights_of, read_back_key, transition_cache
 from ...core.adapter import Adapter
 from ...core.dispatcher import EMPTY_GROUP
 from ...core.models import EntityResult, Request, Status, Target
@@ -31,8 +31,8 @@ class Z2MStop(Adapter[Request]):
 
     Each stop is its own publish, the color ones first: Z2M reads the light back after a brightness stop before it
     sends the next key of the same message. Z2M's read-back puts HA right for brightness; after a color stop, HA's color
-    is brought in line (xy_writeback). A light or group with nothing lit (off, and no soft off of ours fading it) is
-    unchanged with off and nothing is sent.
+    is refreshed where it needs it (color_refresh). A light or group with nothing lit (off, and no soft off of ours
+    fading it) is unchanged with off and nothing is sent.
     """
 
     action: ClassVar[str] = "stop"
@@ -83,15 +83,15 @@ class Z2MStop(Adapter[Request]):
                 await publish(hass, set_topic, {"brightness_move": "stop"})
             cycling.difference_update(hue)
 
-            async def bring_color_in_line() -> None:
+            async def refresh() -> None:
                 # A raw stopMoveStep publishes nothing, so Z2M has no read-back of its own.
-                await write_back_xy(hass, target, silent=bool(halts[SATURATION]))
+                await refresh_color(hass, target, silent=bool(halts[SATURATION]))
 
-            # Replaces the end read-back of the move this halts.
+            # Replaces the end read-backs of the moves this halts.
             color_halted = hue or halts[SATURATION]
-            get_runtime(hass).schedule(
-                hass, read_back_key(target), [(DELAY_S, bring_color_in_line)] if color_halted else []
-            )
+            runtime = get_runtime(hass)
+            runtime.schedule(hass, read_back_key(target, BRIGHTNESS), [])
+            runtime.schedule(hass, read_back_key(target, SATURATION), [(DELAY_S, refresh)] if color_halted else [])
             return self.result(target, Status.SENT)
 
         return await self.gather(hass, targets, send)

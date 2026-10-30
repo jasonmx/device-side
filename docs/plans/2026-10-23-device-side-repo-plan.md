@@ -61,13 +61,14 @@ requires it.
   4. Documented user demand (as in light-extras-research). Contributions without evidence are
      accepted but not prioritized.
 - **One action per user intent, not per protocol primitive.** Zigbee has move/step/moveto;
-  device_side exposes one `move`. Command selection is hidden in the adapter.
+  device_side exposes one raise and one lower per attribute. Command selection is hidden in the adapter.
 - **No HA-side help.** Every feature runs on the device or bridge; nothing Device Side does
   depends on HA staying up. Emulation is never shipped; docs show how to build it with
   `set_attributes` plus an automation.
 - **Drop-in for hue_dimmer users.** `set_attributes`, `get_attributes` and `set_scene` take hue_dimmer's
   field names, units (brightness in percent), names and descriptions, and return its response shape, so a
-  user changes only the domain. `move`/`stop` replace raise/lower by design and are the exception.
+  user changes only the domain. hue_dimmer's `raise`/`lower` are `raise_brightness`/`lower_brightness`, with
+  the same fields.
 - **Behave as core does.** When to raise, what to skip and what a response looks like follow HA core's own
   actions: `docs/action-behavior.md`.
 - **Audience:** automation authors and dashboard users from v1. Actions for everything; entities
@@ -103,46 +104,49 @@ requires it.
     `supported_color_modes`, so a switch-only selection shows just `duration`. The schema still
     accepts the fields for any target; adapters ignore fields their domain cannot use and the result
     records that under `detail`.
-  - Hue port of hue_dimmer: `set_attributes`, `get_attributes`, `set_scene`, `move`/`stop`.
-    `move` replaces raise/lower and grows beyond brightness. **Design principle (applies to
-    every feature): fields describe what the light should do in human terms, never how the
-    device does it.** No rates, steps, mireds or cluster vocabulary; the adapter converts.
-    `move` fields, all optional but at least one direction required:
-    - `brightness: up | down`, `saturation: up | down`, `hue: up | down` (`up` = the hue
-      angle increases, red → yellow → green, wrapping at 360°). One field per attribute, each
-      with its own direction, so "brighter and more saturated" is one call with no ambiguity.
-      Why not `brighter | dimmer`: `docs/plans/2026-10-25-hue-port.md`, Decisions. Color
-      temperature isn't moved (dropped 2026-10-28): every halt of a Hue bulb's color
-      temperature fade jumps visibly (`docs/plans/2026-10-28-z2m-move-stop.md`).
-    - `sweep_time` (seconds; hue_dimmer's existing field): how long a **full-range sweep**
-      takes, 0 → 100 % brightness, 0 → 100 % saturation, 360° of hue. Speed is therefore constant whatever the start point, which is
-      what hold-to-dim needs, and one number covers every attribute in the call. Default from
-      hue_dimmer.
-    - Limits in a collapsed "Limits" section (`services.yaml` sections): `brightness_limit`
-      (%), `saturation_limit` (%). A limit is "stop here instead of
-      the range end". A move already at or past its limit (or range end) in its direction does
-      nothing and returns `unchanged` with `detail: at_limit`: `down` to 30 % from 20 % never
+  - Hue port of hue_dimmer: `set_attributes`, `get_attributes`, `set_scene`, raise/lower and `stop`.
+    **Design principle (applies to every feature): fields describe what the light should do in human
+    terms, never how the device does it.** No rates, steps, mireds or cluster vocabulary; the adapter
+    converts. Six actions, one per attribute and direction, as HA names its direction actions
+    (`cover.open_cover`/`close_cover`/`stop_cover`, `fan.increase_speed`/`decrease_speed`). No action takes a
+    direction field, so each limit is labeled for its action, and a call can never ask for two moves:
+
+    | Action | Fields |
+    |---|---|
+    | `raise_brightness` | `sweep_time`; `limit` "Maximum brightness" (%, 1–100, step 0.2). Turns the light on. |
+    | `lower_brightness` | `sweep_time`; `limit` "Minimum brightness" (%, 0–99, step 0.2): "The light turns off at 0 %. Choose 0.4 % or more to keep it on." |
+    | `raise_saturation` | `sweep_time`; `limit` "Maximum saturation" (%, 0–100) |
+    | `lower_saturation` | `sweep_time`; `limit` "Minimum saturation" (%, 0–100) |
+    | `raise_hue` | `sweep_time`. The hue angle increases: red → yellow → green → blue, wrapping at 360°. |
+    | `lower_hue` | `sweep_time`. The hue angle decreases: red → magenta → blue → green, wrapping at 360°. |
+    | `stop` | None. Halts every raise and lower in flight on the target, whichever attribute. |
+
+    - `sweep_time` (seconds, default 5, min 0.1; hue_dimmer's existing field): how long a **full range**
+      takes, 0 → 100 % brightness or saturation, or one turn of the hue wheel. Speed is therefore constant
+      whatever the start point, which is what hold-to-dim needs.
+    - A limit is "stop here instead of the range end". A call already at or past its limit (or range end)
+      does nothing and returns `unchanged` with `detail: at_limit`: lowering to 30 % from 20 % never
       brightens (decided 2026-10-26). Hue has no limit: a wrapping hue range was considered and
       dropped as needless complexity for a niche feature; revisit only if users ask.
-    `stop` takes no fields and halts every move in flight on the target. (Per-attribute
-    direction words and the reserved `hue` field confirmed by Jason, 2026-10-23.)
+    - Two moves at once are not promised: two calls can still overlap (one per attribute), and `stop` halts
+      both. Color temperature isn't moved (dropped 2026-10-28): every halt of a Hue bulb's color
+      temperature fade jumps visibly (`docs/plans/2026-10-28-z2m-move-stop.md`). Why six actions:
+      `docs/plans/2026-10-30-raise-lower.md`.
     Hue implementation: target = limit or range end, `dynamics.duration` = sweep_time ×
     fraction of range still to travel; brightness as one write;
     saturation as one `color.xy` write along the line toward the white point or the gamut
-    edge (straight in xy, so native); `hue` is **unsupported on Hue** in v1 because a hue
+    edge (straight in xy, so native); the hue actions are **unsupported on Hue** in v1 because a hue
     rotation is not a straight line in xy and chaining segments from HA would violate the
-    offline rule. Zigbee Color Control Move Hue is native, so the field exists in the contract
-    for that integration later. `stop` writes the interpolated current value for every attribute
-    the transition cache holds for that light. Combined moves on Hue: verify on the rig
-    whether per-attribute writes with separate durations run independently; if not, send one
-    write with the longest duration and record `detail: shared_duration` (open item 12).
+    offline rule. Zigbee Color Control Move Hue is native, so the actions exist for that integration.
+    `stop` writes the interpolated current value for every attribute the transition cache holds for that
+    light.
 - **Deferred, architecture must accommodate:** cross-integration `set_attributes`, `get_attributes`
-  and `move`/`stop`, Shelly Gen1, further
+  and raise/lower/`stop`, Shelly Gen1, further
   domains (cover, valve, lock), and one further integration: **Z-Wave JS**.
 - **`get_attributes` pairs with timed on/off and set-while-off:** every `turn_on_for`, `turn_off_for`
   and `set_attributes` adapter needs a matching `get_attributes` capability on its integration, to
   read the device state HA doesn't show (timer status; brightness, color and color temperature while off).
-- **Z-Wave JS (post-v1, decided 2026-10-23):** scope is `move`/`stop` via Multilevel Switch CC
+- **Z-Wave JS (post-v1, decided 2026-10-23):** scope is `raise_brightness`/`lower_brightness`/`stop` via Multilevel Switch CC
   Start/Stop Level Change (direction + duration), plus auto-off only where a
   device exposes them as config parameters (Inovelli, Zooz, GE/Jasco). Binary Switch CC has no
   `OnWithTimedOff` equivalent, so `turn_on_for` is not a Z-Wave goal. Jason no longer owns
@@ -164,18 +168,18 @@ requires it.
   startup attributes (`StartUpOnOff`, `StartUpCurrentLevel`, `StartUpColorTemperatureMireds`), which
   apply when mains power returns, not to an On command (`OnLevel`, not exposed). Its "smooth
   transition power-on" option is HA-side sequencing of `light.turn_on`, not setting attributes while
-  off. Neither overlaps timed on/off, `move`/`stop` or `set_attributes`.
+  off. Neither overlaps timed on/off, raise/lower/`stop` or `set_attributes`.
 - **Naming convention (fixed now; it is a 0-to-1 decision):**
   1. `verb_object`, HA vocabulary only. Objects are the names HA's own services and state
      attributes use (`brightness`, `color_temp`, `attributes`, `scene`); protocol vocabulary
      (`level`, `OnLevel`, `PulseTime`, `toggle_after`) never appears in an action or field name.
   2. Commands (do something now) use HA's command verbs: `turn_on_for`, `turn_off_for`,
-     `move`, `stop`, `set_attributes` (write HA light attributes to the device
+     `raise_brightness`, `lower_brightness`, `stop`, `set_attributes` (write HA light attributes to the device
      without turning it on), `get_attributes`, `set_scene`.
   3. Persistent settings (change how the device behaves from now on) use `set_<behavior>` with
      the trigger named in plain English, e.g. `set_power_on_defaults`. None are planned.
   4. Field names are the `light.turn_on` field names wherever one exists; a feature-specific
-     field gets plain words (`duration`, `sweep_time`, `brightness_limit`).
+     field gets plain words (`duration`, `sweep_time`, `limit`).
   5. Field *values* are human terms for the outcome (`brighter`, `warmer`, a full-sweep time,
      a stop point), never device mechanics (a rate per second, a step count, a mired value).
      The adapter owns the conversion and documents it in `docs/integrations.md`.
@@ -187,7 +191,7 @@ requires it.
     batch members that came from the same group.
   - *Integration-native groups* (Hue `grouped_light`, Z2M group entities, ZHA group entities).
     These pass through to the adapter as a single target. Each adapter declares `native_groups`: when
-    true the adapter sends one command to the group (hue_dimmer sends `move`/`stop` to
+    true the adapter sends one command to the group (hue_dimmer sends raise/lower/`stop` to
     `grouped_light`; Z2M `turn_on_for` can publish to the group topic). When false, the
     dispatcher calls the integration's `expand_group(hass, target) -> list[Target]` hook
     (`IntegrationInfo.expand_group`; Hue uses `grouped_light.get_lights`, exactly what hue_dimmer
@@ -313,7 +317,8 @@ custom_components/device_side/
   actions/
     __init__.py          discover() -> actions sorted by module name
     turn_on_for.py  turn_off_for.py                         (COMMAND)
-    set_attributes.py  set_scene.py  move.py  stop.py        (COMMAND, Hue port)
+    set_attributes.py  set_scene.py  stop.py                 (COMMAND, Hue port)
+    raise_brightness.py  lower_brightness.py  ...  ramp.py   (COMMAND, one per attribute and direction; ramp.py shared)
     get_attributes.py                                         (QUERY, SupportsResponse.ONLY)
   integrations/
     __init__.py          discover() -> modules sorted; each exports INTEGRATION and ADAPTERS
@@ -322,7 +327,8 @@ custom_components/device_side/
     matter/       __init__.py addressing.py turn_on_for.py
     shelly/       __init__.py addressing.py turn_on_for.py turn_off_for.py
     hue/          __init__.py bridge.py transition_cache.py colors.py
-                  set_attributes.py get_attributes.py set_scene.py move.py stop.py
+                  set_attributes.py get_attributes.py set_scene.py stop.py
+                  raise_brightness.py lower_brightness.py fade.py
 scripts/
   check_release.py       coverage bar for CI, and no experimental adapter in a release
   deploy.sh              the deploy sync command <branch>, then the deploy restart command (rig only)
@@ -458,8 +464,8 @@ class Adapter[RequestT](ABC):
   adapter emits SENT/REJECTED); `transitions.py` `_brightness_cache` -> `TransitionCache` instance in
   `runtime.integration_state["hue"]`, keyed by (resource_id, attribute) so brightness
   and saturation moves are tracked alike (start value, target, duration, started_at;
-  interpolate on read); `_start_transition` -> `move.py` (per-attribute direction + sweep_time
-  + limits; raise/lower partials go; saturation computes the xy end point via `colors.py`; `hue` -> `unsupported`); `_stop_transition` ->
+  interpolate on read); `_start_transition` -> `fade.py` under `raise_brightness.py`/`lower_brightness.py`
+  (sweep_time + limit; raise/lower partials go; saturation computes the xy end point via `colors.py`; no hue adapter); `_stop_transition` ->
   `stop.py` (all attributes in the cache for the light);
   `attributes.py` -> `colors.py`;
   `_handle_set_attributes` -> `set_attributes.py` ("nothing to set" becomes a
@@ -472,7 +478,7 @@ class Adapter[RequestT](ABC):
 Integration semaphore from `IntegrationInfo.max_concurrency` (Hue 2 because aiohue's cap of 3 is shared
 with core; ZHA 2; Matter 2; Shelly 4; Z2M 4) plus a per-adapter semaphore from
 `AdapterScope.max_concurrency`, both applied inside `Adapter.gather()`. `execute` receives all
-of an adapter's targets at once so native group commands stay possible. Hue `move`/`stop` keep the
+of an adapter's targets at once so native group commands stay possible. Hue raise/lower/`stop` keep the
 "cache only after accept" rule.
 
 ### services.yaml, strings, icons
@@ -611,6 +617,7 @@ What is done and what is left: [`TODO.md`](../../TODO.md).
 | 9e | Native groups survey | Research `docs/plans/2026-10-26-native-groups-research.md`, probe `docs/plans/2026-10-27-zha-groups-probe.md`. Decision per integration for v0.1.0: **Z2M** `turn_on_for` `native_groups` on (#59, rig-proved). **ZHA** groups expand (`expand_group`), and `turn_on_for` sends the expanded members of one group a single groupcast, then reads each back, so results stay per member; move/stop (13f) groupcast the same way; get/set_attributes expand. **Matter, Shelly:** n/a, HA exposes no native group. |
 | 9f | Core-aligned failure behavior | Plan: `docs/plans/2026-10-27-core-failure-behavior.md`. move the dispatcher's raise rule from "raise when every target failed" to core's, per `docs/action-behavior.md`: unavailable or missing targets skipped with core's warning; a field a target can't take dropped; a target the caller named that the action can never support raises (as `ServiceNotSupported`); a device or bridge error raises; a query that reads nothing raises. Decide whether command actions keep their optional status response, which core's commands don't have, and whether `nothing_to_set` becomes a warning (a hue_dimmer call passing only zeros did nothing). Every action's tests and the rig's `expect_error` steps follow. |
 | 13 | Zigbee parity and timer state | Plan: `docs/plans/2026-10-27-zigbee-parity-timer-state.md` (13a to 13k). `get_attributes` takes switches and reports a running timer (Shelly, Matter, ZHA, Z2M where readable); ZHA and Z2M gain `get_attributes`, `move`/`stop` (hue cycling included) and `set_attributes` while off; after a probe spike, by integration, with one Hue A60 rig run per network after that integration's code freezes: Z2M first, where the bulb already is, then the Hue bridge, then ZHA. Needs 7c and 9f first. |
+| 14 | Z2M color modes fixed for HA | Plan: `docs/plans/2026-10-28-z2m-color-modes.md`. Z2M announces a full-color light to HA with one color mode, and HA drops every state in the other. device_side sets each qualifying light's and group's `homeassistant.light.supported_color_modes` override in Z2M (on by default, opt-out in options), so HA accepts both. Lands before the Z2M A60 run, which proves it, and backs out 13i's xy write-back. |
 | 12 | `v0.1.0` ("v1" names the scope, not the version) | feature complete for this plan; scope limited to what rig runs (and any tester reports) cover; README feature table current; release checklist adapted from hue_dimmer; the `predicted_state` default reviewed (flip it to off if flaky), on the regression issues and rig runs since it landed. |
 | 9b | Remote tester flow (after `v0.1.0`) | **plan in /plan first**; starts when an adapter needs hardware the rig lacks (a reported bug on someone else's device, a community integration such as Z-Wave JS). Standalone tester runner: one file (`uv run`, PEP 723 inline metadata, aiohttp WebSocket + PyYAML), talks to HA_URL + long-lived token, assumes integration installed via HACS or by hand (no deploy), runs 9a's YAML step files with a confirmation gate on every run; `tests/rig/client.py` moved to a location both the runner and `scripts/rig.py` import; runner prints a prefilled `test-report.yml` issue body; RC-only umbrella Repairs issue with multi-select flow and prefilled per-test links; bench files filled from tester reports. |
 

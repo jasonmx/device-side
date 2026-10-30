@@ -133,6 +133,39 @@ which matches the IEEE-keyed `devices` map before `friendly_name`). A group's ID
 survives a rename: `resolveEntity` falls back to `getGroup`, which matches the ID-keyed `groups` map
 before `friendly_name`.
 
+### What Device Side changes in Zigbee2MQTT
+
+Device Side sets three of Z2M's per-device and per-group options, each logged at info level when it changes:
+
+- **`hue_native_control`**, on a Hue bulb or a group with one, before a timer with a color, so the light comes
+  on in that color rather than its last one (see `turn_on_for`).
+- **`filtered_cache`**, before the first `get_attributes` read of a device, so a read's answer isn't cached and
+  resent in every later message (see `get_attributes`).
+- **`homeassistant.light.supported_color_modes`**, on every full-color light and group, so Home Assistant shows
+  the light's color in either color mode (below).
+
+**Color modes.** A light whose Z2M definition exposes both `color_xy` and `color_hs` can be in either mode, but
+Z2M announces only one of them to Home Assistant, usually `xy`. When the bulb is in the other (after a hue or
+saturation call, a Hue gradient scene, a remote's binding, or a power cut), Z2M reports `color_mode: "hs"`, and
+Home Assistant rejects a mode it wasn't announced: it keeps showing the old color, even as Z2M resends the state
+every few minutes ([Koenkk/zigbee2mqtt#28757](https://github.com/Koenkk/zigbee2mqtt/issues/28757)). Z2M declined
+to announce both modes by default, as some lights handle mixed modes badly
+([#33025](https://github.com/Koenkk/zigbee2mqtt/issues/33025)).
+
+So Device Side sets the light's Home Assistant override in Z2M to `xy`, `hs`, and `color_temp` where the light
+has it. Z2M applies the override to its discovery message at once, Home Assistant keeps the entity, and from
+then on accepts every state Z2M sends. The bulb itself is never touched. A group is changed when every member
+qualifies. Lights exposing one color model, and lights on an endpoint (`light_l1`), are left alone. Device Side
+does this at setup and again whenever Z2M announces a device or group change (a device joining, being
+interviewed, coming back after a power cut, a group's members changing), reading Z2M's settings each time. An
+override of your own is never changed, and a light you excluded from discovery is left alone.
+
+**Opting out.** Turn off "Fix colors of full-color Zigbee2MQTT lights" in Device Side's options, or delete Device
+Side. Z2M's settings can't delete an override (a `null` there strips the setting from Home Assistant's
+announcement instead), so Device Side writes back the modes Z2M announces by itself, wherever the value is still
+the one it set, and Home Assistant goes back to Z2M's single mode. Turning the option back on replaces those
+again.
+
 ### `turn_on_for`
 
 For **light entities without fields**: publishes `{"state":"ON","on_time":<seconds>}` to the
@@ -246,54 +279,55 @@ skipped.
 
 Lights only, as for `turn_on_for`.
 
-### `move` and `stop`
+### Raise, lower and `stop`
 
-`move` covers `brightness`, `saturation` and `hue`. No integration moves color temperature: every stop of a color
-temperature fade on a Hue bulb, the Hue bridge's own included, makes a visible jump, because the bulb's output
-during the fade departs from the value it reports.
+`raise_brightness`, `lower_brightness`, `raise_saturation`, `lower_saturation`, `raise_hue` and `lower_hue` each
+move one attribute one way. No integration moves color temperature: every stop of a color temperature fade on a Hue
+bulb, the Hue bridge's own included, makes a visible jump, because the bulb's output during the fade departs from
+the value it reports.
 
 Brightness and saturation are each one publish of the end point (the limit, or the end of the range) with a
-`transition` of `sweep_time` × the fraction of the range left, which the bulb then runs on its own. In one call
-they are two publishes, and the bulb runs both. Brightness up is `{"state": "ON", "brightness", "transition"}`
-and turns the light on. An off bulb keeps its level and would fade up from there, so a light that is off is first
+`transition` of `sweep_time` × the fraction of the range left, which the bulb then runs on its own. A brightness
+call and a saturation call can overlap, and the bulb runs both. `raise_brightness` publishes `{"state": "ON",
+"brightness", "transition"}` and turns the light on. An off bulb keeps its level and would fade up from there, so a light that is off is first
 turned on at the bottom, `{"state": "ON", "brightness": 1, "transition": 0}` (one publish to a group that is all
-off, else to each off member). Down to 0 % is Z2M's soft off, `{"state": "OFF",
+off, else to each off member). `lower_brightness` to 0 % is Z2M's soft off, `{"state": "OFF",
 "transition"}`, which keeps the level for the next plain on. Saturation is written as a color at the light's
 current hue, `{"color": {"hue", "saturation"}, "transition"}`: with Z2M's `hue_native_control` on, the bulb fades
-it in xy and holds its hue. Saturation and hue move only a light that is on, so on a light that is off, as for a
-move down, the result is `unchanged` with `off`. An attribute already at its limit is left out, and a move with
-nothing left to do is `unchanged` with `at_limit`.
+it in xy and holds its hue. Saturation and hue move only a light that is on, so on a light that is off, as for
+`lower_brightness`, the result is `unchanged` with `off`. A call already at its limit is `unchanged` with
+`at_limit`.
 
-Hue is Z2M's `hue_move`, a cycle around the color wheel the bulb keeps running until a stop. Its rate is
+`raise_hue` and `lower_hue` are Z2M's `hue_move`, a cycle around the color wheel the bulb keeps running until a stop. Its rate is
 `254 / sweep_time` steps of the wheel per second, rounded, so `sweep_time` is one full cycle. ZCL takes 1 to
 254 steps per second, so a `sweep_time` under 1 s or over 254 s is clamped and the result carries `clamped_to`.
-Hue and saturation are dropped, with `fields_dropped`, on a light whose Z2M definition lacks the `color_hs`
+A hue or saturation call is `unchanged` with `fields_dropped` on a light whose Z2M definition lacks the `color_hs`
 feature (read from `zigbee2mqtt/bridge/devices`), and on a group with any such member.
 
-`stop` sends `brightness_move: stop` to a light that is on, `hue_move: stop` where a hue move of Device Side's is
-cycling, and a raw `stopMoveStep` where its saturation move is fading. Z2M's own `saturation_move: stop` halts only
+`stop` sends `brightness_move: stop` to a light that is on, `hue_move: stop` where Device Side's hue cycle is
+running, and a raw `stopMoveStep` where its saturation fade is running. Z2M's own `saturation_move: stop` halts only
 the saturation attribute and lets the xy fade drift on. Each is its own publish, the color ones first: Z2M reads
 the light back about 0.7 s after a brightness stop before it sends the next key of the same message. A light
 that is off, with no soft off of Device Side's fading it, is `unchanged` with `off`.
 
 Z2M publishes a fade's end value at once and reads the light back within a second of a brightness or hue stop.
-Device Side remembers each move and stop for its duration plus 2 seconds, so a move after a stop starts from where
-the light halted. Once a fade has run, the light's state and brightness are read back (`{"state": "", "brightness":
+Device Side remembers each raise, lower and stop for its duration plus 2 seconds, so the next one after a stop
+starts from where the light halted. Once a fade has run, the light's state and brightness are read back (`{"state": "", "brightness":
 ""}` on its get topic), so Home Assistant ends right even if a `get_attributes` read mid-fade overwrote the end
-value. A new move or a stop replaces the pending read.
+value. A new call for the same attribute, or a stop, replaces the pending read.
 
-**Color after a stop.** Z2M announces a color light to Home Assistant with `xy` or `hs`, never both, and after a
-hue or saturation command publishes the color as `hs`, which Home Assistant drops for a light announced with `xy`
-([Koenkk/zigbee2mqtt#28757](https://github.com/Koenkk/zigbee2mqtt/issues/28757)). So 1 s after a hue or saturation
-stop, and at the end of a saturation move, Device Side reads such a light's `colorMode`, `currentX` and `currentY`
-(as `get_attributes` reads them). If the bulb is in hs mode, it writes the bulb's own x/y back with `transition: 0`:
-the bulb doesn't change, Z2M then publishes `xy`, and the bulb stays in xy mode. Otherwise it asks Z2M for the
-color (`{"color": ""}` on the get topic): after a stop of an xy fade, Z2M's own read-back carries the fade's end
-point. A light announced with `hs` gets the color get after a saturation stop only, which Z2M doesn't read back.
-A read or write that fails is logged as a warning and leaves Home Assistant's color stale; the result is still
+**Color after a stop.** A saturation stop is a raw command, which Z2M doesn't read back, and after a stop of an
+xy fade Z2M's own read-back carries its cached x/y, the fade's end point. So 1 s after a saturation stop, and at the
+end of a saturation fade, Device Side asks Z2M for the color (`{"color": ""}` on the get topic), and Z2M publishes
+what it reads. A get that fails is logged as a warning and leaves Home Assistant's color stale; the result is still
 `sent`.
 
-**Groups.** A group gets one publish per attribute to its group topic, so its members fade together. Its start is
+After a hue or saturation command the bulb is in hs mode, and Z2M publishes the color as `hs`. Home Assistant takes
+it because Device Side announces the light with both color modes (see [What Device Side changes in
+Zigbee2MQTT](#what-device-side-changes-in-zigbee2mqtt)). With that option off, it drops the color and keeps showing
+the old one until the bulb is next in xy mode.
+
+**Groups.** A group gets one publish to its group topic, so its members fade together. Its start is
 the mean of its members that are on, and each member's fade is remembered from its own start. Z2M reads a group's
 stop back from its first member only, so the color after a stop, and the read-back once a fade has run, go to each
 member on its own.
@@ -336,8 +370,9 @@ firmware. Most Z2M-supported lights cancel the timer on any state change.
   `timeout`. Read a large group's members by area or label instead, which reads them four at a time.
 - **A color stop costs a read and a write.** On a light Home Assistant lists with `xy`, each hue or saturation
   stop adds a Zigbee read and a write or get, 1 s later, and leaves the bulb in xy mode (Color after a stop, above).
-- **A change from elsewhere mid-move.** A brightness or saturation change made outside Device Side within a move's
-  duration plus 2 seconds isn't noticed, so a move started then begins from the prediction, not from the change.
+- **A change from elsewhere mid-fade.** A brightness or saturation change made outside Device Side within a fade's
+  duration plus 2 seconds isn't noticed, so a raise or lower started then begins from the prediction, not from the
+  change.
 - **No confirmation.** Z2M's MQTT interface does not synchronously confirm the timer started.
   The result is always `sent`, never `confirmed`, regardless of whether the device accepted the
   command.
@@ -672,51 +707,51 @@ One failing light doesn't stop the rest: the result is `sent` with `some_lights_
 `rejected` if every light failed. All-Day (smart) scenes are refused with `smart_scene`;
 a scene the bridge no longer has is `rejected` with `scene_not_found`.
 
-### `move` and `stop`
+### Raise, lower and `stop`
 
-`move` covers `brightness`; `saturation` is refused with `fields_not_tested` until it is tested,
-and `hue` is refused because a hue rotation isn't a straight line the bridge can fade along. No
+Hue takes `raise_brightness` and `lower_brightness`. The saturation actions have no Hue adapter until they are
+tested, and the hue actions none because a hue rotation isn't a straight line the bridge can fade along. No
 integration moves color temperature, as every stop of its fade on a Hue bulb makes a visible jump
-(Zigbee2MQTT's `move` and `stop`, above). A move is one write: the end point (the limit, or the end of
+(Zigbee2MQTT's raise, lower and `stop`, above). Each call is one write: the end point (the limit, or the end of
 the range) with a duration of `sweep_time` × the fraction of the range left, which the bridge then
 runs on its own.
 
-Moving brightness up turns the light on, from the bottom if it was off. Moving down to 0 % is a
+`raise_brightness` turns the light on, from the bottom if it was off. `lower_brightness` to 0 % is a
 plain soft off: `on: false` with the duration, so the bridge keeps the stored brightness and the
-next plain on comes back at it. Brightness on a light that can't dim (an on/off light) is dropped,
+next plain on comes back at it. On a light that can't dim (an on/off light) the call is `unchanged`
 with `fields_dropped`. A light already at or past the limit is `unchanged` with `at_limit` and
 nothing is sent.
 
-A room moves with one write to its `grouped_light`, so its lights converge on the end point
+A room takes one write to its `grouped_light`, so its lights converge on the end point
 together. `stop` sends the bridge's dimming stop to the light or room. The bridge refuses a dimming stop during a soft off, so a soft off Device Side
 started is cut by writing `on: true` with the predicted brightness and no duration, light by light
 for a room. A light that is off, or fading off from elsewhere, has nothing Device Side can stop: it
 is `unchanged` with `off` and nothing is sent.
 
 While a fade runs the bridge reports its end value, and after a stop it reports where the light
-halted late or not at all (Tested behavior, below). Device Side remembers each move and stop for its
-duration plus 15 seconds and predicts the brightness of each light meanwhile,
-so a move after a stop continues from where the light halted, and `get_attributes` returns the
+halted late or not at all (Tested behavior, below). Device Side remembers each raise, lower and stop for
+its duration plus 15 seconds and predicts the brightness of each light meanwhile,
+so the next one after a stop continues from where the light halted, and `get_attributes` returns the
 predicted values.
 
-A change made elsewhere ends the prediction, so the next move starts from the brightness the bridge
+A change made elsewhere ends the prediction, so the next raise or lower starts from the brightness the bridge
 reports. A bulb reports late, stale, and off any straight line (Tested behavior, below), so Device
-Side doesn't judge a report by its value. While it remembers a move or stop, it takes every report
+Side doesn't judge a report by its value. While it remembers a raise, lower or stop, it takes every report
 of what it moved (brightness and on/off) from that light as its own, with two
 exceptions, both a change from elsewhere (the Hue app, a dimmer switch, a Hue automation): a switch
-to off while the light is fading to, or halted at, a lit level, and a report of anything the move
-didn't change, such as a color temperature report during a brightness move. A scene recalled on the bridge ends the prediction of its room's or zone's lights, and a light
+to off while the light is fading to, or halted at, a lit level, and a report of anything the fade
+didn't change, such as a color temperature report during a brightness fade. A scene recalled on the bridge ends the prediction of its room's or zone's lights, and a light
 or scene call from Home Assistant ends the prediction of every Hue light it targets at once, whatever
 its value, as do `set_attributes` and `set_scene`. Not caught: a brightness change, or a switch to on,
-from outside Home Assistant while a move or stop is remembered, such as a light turned back on in the
+from outside Home Assistant while a raise, lower or stop is remembered, such as a light turned back on in the
 Hue app within 15 seconds of a fade to off.
 
 With **Show predicted brightness during Hue fades** on (the default), Home Assistant shows Device
 Side's predictions in place of those reports: the brightness at the start while a fade runs, where a
 stop halted the light, and the end once the fade has run. A fade to off shows the light on until it
-ends, a move up from off shows it on at its dimmest, and a room shows the mean of its lit lights. A
+ends, a raise from off shows it on at its dimmest, and a room shows the mean of its lit lights. A
 change caught as made elsewhere shows at once; one not caught shows once the bridge next reports
-after the move or stop is no longer remembered. Nothing is sent while a fade runs, so a dashboard slider holds
+after the raise, lower or stop is no longer remembered. Nothing is sent while a fade runs, so a dashboard slider holds
 still and then jumps to the stop or the end. After Home Assistant restarts, or reconnects to the
 bridge, mid-fade, it shows what the bridge reports. To always show what the bridge reports, turn the
 option off: Settings › Devices & services › Device Side › Configure.
@@ -771,7 +806,7 @@ it arrives, so Home Assistant shows what is listed here.
   events, one per attribute. The bridge takes a dimming stop and a color temperature stop in one
   write, on a light and on a zone.
 - **A brightness write never reports a color.** Across the full Hue rig suite on 2026-10-27, every
-  report of a light during or after Device Side's brightness moves and stops held only `on` and
+  report of a light during or after Device Side's brightness raises, lowers and stops held only `on` and
   `dimming`; `color_temperature` came only from color writes, and `color` never.
 - **A scene recalled on the bridge reports its status:** `status.active` turns `static` within
   about 1 s of its lights' reports, before or after them. A light whose color the scene leaves alone

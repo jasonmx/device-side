@@ -1,0 +1,72 @@
+# hue_dimmer tests/RELEASE_CHECKLIST.md §2 as steps, lowering; raise_brightness.yaml has the rest, and stop.yaml
+# stopping a lower to off. Each test runs on a lamp and then a room; on the room, expect_state checks every member
+# light. HA shows a fade's end value at once, so samples read device_side: Hue's prediction, Zigbee2MQTT's and ZHA's
+# live reads, in percent.
+action: lower_brightness
+rig_seconds: 400
+tests:
+  - name: lower_to_off  # §2.2; the default sweep time is under 10 s
+    roles: [light_ct, group]
+    setup:
+      - set: {state: on, brightness_pct: 100}
+    steps:
+      - call: {}
+      - expect_response: {status: expected, integration: self}
+      - expect_state: {state: off, within: 10}
+    observe:
+      see: The light at full, fading to off in under 10 s.
+      watch: Steps on the way down, and that it ends off.
+      ask: Did it fade smoothly and turn off at the end?
+
+  - name: soft_off_keeps_level  # ZHA puts the start level back once its soft off has run, so a plain on returns there
+    roles: [light_ct, group]
+    only: [zha]
+    setup:
+      - set: {state: on, brightness_pct: 60}
+    steps:
+      - call: {sweep_time: 3}  # 60 % to off takes 1.8 s; the restore follows 1 s after
+      - expect_response: {status: expected, integration: self}
+      - expect_state: {state: off, within: 2 + tol}
+      - wait: 2
+      - expect_state: {state: off}
+      - set: {state: on}
+      - expect_state: {state: on, brightness: {min: 148, max: 158}, within: 2}
+    observe:
+      see: The light at 60 %, fading to off over 1.8 s, dark for about 3 s, then turned on with no brightness given.
+      watch: 'While dark: no flash or glow. At the turn on: it comes straight back at 60 %, not dim.'
+      ask: Did it stay dark, then come back on at the 60 % it started from, with no dim start?
+
+  - name: lower_to_a_limit  # §2.4
+    roles: [light_ct, group]
+    steps:
+      - set: {state: on, brightness_pct: 100}
+      - call: {limit: 30, sweep_time: 5}
+      - expect_state: {state: on, brightness: {min: 70, max: 84}, within: 4 + tol}
+      - wait: 2
+      - expect_state: {state: on, brightness: {min: 70, max: 84}}
+
+  - name: lower_stop_lower  # §2.5 with lower; watched in stop.yaml (the cut) and raise_stop_raise
+    roles: [light_ct, group]
+    setup:
+      - set: {state: on, brightness_pct: 90}
+    steps:
+      - call: {sweep_time: 10}
+      - wait: 3
+      - call: {action: stop}
+      - sample: {attribute: brightness, for: 4, expect: steady, source: device_side}
+      - call: {sweep_time: 10}
+      - sample: {attribute: brightness, for: 2, expect: falling, min: 12, source: device_side}
+
+  - name: light_raised_mid_room_lower  # needs light_ct to be one of the group's lights
+    roles: [group]
+    setup:
+      - set: {state: on, brightness_pct: 100}
+    steps:
+      - call: {sweep_time: 10}
+      - wait: 4
+      - call: {action: raise_brightness, target: light_ct, sweep_time: 10}
+      - expect_response: {target: light_ct, status: expected, integration: self}
+    observe:
+      see: The room at full, fading over 10 s; after 4 s the lamp alone turns back up.
+      watch: 'The lamp as it turns: no jump to the bottom or top first.'
+      ask: Did the lamp turn back up from where the room's fade had it, without jumping to the bottom or top first?

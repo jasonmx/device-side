@@ -43,7 +43,7 @@ light field, so a timed call still runs its timer. A call left nothing to do by 
 `fields_dropped`. An empty group is skipped silently, as core's group expansion yields nothing for one.
 
 **A value the device can't reach** passes the schema but lies outside what the device can do: a timer longer
-than its counter, or a `move` `sweep_time` outside a native hue cycle's 1–254 s (Zigbee2MQTT). It is clamped to
+than its counter, or a `raise_hue` or `lower_hue` `sweep_time` outside a native hue cycle's 1–254 s (Zigbee2MQTT). It is clamped to
 that range and the result carries `clamped_to`, the value used. It isn't refused, as the call can still do the
 nearest thing, and it isn't `fields_dropped`, which is for a field the light lacks. Rounding inside the range
 isn't reported.
@@ -80,4 +80,4 @@ same response shape, and hue_dimmer's input habits: `0` leaves `min_brightness`,
 `color_temp_kelvin` unset, and given several colors, `rgb_color` wins, then `hs_color`, then `xy_color`.
 Before changing any of these, check hue_dimmer
 ([jasonmx/hue-smooth-dimming](https://github.com/jasonmx/hue-smooth-dimming)) and say what breaks for its
-users. `move`/`stop` replace raise/lower by design and are the exception.
+users. hue_dimmer's `raise`/`lower` are `raise_brightness`/`lower_brightness` here, with the same fields.

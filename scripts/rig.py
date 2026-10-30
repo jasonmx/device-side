@@ -108,7 +108,7 @@ def select(
     step_files: list[StepFile], inventory: Inventory, integrations: list[str] | None, actions: list[str] | None = None
 ) -> list[Suite]:
     """Every step file on every inventory integration, narrowed to --integration and --action. An action takes every
-    step file for it (move and move-predicted_state), whole, so each still writes its record."""
+    step file for it (lower_brightness and lower_brightness-predicted_state), whole, so each still writes its record."""
     return [
         Suite(step_file, integration)
         for step_file in step_files
