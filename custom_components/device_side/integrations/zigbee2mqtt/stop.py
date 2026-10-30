@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant
 from .addressing import topic
 from .bridge import publish
 from .color_refresh import DELAY_S, refresh_color
-from .move import hs_color, hue_moves, light_brightness, lights_of, lit, read_back_key, transition_cache
+from .fade import hs_color, hue_moves, light_brightness, lights_of, lit, read_back_key, transition_cache
 from ...core.adapter import Adapter
 from ...core.dispatcher import EMPTY_GROUP
 from ...core.models import EntityResult, Request, Status, Target
@@ -87,9 +87,11 @@ class Z2MStop(Adapter[Request]):
                 # A raw stopMoveStep publishes nothing, so Z2M has no read-back of its own.
                 await refresh_color(hass, target, silent=bool(halts[SATURATION]))
 
-            # Replaces the end read-back of the move this halts.
+            # Replaces the end read-backs of the moves this halts.
             color_halted = hue or halts[SATURATION]
-            get_runtime(hass).schedule(hass, read_back_key(target), [(DELAY_S, refresh)] if color_halted else [])
+            runtime = get_runtime(hass)
+            runtime.schedule(hass, read_back_key(target, BRIGHTNESS), [])
+            runtime.schedule(hass, read_back_key(target, SATURATION), [(DELAY_S, refresh)] if color_halted else [])
             return self.result(target, Status.SENT)
 
         return await self.gather(hass, targets, send)

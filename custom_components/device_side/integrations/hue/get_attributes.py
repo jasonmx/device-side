@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util.color import color_temperature_mired_to_kelvin
 
 from .bridge import bridge_api, resource_id
-from .move import lit
+from .fade import lit
 from .transition_cache import transition_cache
 from ...core.adapter import Adapter
 from ...core.color import xy_row

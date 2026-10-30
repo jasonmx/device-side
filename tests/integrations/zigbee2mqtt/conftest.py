@@ -2,7 +2,7 @@ import pytest
 from homeassistant.config_entries import ConfigEntryState
 
 from custom_components.device_side.integrations.zigbee2mqtt import bridge, read
-from custom_components.device_side.integrations.zigbee2mqtt.move import transition_cache
+from custom_components.device_side.integrations.zigbee2mqtt.fade import transition_cache
 
 from ...fixtures.z2m import GROUPS, IEEE, INFO, Broker, add_z2m_entity, add_z2m_group, z2m_entry
 
@@ -100,3 +100,14 @@ def commands(broker) -> list[tuple[str, dict]]:
         for p in broker.published
         if not p["topic"].startswith("zigbee2mqtt/bridge/") and "read" not in p["payload"]
     ]
+
+
+SENT = {"status": "sent", "integration": "zigbee2mqtt"}
+SET = f"zigbee2mqtt/{IEEE}/set"
+GET = f"zigbee2mqtt/{IEEE}/get"
+# An off light is put here first, so a fade from off starts at the bottom, not the level it kept.
+BOTTOM = {"state": "ON", "brightness": 1, "transition": 0}
+
+
+def unchanged(detail: str) -> dict:
+    return {"status": "unchanged", "integration": "zigbee2mqtt", "detail": detail}

@@ -7,7 +7,7 @@ from ..core.models import ActionKind, Request
 
 
 class Stop(Action[Request]):
-    """Halt every move in flight on the target, where it is now."""
+    """Halt every raise and lower in flight on the target, whichever attribute, where it is now."""
 
     key: ClassVar[str] = "stop"
     kind: ClassVar[ActionKind] = ActionKind.COMMAND

@@ -9,20 +9,20 @@ tests:
     setup:
       - set: {state: on, brightness_pct: 10}
     steps:
-      - call: {action: move, brightness: up, sweep_time: 10}
+      - call: {action: raise_brightness, sweep_time: 10}
       - wait: 3
       - call: {}
       - expect_response: {status: expected, integration: self}
       - expect_state: {state: on, brightness: {min: 84, max: 122}, within: tol}
-      - wait: 7  # past where the move would have ended
+      - wait: 7  # past where the raise would have ended
       - expect_state: {state: on, brightness: {min: 84, max: 122}}
 
-  - name: shows_the_halt_of_a_move_to_off  # the cut: HA stays on throughout
+  - name: shows_the_halt_of_a_lower_to_off  # the cut: HA stays on throughout
     roles: [light_ct, group]
     setup:
       - set: {state: on, brightness_pct: 100}
     steps:
-      - call: {action: move, brightness: down, sweep_time: 10}
+      - call: {action: lower_brightness, sweep_time: 10}
       - wait: 3
       - call: {}
       - expect_response: {status: expected, integration: self}

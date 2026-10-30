@@ -71,7 +71,7 @@ async def test_the_move_is_recorded_before_its_write(hass, bridge, cache):
         return await request(*args, **kwargs)
 
     bridge.api.request = recording
-    await call(hass, "move", {"entity_id": "light.one", "brightness": "up"})
+    await call(hass, "raise_brightness", {"entity_id": "light.one"})
 
     assert followed == [True]
 
@@ -113,7 +113,7 @@ async def test_a_grouped_light_is_decided_by_its_lights(hass, bridge, cache, clo
 
 async def test_a_real_change_from_the_bridge_forgets_the_light(hass, bridge, cache, clock):
     await setup_room(hass, bridge)
-    await call(hass, "move", {"entity_id": "light.one", "brightness": "up", "sweep_time": 10})
+    await call(hass, "raise_brightness", {"entity_id": "light.one", "sweep_time": 10})
     clock.now += 2.0
     api = bridge.api
 
@@ -133,28 +133,28 @@ async def test_a_refused_move_records_nothing(hass, bridge, cache):
     bridge.failing.add("one")
 
     with pytest.raises(HomeAssistantError):
-        await call(hass, "move", {"entity_id": "light.one", "brightness": "up"})
+        await call(hass, "raise_brightness", {"entity_id": "light.one"})
 
     assert not cache.follows("one")
 
 
-@pytest.mark.parametrize(("action", "data"), [("move", {"brightness": "up"}), ("stop", {})])
-async def test_a_refused_write_puts_back_the_prediction_it_replaced(hass, bridge, cache, clock, action, data):
+@pytest.mark.parametrize("action", ["raise_brightness", "stop"])
+async def test_a_refused_write_puts_back_the_prediction_it_replaced(hass, bridge, cache, clock, action):
     await setup_room(hass, bridge)
-    await call(hass, "move", {"entity_id": "light.one", "brightness": "down", "brightness_limit": 10})
+    await call(hass, "lower_brightness", {"entity_id": "light.one", "limit": 10})
     clock.now += 0.5
     before = cache.live("one", BRIGHTNESS)
     bridge.failing.add("one")
 
     with pytest.raises(HomeAssistantError):
-        await call(hass, action, {"entity_id": "light.one", **data})
+        await call(hass, action, {"entity_id": "light.one"})
 
     assert cache.live("one", BRIGHTNESS) == before
 
 
 async def test_a_refused_write_from_set_attributes_keeps_the_prediction(hass, bridge, cache, clock):
     await setup_room(hass, bridge)
-    await call(hass, "move", {"entity_id": "light.one", "brightness": "up"})
+    await call(hass, "raise_brightness", {"entity_id": "light.one"})
     clock.now += 1.0
     bridge.failing.add("one")
 
@@ -226,8 +226,8 @@ async def test_the_filter_attaches_once_per_bridge_and_detaches_on_unload(hass, 
     api = bridge.api
     before = len(api.events._subscribers)
 
-    await call(hass, "move", {"entity_id": "light.one", "brightness": "up"})
-    await call(hass, "move", {"entity_id": "light.two", "brightness": "up"})
+    await call(hass, "raise_brightness", {"entity_id": "light.one"})
+    await call(hass, "raise_brightness", {"entity_id": "light.two"})
     assert len(api.events._subscribers) == before + 1
 
     # A reloaded hue entry is a new aiohue bridge: the old one's filter is detached and a new one attached.

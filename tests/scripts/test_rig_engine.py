@@ -871,6 +871,21 @@ async def test_a_device_side_sample_reads_get_attributes_not_ha(tmp_path):
     assert outcomes(result) == {"ramps[light_dimmable]": (Outcome.PASS, "")}
 
 
+async def test_a_sample_reads_a_dotted_attribute(tmp_path):
+    text = SAMPLE.replace("EXPECT", "falling").replace("attribute: brightness", "attribute: hs_color.1")
+    text = text.replace("max: 200}", "max: 100, source: device_side}")
+    saturation = iter(range(90, 0, -5))
+
+    def respond(ha, action, data):
+        if action == "get_attributes":
+            return {data["entity_id"]: {"hs_color": [200, next(saturation)]}}
+        return {data["entity_id"]: {"status": "confirmed"}}
+
+    ha = FakeHA({"light.lamp": {}}, respond)
+    result = await run_one(ha, suite(tmp_path, text), inventory(light_dimmable="light.lamp"))
+    assert outcomes(result) == {"ramps[light_dimmable]": (Outcome.PASS, "")}
+
+
 MATCHES_READ = """
 action: turn_on_for
 rig_seconds: 5
@@ -914,32 +929,32 @@ def test_expect_matches_read_needs_attributes(tmp_path):
         suite(tmp_path, text.replace("WITHIN", "0"))
 
 
-MOVES = """
-action: move
+RAISES = """
+action: raise_brightness
 rig_seconds: 5
 tests:
-  - name: moves_the_room
+  - name: raises_the_room
     roles: [group]
     steps:
-      - call: {brightness: up, sweep_time: 0.2}
-  - name: moves_a_member
+      - call: {sweep_time: 0.2}
+  - name: raises_a_member
     roles: [light_ct]
     steps:
-      - call: {brightness: up}
+      - call: {}
 """
 
 
 @pytest.mark.parametrize(("settle", "gap"), [({"fake": 0.3}, (0.45, 1.0)), ({}, (0.0, 0.1))])
-async def test_a_case_waits_out_the_predictions_a_move_left_on_its_lights(tmp_path, settle, gap):
+async def test_a_case_waits_out_the_predictions_a_raise_left_on_its_lights(tmp_path, settle, gap):
     called_at = []
 
     def respond(ha, action, data):
-        if action == "move":  # the snapshot reads get_attributes too
+        if action == "raise_brightness":  # the snapshot reads get_attributes too
             called_at.append(asyncio.get_running_loop().time())
         return {data["entity_id"]: {"status": "sent", "integration": "fake"}}
 
     result = await run(
-        [suite(tmp_path, MOVES, "fake")],
+        [suite(tmp_path, RAISES, "fake")],
         inventory("fake", group="light.room", light_ct="light.a"),
         GROUP_REGISTRY,
         group_ha(respond),
@@ -951,10 +966,18 @@ async def test_a_case_waits_out_the_predictions_a_move_left_on_its_lights(tmp_pa
     assert gap[0] <= called_at[1] - called_at[0] < gap[1]
 
 
-def test_the_default_sweep_time_matches_the_move_action():
-    from custom_components.device_side.actions.move import DEFAULT_SWEEP_TIME
+def test_the_default_sweep_time_matches_the_ramp_actions():
+    from custom_components.device_side.actions.ramp import DEFAULT_SWEEP_TIME
 
-    assert engine.MOVE_SWEEP_TIME_S == DEFAULT_SWEEP_TIME
+    assert engine.SWEEP_TIME_S == DEFAULT_SWEEP_TIME
+
+
+def test_the_engine_knows_every_raise_and_lower_action():
+    # Their cases wait out the predictions the calls leave behind.
+    from custom_components.device_side.actions import discover
+    from custom_components.device_side.actions.ramp import Ramp
+
+    assert {action.key for action in discover() if issubclass(action, Ramp)} == engine._RAMPS
 
 
 async def test_duration_before_any_call_fails_the_step(tmp_path):
@@ -1223,13 +1246,13 @@ def test_z2m_option_needs_an_option(tmp_path, args):
 
 
 def option_file(options: str = "") -> str:
-    lines = ["action: move", "rig_seconds: 5"] + ([f"options: [{options}]"] if options else [])
+    lines = ["action: raise_brightness", "rig_seconds: 5"] + ([f"options: [{options}]"] if options else [])
     return "\n".join([*lines, "tests:", "  - name: t", "    roles: [light_ct]", "    steps:", "      - call: {}", ""])
 
 
 def options_seen(admin: FakeAdmin) -> Callable:
     def respond(ha, action, data):
-        if action == "move":  # the snapshot reads get_attributes too
+        if action == "raise_brightness":  # the snapshot reads get_attributes too
             seen.append(dict(admin.options))
         return {data["entity_id"]: {"status": "sent", "integration": "fake"}}
 
@@ -1261,7 +1284,7 @@ async def test_each_suite_runs_with_its_options_and_the_rig_gets_its_own_back(tm
     assert respond.seen == [{"opt": False, "other": False}, {"opt": True, "other": False}]
     assert admin.options == {"opt": True, "other": False}  # as the rig had them
     assert admin.saved == [{"opt": False, "other": False}, {"opt": True, "other": False}]
-    assert [suite_result.suite.name for suite_result in result.suites] == ["move", "move-opt"]
+    assert [suite_result.suite.name for suite_result in result.suites] == ["raise_brightness", "raise_brightness-opt"]
 
 
 async def test_options_already_in_force_are_not_saved(tmp_path, monkeypatch):
@@ -1384,7 +1407,7 @@ async def test_a_suite_whose_adapter_has_options_needs_the_admin_token(tmp_path)
         out=out.append,
     )
     assert result.suites == []
-    assert "fake / move: needs HA_ADMIN_TOKEN, skipped" in out
+    assert "fake / raise_brightness: needs HA_ADMIN_TOKEN, skipped" in out
 
 
 async def test_an_option_outside_the_adapters_scope_is_a_schema_error(tmp_path):
@@ -1399,7 +1422,7 @@ async def test_an_option_outside_the_adapters_scope_is_a_schema_error(tmp_path):
 
 
 async def test_an_option_file_skips_an_adapter_without_the_option(tmp_path):
-    # move-predicted_state.yaml is Hue's: Zigbee2MQTT's move has no predicted_state.
+    # raise_brightness-predicted_state.yaml is Hue's: Zigbee2MQTT's raise_brightness has no predicted_state.
     out: list[str] = []
     result = await run(
         [suite(tmp_path, option_file("predicted_state"), "zigbee2mqtt")],
@@ -1410,7 +1433,7 @@ async def test_an_option_file_skips_an_adapter_without_the_option(tmp_path):
         out=out.append,
     )
     assert result.suites == []
-    assert "zigbee2mqtt / move: no options, steps.yaml skipped" in out
+    assert "zigbee2mqtt / raise_brightness: no options, steps.yaml skipped" in out
 
 
 def test_a_step_file_lists_options_by_name(tmp_path):
@@ -1427,8 +1450,8 @@ async def test_a_record_with_options_on_is_named_for_them(tmp_path):
 
     [path] = await write_records(result, FakeHA({}), REGISTRY, tmp_path / "bench", "2026-10-27", "rig run")
 
-    assert path == tmp_path / "bench" / "hue" / "move-predicted_state.md"
-    assert path.read_text().startswith("# Hue · move-predicted_state\n")
+    assert path == tmp_path / "bench" / "hue" / "raise_brightness-predicted_state.md"
+    assert path.read_text().startswith("# Hue · raise_brightness-predicted_state\n")
 
 
 # --- bridge ---------------------------------------------------------------------------------------------------

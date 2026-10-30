@@ -1,18 +1,15 @@
-"""Zigbee2MQTT stop: a stop per attribute a move of ours changes, the halts recorded, the end read-back cancelled."""
+"""Zigbee2MQTT stop: a stop per attribute we move, the halts recorded, the end read-backs cancelled."""
 
 import pytest
 
 from custom_components.device_side.core.transition import BRIGHTNESS, SATURATION
-from custom_components.device_side.integrations.zigbee2mqtt.move import hue_moves, transition_cache
+from custom_components.device_side.integrations.zigbee2mqtt.fade import hue_moves, transition_cache
 
-from .conftest import commands, group, light
+from .conftest import GET, SENT, SET, commands, group, light
 from ...conftest import advance, call, wall_clock_now
-from ...fixtures.z2m import IEEE
 
 pytestmark = pytest.mark.usefixtures("setup_production", "clock")
 
-SENT = {"status": "sent", "integration": "zigbee2mqtt"}
-SET = f"zigbee2mqtt/{IEEE}/set"
 BRIGHTNESS_STOP = {"brightness_move": "stop"}
 STOP_MOVE_STEP = {
     "command": {
@@ -45,7 +42,7 @@ async def test_an_off_light_is_unchanged(hass, broker):
 
 async def test_a_soft_off_of_ours_is_halted_where_it_is(hass, broker, clock):
     entity_id = light(hass, broker)
-    await call(hass, "move", {"entity_id": entity_id, "brightness": "down"})
+    await call(hass, "lower_brightness", {"entity_id": entity_id})
     hass.states.async_set(entity_id, "off", {})  # Z2M publishes off at the start of the fade
     clock.now += 1.5  # halfway from 60 % to off
 
@@ -58,20 +55,22 @@ async def test_a_soft_off_of_ours_is_halted_where_it_is(hass, broker, clock):
 
 
 @pytest.mark.parametrize(
-    ("move", "stops"),
+    ("actions", "stops"),
     [
-        pytest.param({"hue": "up"}, [{"hue_move": "stop"}, BRIGHTNESS_STOP], id="hue"),
-        pytest.param({"saturation": "up"}, [STOP_MOVE_STEP, BRIGHTNESS_STOP], id="saturation"),
+        pytest.param(["raise_hue"], [{"hue_move": "stop"}, BRIGHTNESS_STOP], id="hue"),
+        pytest.param(["raise_saturation"], [STOP_MOVE_STEP, BRIGHTNESS_STOP], id="saturation"),
         pytest.param(
-            {"brightness": "up", "saturation": "down", "hue": "up"},
-            [{"hue_move": "stop"}, STOP_MOVE_STEP, BRIGHTNESS_STOP],
-            id="all_three_color_first",
+            ["raise_brightness", "lower_saturation"], [STOP_MOVE_STEP, BRIGHTNESS_STOP], id="two_moves_color_first"
+        ),
+        pytest.param(
+            ["raise_brightness", "raise_hue"], [{"hue_move": "stop"}, BRIGHTNESS_STOP], id="brightness_and_hue"
         ),
     ],
 )
-async def test_each_attribute_a_move_of_ours_changes_gets_its_stop(hass, broker, move, stops):
+async def test_each_attribute_a_move_of_ours_changes_gets_its_stop(hass, broker, actions, stops):
     entity_id = light(hass, broker)
-    await call(hass, "move", {"entity_id": entity_id, **move})
+    for action in actions:
+        await call(hass, action, {"entity_id": entity_id})
     moved = len(commands(broker))
 
     await call(hass, "stop", {"entity_id": entity_id})
@@ -81,7 +80,7 @@ async def test_each_attribute_a_move_of_ours_changes_gets_its_stop(hass, broker,
 
 async def test_a_stop_ends_the_hue_cycle(hass, broker):
     entity_id = light(hass, broker)
-    await call(hass, "move", {"entity_id": entity_id, "hue": "up"})
+    await call(hass, "raise_hue", {"entity_id": entity_id})
 
     await call(hass, "stop", {"entity_id": entity_id})
     await call(hass, "stop", {"entity_id": entity_id})
@@ -94,8 +93,8 @@ async def test_a_stop_ends_the_hue_cycle(hass, broker):
 async def test_a_saturation_move_ends_the_hue_cycle(hass, broker):
     # The color write halts the bulb's hue cycle, so the next stop has no hue_move to stop.
     entity_id = light(hass, broker)
-    await call(hass, "move", {"entity_id": entity_id, "hue": "up"})
-    await call(hass, "move", {"entity_id": entity_id, "saturation": "up"})
+    await call(hass, "raise_hue", {"entity_id": entity_id})
+    await call(hass, "raise_saturation", {"entity_id": entity_id})
 
     await call(hass, "stop", {"entity_id": entity_id})
 
@@ -105,7 +104,8 @@ async def test_a_saturation_move_ends_the_hue_cycle(hass, broker):
 
 async def test_the_halts_are_recorded_at_their_predictions(hass, broker, clock):
     entity_id = light(hass, broker)
-    await call(hass, "move", {"entity_id": entity_id, "brightness": "up", "saturation": "down"})
+    await call(hass, "raise_brightness", {"entity_id": entity_id})
+    await call(hass, "lower_saturation", {"entity_id": entity_id})
     clock.now += 1  # 80 % brightness, 40 % saturation
 
     await call(hass, "stop", {"entity_id": entity_id})
@@ -118,7 +118,7 @@ async def test_the_halts_are_recorded_at_their_predictions(hass, broker, clock):
 
 async def test_a_group_is_stopped_with_one_publish_and_a_halt_per_member(hass, broker, clock):
     room = group(hass, broker, one={"brightness": 255}, two={"brightness": 51})
-    await call(hass, "move", {"entity_id": room, "brightness": "down"})
+    await call(hass, "lower_brightness", {"entity_id": room})
     clock.now += 1
 
     response = await call(hass, "stop", {"entity_id": room})
@@ -142,7 +142,7 @@ async def test_a_group_with_nothing_lit_is_unchanged(hass, broker):
 async def test_a_stop_cancels_the_moves_end_read_back(hass, broker):
     entity_id = light(hass, broker)
     start = wall_clock_now()
-    await call(hass, "move", {"entity_id": entity_id, "brightness": "up"})
+    await call(hass, "raise_brightness", {"entity_id": entity_id})
 
     await call(hass, "stop", {"entity_id": entity_id})
 
@@ -151,6 +151,20 @@ async def test_a_stop_cancels_the_moves_end_read_back(hass, broker):
         (SET, {"state": "ON", "brightness": 254, "transition": 2.0}),
         (SET, BRIGHTNESS_STOP),
     ]
+
+
+async def test_a_stop_of_two_moves_cancels_both_end_read_backs(hass, broker):
+    # The saturation halt's color refresh replaces the saturation fade's read-back; the brightness one is dropped.
+    entity_id = light(hass, broker)
+    start = wall_clock_now()
+    await call(hass, "raise_brightness", {"entity_id": entity_id})
+    await call(hass, "lower_saturation", {"entity_id": entity_id})
+    moved = len(commands(broker))
+
+    await call(hass, "stop", {"entity_id": entity_id})
+
+    await advance(hass, start, 5)
+    assert (GET, {"state": "", "brightness": ""}) not in commands(broker)[moved:]
 
 
 async def test_an_empty_group_is_skipped(hass, broker):
