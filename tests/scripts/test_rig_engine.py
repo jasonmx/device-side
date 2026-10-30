@@ -871,6 +871,21 @@ async def test_a_device_side_sample_reads_get_attributes_not_ha(tmp_path):
     assert outcomes(result) == {"ramps[light_dimmable]": (Outcome.PASS, "")}
 
 
+async def test_a_sample_reads_a_dotted_attribute(tmp_path):
+    text = SAMPLE.replace("EXPECT", "falling").replace("attribute: brightness", "attribute: hs_color.1")
+    text = text.replace("max: 200}", "max: 100, source: device_side}")
+    saturation = iter(range(90, 0, -5))
+
+    def respond(ha, action, data):
+        if action == "get_attributes":
+            return {data["entity_id"]: {"hs_color": [200, next(saturation)]}}
+        return {data["entity_id"]: {"status": "confirmed"}}
+
+    ha = FakeHA({"light.lamp": {}}, respond)
+    result = await run_one(ha, suite(tmp_path, text), inventory(light_dimmable="light.lamp"))
+    assert outcomes(result) == {"ramps[light_dimmable]": (Outcome.PASS, "")}
+
+
 MATCHES_READ = """
 action: turn_on_for
 rig_seconds: 5

@@ -3,7 +3,7 @@
 # HA shows a fade's end value at once, so samples read device_side: Hue's prediction, Zigbee2MQTT's live read, in
 # percent. Zigbee2MQTT doesn't notice a change from elsewhere mid-move.
 action: move
-rig_seconds: 900
+rig_seconds: 960
 tests:
   - name: raise  # §2.1
     roles: [light_ct, group]
@@ -152,3 +152,56 @@ tests:
       see: 'The light at hue 200° (sky blue), 90 % saturation, paling over 3 s to 30 %, then holding.'
       watch: 'The hue: it stays blue all the way, with no swing toward green or purple.'
       ask: Did it pale smoothly and stay the same blue, then hold?
+
+  # Brightness with saturation on Zigbee2MQTT: two fades on two clusters (Level, Color). Do they run together, and
+  # does the second command leave the first one running?
+  - name: brightness_and_saturation_together
+    roles: [light_color]
+    only: [zigbee2mqtt]
+    setup:
+      - set: {state: on, brightness_pct: 30, hs_color: [200, 90]}
+    steps:
+      # 30 % to 80 % takes 5 s; 90 % to 30 % saturation takes 6 s.
+      - call: {brightness: up, brightness_limit: 80, saturation: down, saturation_limit: 30, sweep_time: 10}
+      - expect_response: {status: expected, integration: self}
+      - sample: {attribute: brightness, for: 1.5, expect: rising, min: 30, max: 65, source: device_side}
+      - sample: {attribute: hs_color.1, for: 1.5, expect: falling, min: 50, max: 90, source: device_side}
+      - wait: 3 + tol
+      - expect_state: {state: on, brightness: {min: 195, max: 212}, hs_color.1: {min: 20, max: 40}}
+      - expect_matches_read: {attributes: [xy_color.0, xy_color.1], tolerance: 0.01, within: 2}
+    observe:
+      see: 'The light at 30 % (level 77), hue 200° (sky blue) at 90 % saturation. It brightens to 80 % (level 204) over 5 s and pales to 30 % saturation over 6 s, both from the start.'
+      watch: 'Both changes start together; at 5 s the brightness stops and the color pales for 1 s more, with no jump, flash or stall at either end.'
+      ask: Did it brighten and pale together, smoothly, with no jump when the brightness finished first?
+
+  - name: saturation_joins_a_brightness_move
+    roles: [light_color]
+    only: [zigbee2mqtt]
+    setup:
+      - set: {state: on, brightness_pct: 20, hs_color: [200, 90]}
+    steps:
+      - call: {brightness: up, sweep_time: 10}  # 20 % to 100 % takes 8 s
+      - wait: 2
+      - call: {saturation: down, saturation_limit: 30, sweep_time: 10}  # 90 % to 30 % takes 6 s, to 8 s
+      - expect_response: {status: expected, integration: self}
+      - sample: {attribute: brightness, for: 1.5, expect: rising, min: 35, max: 70, source: device_side}
+      - sample: {attribute: hs_color.1, for: 1.5, expect: falling, min: 50, max: 90, source: device_side}
+      - wait: 3 + tol
+      - expect_state: {state: on, brightness: {min: 250}, hs_color.1: {min: 20, max: 40}}
+      - expect_matches_read: {attributes: [xy_color.0, xy_color.1], tolerance: 0.01, within: 2}
+
+  - name: brightness_joins_a_saturation_move
+    roles: [light_color]
+    only: [zigbee2mqtt]
+    setup:
+      - set: {state: on, brightness_pct: 30, hs_color: [200, 90]}
+    steps:
+      - call: {saturation: down, saturation_limit: 30, sweep_time: 10}  # 90 % to 30 % takes 6 s
+      - wait: 2
+      - call: {brightness: up, brightness_limit: 80, sweep_time: 10}  # 30 % to 80 % takes 5 s, to 7 s
+      - expect_response: {status: expected, integration: self}
+      - sample: {attribute: hs_color.1, for: 1.5, expect: falling, min: 30, max: 75, source: device_side}
+      - sample: {attribute: brightness, for: 1.5, expect: rising, min: 30, max: 75, source: device_side}
+      - wait: 2 + tol
+      - expect_state: {state: on, brightness: {min: 195, max: 212}, hs_color.1: {min: 20, max: 40}}
+      - expect_matches_read: {attributes: [xy_color.0, xy_color.1], tolerance: 0.01, within: 2}

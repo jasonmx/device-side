@@ -1156,7 +1156,8 @@ class _CaseRun:
         await asyncio.sleep(max(seconds.eval(self.names), 0))
 
     async def _sample(self, args: dict, _following: str | None) -> None:
-        """Poll an attribute for `for` seconds; an absent attribute (a light that is off) reads as 0.
+        """Poll an attribute (dotted, as _lookup reads one) for `for` seconds; an absent attribute (a light that is
+        off) reads as 0.
 
         `source: device_side` reads device_side.get_attributes instead of HA's state, in its units (brightness in
         percent): mid-move it predicts where the light is, where HA shows a Hue fade's end value at once.
@@ -1191,11 +1192,11 @@ class _CaseRun:
     async def reading(self, entity_id: str, attribute: str, source: str) -> Any:
         if source == "ha":
             state = await self.ha.get_state(entity_id)
-            return state["attributes"].get(attribute) if state else None
+            return _lookup(state["attributes"], attribute) if state else None
         response = await self.ha.call_service(
             "device_side", "get_attributes", {"entity_id": entity_id}, return_response=True
         )
-        return ((response or {}).get(entity_id) or {}).get(attribute)
+        return _lookup((response or {}).get(entity_id) or {}, attribute)
 
     async def _do(self, instruction: str, _following: str | None) -> None:
         await self.answer(f"    {instruction} Press Enter when done... ")
