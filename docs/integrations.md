@@ -139,8 +139,8 @@ Device Side sets three of Z2M's per-device and per-group options, each logged at
 
 - **`hue_native_control`**, on a Hue bulb or a group with one, before a timer with a color, so the light comes
   on in that color rather than its last one (see `turn_on_for`).
-- **`filtered_cache`**, before the first `get_attributes` read of a device, so a read's answer isn't cached and
-  resent in every later message (see `get_attributes`).
+- **`filtered_cache`**, before the first `get_attributes` or `set_attributes` read of a device, so a read's answer
+  isn't cached and resent in every later message (see `get_attributes`).
 - **`homeassistant.light.supported_color_modes`**, on every full-color light and group, so Home Assistant shows
   the light's color in either color mode (below).
 
@@ -238,6 +238,33 @@ A command to a group uses the group's Z2M options, not its members', so for a ti
 Device Side turns `hue_native_control` on as an option of the group itself when any member is a Hue
 bulb (members read from `zigbee2mqtt/bridge/groups`). A group takes a color only when every member
 can show one, as Z2M exposes the features its members share.
+
+### `set_attributes`
+
+Publishes each light the Level and Color cluster `MoveTo…` commands through Z2M's generic `command` payload, never
+the `…WithOnOff` ones, so a light that is off stays off and comes on with the new settings. Each carries the ZCL
+`ExecuteIfOff` override (`optionsMask: 1, optionsOverride: 1`), which makes a light that is off store it, and a 0.4 s
+transition, the Hue bridge's default, so a light that is on fades as it would on Hue.
+
+The fields, units and names are Hue's and ZHA's (see Hue's `set_attributes`). A color goes as xy, or as hue and
+saturation on a light without xy; given a color and a color temperature, only the color is sent. A field the light
+can't take is dropped, and the result says `fields_dropped`.
+
+**Z2M's kept level.** After an off with a transition, Z2M keeps the level the light had and restores it on the next
+plain on, whatever the bulb now stores. So after each level it writes, Device Side also publishes
+`{"state": null, "brightness": <level>, "transition": 0.4}` to the same topic. Z2M replaces its kept level with
+the new one, and the light, which ignores the plain `moveToLevel` this sends, stays off.
+
+**Read back.** Z2M publishes no state after a raw command, so Device Side reads each written cluster live from
+each light. The answer updates Z2M's state, and Home Assistant's, as a report would. A light whose level or color
+temperature doesn't read back as written ignored the override, and is `rejected` with `not_stored`; a read that
+fails raises. Otherwise the result is `confirmed`. Color is not compared, as the bulb clamps it to its gamut, but
+it is still read, so Home Assistant shows what the bulb stored.
+
+A group is one groupcast per field, then every member is read, and the group is `confirmed` only when every member
+is. `min_brightness` and `max_brightness` alone clamp each member from its own level, so each member gets its own
+commands. A light already inside the range is `unchanged` with `within_limits`; an off light is clamped from the
+brightness Z2M holds for it. Lights only.
 
 ### `get_attributes`
 

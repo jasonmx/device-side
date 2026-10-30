@@ -56,8 +56,10 @@ and Hue (from the A60 move on). The rig lock and the bulb moves are shared.
   `docs/bench/{hue,zigbee2mqtt}/move*.md` and rewrite `stop*.md`; it measures the new hue, saturation and two-call
   stop ranges for the first time.
 - [ ] **13j** Z2M `set_attributes` while off. Z2M code freezes.
-  In progress on `wt/z2m-set-attributes` (not pushed): steps 0–4 done; rig run, docs and PR left. Pick up from
-  the [handoff note](.worktrees/z2m-set-attributes/docs/plans/2026-10-28-z2m-set-attributes.md#handoff-2026-10-29).
+  Code, tests and docs merged in the PR below, experimental. Still to do: its rig run
+  (`scripts/rig.py --action set_attributes`, with the new `sets_after_a_soft_off` case, which also runs on Hue and
+  ZHA) and `docs/bench/zigbee2mqtt/set_attributes.md`, both in the pre-release full rig run. Tick when the
+  record is in.
 - [x] **14** Z2M color modes fixed for HA, on by default, and 13i's xy write-back backed out
   ([`2026-10-28-z2m-color-modes.md`](docs/plans/2026-10-28-z2m-color-modes.md)). Counts toward the Z2M freeze.
 - [ ] **Z2M A60 run** (13k step 1): full Z2M suite, bulb in place. Clears `experimental` on the Z2M adapters it

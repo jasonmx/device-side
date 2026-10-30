@@ -96,6 +96,7 @@ class Broker:
         self.before_reply: list[dict] = []  # state payloads published ahead of each read's reply
         self.logs_before_reply: list[str] = []  # bridge/logging payloads published ahead of each read's reply
         self.states: dict[str, dict] = {}  # the state Z2M keeps for each device, keyed by IEEE, in every publish
+        self.ignores_override: set[str] = set()  # IEEEs whose bulbs drop a MoveTo command, as without the override
 
     async def subscribe(self, hass, topic, msg_callback):
         self.topics.append(topic)
@@ -139,6 +140,8 @@ class Broker:
         self.published.append({"topic": topic, "payload": payload})
         if "read" in payload:
             self._read(topic.split("/")[1], payload["read"])
+        elif "command" in payload:
+            self._command(topic.split("/")[1], payload["command"])
         elif topic.startswith("zigbee2mqtt/bridge/request/") and self.reply is not None:
             response = topic.replace("/request/", "/response/")
             self.deliver(response, json.dumps({"transaction": "someone else's", "status": "error"}))
@@ -168,6 +171,33 @@ class Broker:
         if "currentLevel" in reply:
             state["brightness"] = reply["currentLevel"]
         self.deliver(f"zigbee2mqtt/{name}", json.dumps({**state, read["state_property"]: reply}))
+
+    def _command(self, address: str, command: dict) -> None:
+        """A bulb storing a raw MoveTo command, sent to it or to a group it is in (from the retained bridge/groups)."""
+        if address in self.devices:
+            ieees = [address]
+        else:
+            groups = {str(group["id"]): group["members"] for group in self.retained.get(GROUPS, [])}
+            ieees = [member["ieee_address"] for member in groups.get(address, [])]
+        params = command["payload"]
+        stored = {
+            "moveToLevel": ("genLevelCtrl", {"currentLevel": params.get("level")}),
+            "moveToColorTemp": ("lightingColorCtrl", {"colorMode": 2, "colorTemperature": params.get("colortemp")}),
+            "moveToColor": (
+                "lightingColorCtrl",
+                {"colorMode": 1, "currentX": params.get("colorx"), "currentY": params.get("colory")},
+            ),
+            "moveToHueAndSaturation": (
+                "lightingColorCtrl",
+                {"colorMode": 0, "currentHue": params.get("hue"), "currentSaturation": params.get("saturation")},
+            ),
+        }.get(command["command"])
+        if stored is None:
+            return
+        cluster, values = stored
+        for ieee in ieees:
+            if ieee in self.devices and ieee not in self.ignores_override:
+                self.devices[ieee][1].setdefault(cluster, {}).update(values)
 
     def reads(self) -> list[tuple[str, dict]]:
         """Each read sent, as (topic, read payload)."""

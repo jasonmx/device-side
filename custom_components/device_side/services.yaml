@@ -114,6 +114,8 @@ set_attributes:
         integration: hue
       - domain: light
         integration: zha
+      - domain: light
+        integration: mqtt
   fields:
     brightness:
       example: 50
