@@ -37,6 +37,7 @@ v0.1.0 is the next release.
 | 14 | Z2M color modes fixed for HA, on by default | #126 |
 | — | Color temperature moves dropped on every integration: no halt of a Hue bulb's fade is clean | #125 |
 | — | Six raise and lower actions replace `move` | #128 |
+| 13j | Z2M `set_attributes` (experimental; rig run and bench record still to do) | #130 |
 
 ## To go, in order
 
@@ -56,7 +57,7 @@ and Hue (from the A60 move on). The rig lock and the bulb moves are shared.
   `docs/bench/{hue,zigbee2mqtt}/move*.md` and rewrite `stop*.md`; it measures the new hue, saturation and two-call
   stop ranges for the first time.
 - [ ] **13j** Z2M `set_attributes` while off. Z2M code freezes.
-  Code, tests and docs merged in the PR below, experimental. Still to do: its rig run
+  Code, tests and docs merged in #130, experimental. Still to do: its rig run
   (`scripts/rig.py --action set_attributes`, with the new `sets_after_a_soft_off` case, which also runs on Hue and
   ZHA) and `docs/bench/zigbee2mqtt/set_attributes.md`, both in the pre-release full rig run. Tick when the
   record is in.
