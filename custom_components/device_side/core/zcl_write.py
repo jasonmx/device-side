@@ -70,9 +70,8 @@ def _brightness(request: SetAttributesRequest, current_level: int | None) -> Mov
     return MoveToLevel(level)
 
 
-def _mireds(kelvin: int, attrs: dict) -> int:
-    """The kelvin as mireds, within the light's own range where its state gives one."""
-    mireds = color_temperature_kelvin_to_mired(kelvin)
+def clamp_mireds(mireds: int, attrs: dict) -> int:
+    """The mireds within the light's own range, where its state gives one."""
     if (warmest := attrs.get("min_color_temp_kelvin")) is not None:
         mireds = min(mireds, color_temperature_kelvin_to_mired(warmest))
     if (coolest := attrs.get("max_color_temp_kelvin")) is not None:
@@ -123,7 +122,7 @@ def commands(
             dropped = True
     if kelvin is not None and not (xy is not None and colors):
         if "color_temp" in modes:
-            sent.append(MoveToColorTemp(_mireds(kelvin, attrs)))
+            sent.append(MoveToColorTemp(clamp_mireds(color_temperature_kelvin_to_mired(kelvin), attrs)))
         else:
             dropped = True
     return sent, dropped

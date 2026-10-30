@@ -5,7 +5,6 @@ values into Z2M's state, and so HA's."""
 from typing import ClassVar
 
 from homeassistant.core import HomeAssistant
-from homeassistant.util.color import color_temperature_kelvin_to_mired
 
 from .addressing import state_topic, topic
 from .bridge import publish
@@ -22,6 +21,7 @@ from ...core.zcl_write import (
     MoveToColorTemp,
     MoveToHueAndSaturation,
     MoveToLevel,
+    clamp_mireds,
     commands,
     wants_level,
 )
@@ -67,15 +67,6 @@ def _attrs(target: Target) -> dict:
     return dict(target.state.attributes) if target.state else {}
 
 
-def _within_range(mireds: int, attrs: dict) -> int:
-    """The mireds clamped to the light's own range, as the bulb clamps it: a group's range can be wider."""
-    if (warmest := attrs.get("min_color_temp_kelvin")) is not None:
-        mireds = min(mireds, color_temperature_kelvin_to_mired(warmest))
-    if (coolest := attrs.get("max_color_temp_kelvin")) is not None:
-        mireds = max(mireds, color_temperature_kelvin_to_mired(coolest))
-    return mireds
-
-
 def _expected(light: Target, sent: list[Command]) -> tuple[dict[str, list[str]], dict[str, int]]:
     """The clusters to read back from this light, and the attributes that must read as written.
 
@@ -92,7 +83,7 @@ def _expected(light: Target, sent: list[Command]) -> tuple[dict[str, list[str]],
                 expected["currentLevel"] = level
             case MoveToColorTemp(mireds) if "color_temp" in modes:
                 reads[_COLOR] = ["colorMode", "colorTemperature"]
-                expected["colorTemperature"] = _within_range(mireds, _attrs(light))
+                expected["colorTemperature"] = clamp_mireds(mireds, _attrs(light))
             case MoveToColor() | MoveToHueAndSaturation() if "xy" in modes:
                 reads[_COLOR] = ["colorMode", "currentX", "currentY"]
             case MoveToColor() | MoveToHueAndSaturation() if "hs" in modes:
