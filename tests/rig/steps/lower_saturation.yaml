@@ -1,0 +1,21 @@
+# Saturation on Zigbee2MQTT: written as a color at the current hue, which the bulb fades in xy. HA's hs is derived
+# from the bulb's xy, so it lands near the limit, not on it.
+action: lower_saturation
+rig_seconds: 60
+tests:
+  - name: saturation_to_a_limit
+    roles: [light_color]
+    only: [zigbee2mqtt]
+    setup:
+      - set: {state: on, brightness_pct: 70, hs_color: [200, 90]}
+    steps:
+      - call: {limit: 30, sweep_time: 5}  # 90 % to 30 % takes 3 s
+      - expect_response: {status: expected, integration: self}
+      - wait: 3 + tol
+      # HA's hs is derived from the bulb's xy, so it lands near the limit, not on it.
+      - expect_state: {state: on, hs_color.1: {min: 20, max: 40}}
+      - expect_matches_read: {attributes: [xy_color.0, xy_color.1], tolerance: 0.01, within: 2}
+    observe:
+      see: 'The light at hue 200° (sky blue), 90 % saturation, paling over 3 s to 30 %, then holding.'
+      watch: 'The hue: it stays blue all the way, with no swing toward green or purple.'
+      ask: Did it pale smoothly and stay the same blue, then hold?

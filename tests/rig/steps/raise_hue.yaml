@@ -1,0 +1,21 @@
+# Hue on Zigbee2MQTT: hue_move, a cycle the bulb runs until a stop, so each test ends with one. Zigbee2MQTT publishes a
+# hue stop's color as hs, which HA takes only with z2m_color_modes on (the default).
+action: raise_hue
+rig_seconds: 60
+tests:
+  - name: cycles_up_the_wheel
+    roles: [light_color]
+    only: [zigbee2mqtt]
+    setup:
+      - set: {state: on, brightness_pct: 70, hs_color: [30, 90]}
+    steps:
+      - call: {sweep_time: 20}  # 18° a second: about 84° after 3 s
+      - expect_response: {status: expected, integration: self}
+      - wait: 3
+      - call: {action: stop}
+      - expect_matches_read: {attributes: [xy_color.0, xy_color.1], tolerance: 0.01, within: 3}
+      - expect_state: {state: on, hs_color.0: {min: 72, max: 96}}
+    observe:
+      see: 'The light at hue 30° (orange), 90 % saturation, turning through yellow at 18° a second, stopped after 3 s near 84° (yellow-green).'
+      watch: 'The direction: orange to yellow, never toward red or magenta.'
+      ask: Did it turn from orange toward yellow and green, then stop?

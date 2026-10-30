@@ -1,0 +1,14 @@
+# lower_brightness.yaml's fades with predicted_state on: HA's state shows device_side's predictions, so these checks
+# read HA, in 0-255 (60 % is 153).
+action: lower_brightness
+rig_seconds: 60
+options: [predicted_state]
+tests:
+  - name: soft_off_stays_on_until_its_end  # 60 % to off takes 3 s
+    roles: [light_ct, group]
+    setup:
+      - set: {state: on, brightness_pct: 60}
+    steps:
+      - call: {sweep_time: 5}
+      - sample: {attribute: brightness, for: 2, expect: steady, min: 148, max: 158}
+      - expect_state: {state: off, within: 1 + tol}

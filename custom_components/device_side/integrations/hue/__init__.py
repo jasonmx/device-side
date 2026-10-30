@@ -2,7 +2,8 @@
 
 from .bridge import expand_group, is_hue_group
 from .get_attributes import HueGetAttributes
-from .move import HueMove
+from .lower_brightness import HueLowerBrightness
+from .raise_brightness import HueRaiseBrightness
 from .set_attributes import HueSetAttributes
 from .set_scene import HueSetScene
 from .stop import HueStop
@@ -18,4 +19,11 @@ INTEGRATION = IntegrationInfo(
     max_concurrency=2,
 )
 
-ADAPTERS = [HueGetAttributes, HueMove, HueSetAttributes, HueSetScene, HueStop]
+ADAPTERS = [
+    HueGetAttributes,
+    HueLowerBrightness,
+    HueRaiseBrightness,
+    HueSetAttributes,
+    HueSetScene,
+    HueStop,
+]

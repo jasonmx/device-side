@@ -3,8 +3,23 @@
     "get_attributes": {
       "service": "mdi:lightbulb-question"
     },
-    "move": {
-      "service": "mdi:tune-vertical"
+    "lower_brightness": {
+      "service": "mdi:brightness-5"
+    },
+    "lower_hue": {
+      "service": "mdi:rotate-left"
+    },
+    "lower_saturation": {
+      "service": "mdi:invert-colors-off"
+    },
+    "raise_brightness": {
+      "service": "mdi:brightness-7"
+    },
+    "raise_hue": {
+      "service": "mdi:rotate-right"
+    },
+    "raise_saturation": {
+      "service": "mdi:invert-colors"
     },
     "set_attributes": {
       "service": "mdi:tune-variant"

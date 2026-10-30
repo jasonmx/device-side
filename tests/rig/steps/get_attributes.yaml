@@ -17,10 +17,10 @@ tests:
 
   - name: predicts_mid_move  # §4.2: about 40% three seconds in, not the 100% the bridge reports
     roles: [light_ct, group]
-    only: [hue]  # the only integration with move
+    only: [hue]  # the only integration whose read predicts a fade
     steps:
       - set: {state: on, brightness_pct: 10}
-      - call: {action: move, brightness: up, sweep_time: 10}
+      - call: {action: raise_brightness, sweep_time: 10}
       - wait: 3
       - call: {}
       - expect_response: {attributes: {brightness: {min: 25, max: 55}}}

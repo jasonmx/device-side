@@ -43,7 +43,7 @@ def room_shown(bridge) -> tuple[bool, float | None]:
 
 
 async def raise_one(hass) -> None:
-    await call(hass, "move", {"entity_id": "light.one", "brightness": "up", "sweep_time": 10})
+    await call(hass, "raise_brightness", {"entity_id": "light.one", "sweep_time": 10})
 
 
 async def test_aiohue_applies_an_event_after_a_synchronous_subscriber(bridge):
@@ -171,7 +171,7 @@ async def test_set_attributes_mid_fade_reaches_ha(hass, bridge, clock):
 async def test_a_soft_off_stays_on_until_its_end(hass, bridge, clock):
     await setup_room(hass, bridge)
     start = wall_clock_now()
-    await call(hass, "move", {"entity_id": "light.one", "brightness": "down", "sweep_time": 10})  # 2 s
+    await call(hass, "lower_brightness", {"entity_id": "light.one", "sweep_time": 10})  # 2 s
 
     report(bridge, light_event("one", on=False))
     await settle(hass)
@@ -187,7 +187,7 @@ async def test_up_from_off_shows_on_at_the_dimmest(hass, bridge, clock):
     add_hue_entity(hass, entry, "light.one", "one")
     bridge.api.lights["one"].dimming.min_dim_level = 2.0
 
-    await call(hass, "move", {"entity_id": "light.one", "brightness": "up", "sweep_time": 10})
+    await call(hass, "raise_brightness", {"entity_id": "light.one", "sweep_time": 10})
     report(bridge, light_event("one", on=True, brightness=100.0))
     await settle(hass)
 
@@ -199,7 +199,7 @@ async def test_up_from_off_without_a_min_dim_level_shows_the_dimmest_step(hass, 
     entry = await hue_entry(hass, bridge)
     add_hue_entity(hass, entry, "light.one", "one")
 
-    await call(hass, "move", {"entity_id": "light.one", "brightness": "up", "sweep_time": 10})
+    await call(hass, "raise_brightness", {"entity_id": "light.one", "sweep_time": 10})
     report(bridge, light_event("one", on=True))
     await settle(hass)
 
@@ -208,7 +208,7 @@ async def test_up_from_off_without_a_min_dim_level_shows_the_dimmest_step(hass, 
 
 async def test_a_room_shows_the_mean_of_its_lit_lights(hass, bridge, clock):
     await setup_room(hass, bridge)
-    await call(hass, "move", {"entity_id": "light.room", "brightness": "up", "sweep_time": 10})
+    await call(hass, "raise_brightness", {"entity_id": "light.room", "sweep_time": 10})
     report(bridge, {"id": "1", "type": "grouped_light", "dimming": {"brightness": 100.0}})
     await settle(hass)
     assert room_shown(bridge) == (True, 20.0)
@@ -229,7 +229,7 @@ async def test_a_room_up_from_off_shows_on(hass, bridge, clock):
     members = [add_hue_entity(hass, entry, f"light.{light_id}", light_id) for light_id in ("one", "two")]
     add_hue_group(hass, entry, "light.room", "1", members)
 
-    await call(hass, "move", {"entity_id": "light.room", "brightness": "up", "sweep_time": 10})
+    await call(hass, "raise_brightness", {"entity_id": "light.room", "sweep_time": 10})
     report(bridge, {"id": "1", "type": "grouped_light", "on": {"on": True}, "dimming": {"brightness": 100.0}})
     for light_id in ("one", "two"):
         report(bridge, light_event(light_id, on=True, brightness=100.0))

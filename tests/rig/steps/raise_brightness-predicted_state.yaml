@@ -1,7 +1,7 @@
-# move.yaml's fades with predicted_state on: HA's state shows device_side's predictions, so these checks read HA, in
-# 0-255 (20 % is 51, 60 % is 153, 80 % is 204).
-action: move
-rig_seconds: 380
+# raise_brightness.yaml's fades with predicted_state on: HA's state shows device_side's predictions, so these checks
+# read HA, in 0-255 (20 % is 51, 80 % is 204).
+action: raise_brightness
+rig_seconds: 320
 options: [predicted_state]
 tests:
   - name: holds_the_start_then_shows_the_end  # 20 % to full takes 8 s
@@ -9,26 +9,17 @@ tests:
     setup:
       - set: {state: on, brightness_pct: 20}
     steps:
-      - call: {brightness: up, sweep_time: 10}
+      - call: {sweep_time: 10}
       - expect_response: {status: expected, integration: self}
       - sample: {attribute: brightness, for: 3, expect: steady, min: 46, max: 56}
       - expect_state: {brightness: 255, within: 5 + tol}
-
-  - name: soft_off_stays_on_until_its_end  # 60 % to off takes 3 s
-    roles: [light_ct, group]
-    setup:
-      - set: {state: on, brightness_pct: 60}
-    steps:
-      - call: {brightness: down, sweep_time: 5}
-      - sample: {attribute: brightness, for: 2, expect: steady, min: 148, max: 158}
-      - expect_state: {state: off, within: 1 + tol}
 
   - name: up_from_off_shows_the_dimmest
     roles: [light_ct, group]
     setup:
       - set: {state: off}
     steps:
-      - call: {brightness: up, sweep_time: 10}
+      - call: {sweep_time: 10}
       - expect_state: {state: on, brightness: {max: 8}, within: tol}
       - sample: {attribute: brightness, for: 3, expect: steady, max: 8}
 
@@ -37,7 +28,7 @@ tests:
     setup:
       - set: {state: on, brightness_pct: 20}
     steps:
-      - call: {brightness: up, sweep_time: 10}
+      - call: {sweep_time: 10}
       - wait: 2
       - set: {state: on, brightness_pct: 80}
       - wait: 7
@@ -49,7 +40,7 @@ tests:
       - set: {state: on, brightness_pct: 10, color_temp_kelvin: 6500}  # far from the scene, so the recall shows
       - set: {state: off}
     steps:
-      - call: {brightness: up, sweep_time: 20}
+      - call: {sweep_time: 20}
       - wait: 8  # long enough to see the cool white before the recall
       - bridge: {target: scene, recall: true}
       - wait: 20  # past the fade's end, which would show the zone at full

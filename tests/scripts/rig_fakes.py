@@ -104,7 +104,7 @@ class FakeAdmin(FakeHA):
 
 
 RESTORED_MIDWAY = """
-action: move
+action: raise_brightness
 rig_seconds: 5
 tests:
   - name: t
