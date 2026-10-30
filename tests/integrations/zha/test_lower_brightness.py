@@ -5,12 +5,10 @@ import pytest
 
 from custom_components.device_side.integrations.zha import zcl
 
-from .conftest import SENT, A, B, bulb, on_off_reads, sent, to, unchanged
+from .conftest import RESTORE_60, SENT, A, B, bulb, on_off_reads, sent, to, unchanged
 from ...conftest import advance, call, wall_clock_now
 
 pytestmark = pytest.mark.usefixtures("setup_production", "clock", "bulbs")
-
-RESTORE_60 = (0x0008, 0x00, {"level": 152, "transition_time": 0, "options_mask": 1, "options_override": 1})
 
 
 @pytest.fixture(autouse=True)

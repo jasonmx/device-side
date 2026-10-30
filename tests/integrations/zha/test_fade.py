@@ -10,7 +10,7 @@ from custom_components.device_side.const import DOMAIN
 from custom_components.device_side.core.transition import BRIGHTNESS, SATURATION
 from custom_components.device_side.integrations.zha.fade import transition_cache
 
-from .conftest import SENT, A, B, bulb, on_off_reads, sent
+from .conftest import RESTORE_60, SENT, A, B, bulb, on_off_reads, sent
 from ...conftest import advance, call, wall_clock_now
 from ...fixtures.zha import IEEE
 
@@ -43,11 +43,7 @@ async def test_a_move_of_another_attribute_keeps_the_soft_offs_restore(hass, com
     await call(hass, "lower_saturation", {"entity_id": "light.bulb"})
     await advance(hass, start, 4.5)
 
-    assert sent(commands)[-1] == (
-        0x0008,
-        0x00,
-        {"level": 152, "transition_time": 0, "options_mask": 1, "options_override": 1},
-    )
+    assert sent(commands)[-1] == RESTORE_60
     assert len(on_off_reads(on_off_read)) == 1
     assert len(refreshes) == 2  # one per fade
 
@@ -165,3 +161,17 @@ async def test_nothing_to_do_by_a_stale_prediction_plans_again_from_has_state(ha
 
     assert response == {"light.bulb": SENT}
     assert sent(commands)[-1] == (0x0008, 0x04, {"level": 0, "transition_time": 50})
+
+
+async def test_planning_again_keeps_a_running_saturation_fade(hass, commands, clock):
+    """Only the stale brightness prediction goes: a stop still halts the saturation fade with StopMoveStep."""
+    bulb(hass)
+    await call(hass, "lower_brightness", {"entity_id": "light.bulb"})
+    clock.now += 5  # predicted at 0 for 2 s more
+    bulb(hass, brightness=255)
+    await call(hass, "raise_saturation", {"entity_id": "light.bulb", "sweep_time": 10})
+
+    await call(hass, "lower_brightness", {"entity_id": "light.bulb"})
+    await call(hass, "stop", {"entity_id": "light.bulb"})
+
+    assert sent(commands)[-2:] == [(0x0300, 0x47, {"options_mask": 0, "options_override": 0}), (0x0008, 0x03, {})]

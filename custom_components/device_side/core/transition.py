@@ -77,9 +77,11 @@ class TransitionCache:
         """Whether a move or stop on the resource is still inside its guard window."""
         return bool(self.attributes(resource_id))
 
-    def forget(self, resource_id: str) -> dict[tuple[str, str], Transition]:
-        """A real change made elsewhere: drop every prediction for the resource, returned for restore."""
-        return {key: self._transitions.pop(key) for key in [key for key in self._transitions if key[0] == resource_id]}
+    def forget(self, resource_id: str, attribute: str | None = None) -> dict[tuple[str, str], Transition]:
+        """A real change made elsewhere: drop the resource's predictions (only the attribute's, if given), returned for
+        restore."""
+        keys = [key for key in self._transitions if key[0] == resource_id and attribute in (None, key[1])]
+        return {key: self._transitions.pop(key) for key in keys}
 
     def restore(self, transitions: dict[tuple[str, str], Transition]) -> None:
         """Put back what forget dropped, for a write the integration refused."""

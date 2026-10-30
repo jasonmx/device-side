@@ -18,6 +18,8 @@ A, B = "00:00:00:00:00:00:00:0a", "00:00:00:00:00:00:00:0b"
 COLOR_MODES = ["color_temp", "xy"]
 # MoveToLevel to 1 with ExecuteIfOff: a light that is off, put at the bottom before a raise.
 BOTTOM = (0x0008, 0x00, {"level": 1, "transition_time": 0, "options_mask": 1, "options_override": 1})
+# The same with ExecuteIfOff at 60 %: bulb()'s default level, put back once a soft off has run.
+RESTORE_60 = (0x0008, 0x00, {"level": 152, "transition_time": 0, "options_mask": 1, "options_override": 1})
 
 
 def unchanged(detail: str) -> dict:

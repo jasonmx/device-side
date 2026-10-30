@@ -184,7 +184,7 @@ class ZHARamp(Adapter[RampRequest]):
             # Nothing to do by the prediction, which a change made elsewhere can leave stale: ZHA applies the bulb's
             # brightness reports, so its state is right then. Plan again from it.
             for light in lights:
-                cache.forget(light.entity_id)
+                cache.forget(light.entity_id, BRIGHTNESS)
             outcome = plan(cache, request, lights)
         if isinstance(outcome, str):
             return each(Status.UNCHANGED, detail=outcome)

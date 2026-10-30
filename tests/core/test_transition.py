@@ -88,6 +88,14 @@ def test_forget_drops_the_resources_transitions_and_restore_puts_them_back(cache
     assert cache.attributes("light-1") == ["brightness", "saturation"]
 
 
+def test_forget_one_attribute_keeps_the_others(cache):
+    cache.moving("light-1", "brightness", 20.0, 80.0, 10.0)
+    cache.moving("light-1", "saturation", 20.0, 30.0, 10.0)
+
+    assert list(cache.forget("light-1", "brightness")) == [("light-1", "brightness")]
+    assert cache.attributes("light-1") == ["saturation"]
+
+
 async def test_recording_keeps_what_an_accepted_write_records(cache):
     async with cache.recording([("light-1", "brightness")]):
         cache.stopped("light-1", "brightness", 42.0)
