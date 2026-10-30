@@ -52,6 +52,9 @@ and Hue (from the A60 move on). The rig lock and the bulb moves are shared.
 - [x] **Raise and lower**: six actions, one per attribute and direction, replace `move`
   ([`2026-10-30-raise-lower.md`](docs/plans/2026-10-30-raise-lower.md)). Lands before 13j's freeze and the Z2M A60
   run.
+- [ ] **Raise/lower rig run**: unattended, the six actions and `stop` on Hue and Z2M. Its records replace
+  `docs/bench/{hue,zigbee2mqtt}/move*.md` and rewrite `stop*.md`; it measures the new hue, saturation and two-call
+  stop ranges for the first time.
 - [ ] **13j** Z2M `set_attributes` while off. Z2M code freezes.
 - [x] **14** Z2M color modes fixed for HA, on by default, and 13i's xy write-back backed out
   ([`2026-10-28-z2m-color-modes.md`](docs/plans/2026-10-28-z2m-color-modes.md)). Counts toward the Z2M freeze.
