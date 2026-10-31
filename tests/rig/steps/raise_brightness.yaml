@@ -17,7 +17,7 @@ tests:
       - wait: 1 + tol
       - sample: {attribute: brightness, for: 0.5, expect: steady, min: 99, source: device_side}
 
-  - name: raise_from_off  # §2.3; the start is watched in raise_after_soft_off
+  - name: raise_from_off  # §2.3; the start is checked in raise_after_soft_off
     roles: [light_ct, group]
     setup:
       - set: {state: off}

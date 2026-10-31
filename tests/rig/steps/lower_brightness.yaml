@@ -23,7 +23,7 @@ tests:
       - wait: 2
       - expect_state: {state: on, brightness: {min: 70, max: 84}}
 
-  - name: lower_stop_lower  # §2.5 with lower; watched in stop.yaml (the cut) and raise_stop_raise
+  - name: lower_stop_lower  # §2.5 with lower; the cut and the hold are checked in stop.yaml and raise_stop_raise
     roles: [light_ct, group]
     setup:
       - set: {state: on, brightness_pct: 90}

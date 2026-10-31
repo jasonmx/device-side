@@ -412,13 +412,13 @@ def _parse_test(raw: Any) -> RigTest:
             raise ValueError("only must be a non-empty list of integration keys")
         steps, setup, observe = _parse_phases(raw)
         test = RigTest(name, tuple(roles), frozenset(only) if only else None, steps, setup, observe)
-        _check_observe_roles(test)
+        _check_observe_scope(test)
     except ValueError as err:
         raise ValueError(f"test {name}, {err}") from None
     return test
 
 
-def _check_observe_roles(test: RigTest) -> None:
+def _check_observe_scope(test: RigTest) -> None:
     """`observe: roles` and `only` name some of the test's roles and integrations, and the ones they leave out still
     get an automated run."""
     if test.observe is None or (test.observe.roles is None and test.observe.only is None):

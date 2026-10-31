@@ -32,6 +32,15 @@ def test_every_step_file_has_an_action():
     assert actions <= set(AdapterRegistry.discover().actions)
 
 
+def test_every_only_names_an_integration():
+    """A misspelled key would silently drop the test, or its observed run, from every suite."""
+    known = set(AdapterRegistry.discover().integrations)
+    for step_file in load_step_files():
+        for test in step_file.tests:
+            named = (test.only or frozenset()) | ((test.observe and test.observe.only) or frozenset())
+            assert named <= known, f"{step_file.action} {test.name}: {sorted(named - known)}"
+
+
 def test_the_step_files_keep_their_roles():
     by_action = {step_file.action: step_file for step_file in load_step_files()}
     assert by_action["turn_on_for"].roles == (

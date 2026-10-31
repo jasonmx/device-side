@@ -112,7 +112,7 @@ tests:
 
   # A color rides the same light.turn_on as brightness. Setup leaves the bulb in color temperature, so color_mode
   # xy shows the call moved it to color; Z2M reports every color field in xy. One test per field, as a record
-  # covers only the fields its calls sent; the RGB test is also watched, since no automated check reads the hue.
+  # covers only the fields its calls sent. The RGB test's red from the start was watched in #80.
   - name: bulb_rgb_then_off
     roles: [light_color]
     only: [zigbee2mqtt]

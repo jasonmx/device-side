@@ -4,7 +4,7 @@
 action: stop
 rig_seconds: 420
 tests:
-  - name: halts_a_raise  # §2.5; the hold is watched in raise_brightness.yaml's raise_stop_raise
+  - name: halts_a_raise  # §2.5; the hold is sampled in raise_brightness.yaml's raise_stop_raise
     roles: [light_ct, group]
     setup:
       - set: {state: on, brightness_pct: 10}
