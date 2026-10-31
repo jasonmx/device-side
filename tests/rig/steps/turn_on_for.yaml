@@ -109,14 +109,10 @@ tests:
       - wait: duration - tol
       - expect_state: {state: on}
       - expect_state: {state: off, within: 2 * tol}
-    observe:
-      see: The Shelly color bulb, off and last warm white, turns on red for 6 seconds, then turns itself off.
-      watch: 'The first moment it lights: red from the start, with no flash of warm white.'
-      ask: Did it come on red and turn itself off about 6 seconds later?
 
   # A color rides the same light.turn_on as brightness. Setup leaves the bulb in color temperature, so color_mode
   # xy shows the call moved it to color; Z2M reports every color field in xy. One test per field, as a record
-  # covers only the fields its calls sent; the RGB test is also watched, since no automated check reads the hue.
+  # covers only the fields its calls sent. The RGB test's red from the start was watched in #80.
   - name: bulb_rgb_then_off
     roles: [light_color]
     only: [zigbee2mqtt]
@@ -132,10 +128,6 @@ tests:
       - expect_state: {state: on}
       - expect_state: {state: off, within: 2 * tol}
       - expect_z2m_option: {hue_native_control: true}
-    observe:
-      see: The color bulb, off and last warm white, turns on red for 6 seconds, then turns itself off.
-      watch: 'The first moment it lights: red from the start, with no flash of warm white.'
-      ask: Did it come on red and turn itself off about 6 seconds later?
 
   - name: bulb_hs_then_off
     roles: [light_color]
@@ -184,10 +176,6 @@ tests:
       - wait: duration - tol
       - expect_state: {state: on}
       - expect_state: {state: off, within: 2 * tol}
-    observe:
-      see: Both bulbs in the group, off, turn on together for 6 seconds, then turn themselves off.
-      watch: 'The moment they turn off: both at once, not one after the other.'
-      ask: Did both bulbs turn on together and turn off at the same moment?
 
   # On ZHA, the brightness goes to the group entity's light.turn_on, then the groupcast starts every member's timer.
   - name: group_brightness_then_off

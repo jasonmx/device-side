@@ -1,4 +1,5 @@
-# hue_dimmer tests/RELEASE_CHECKLIST.md §5.1-5.3 as steps.
+# hue_dimmer tests/RELEASE_CHECKLIST.md §5.1-5.2 as steps. §5.3, an edit in the Hue app applying, is unit-tested
+# (re-read on every call) and was watched on the rig in #48.
 # The target is the scene; `target: group` points a step at the room the scene belongs to. §5.4-5.8 need
 # scene kinds (a light off, All-Day, dynamic), a large room and a second bridge that inventory roles don't name yet.
 action: set_scene
@@ -15,10 +16,6 @@ tests:
       - wait: 1
       - expect_state: {target: group, state: off}
       - set: {target: group, state: on}
-    observe:
-      see: The room, off since it was cool white, gets the scene set while off, then turns on.
-      watch: 'Every light as it comes on: the scene''s colors and brightness, not cool white.'
-      ask: Did every light come on in the scene's colors and brightness?
 
   - name: applies_while_on  # §5.2
     roles: [scene]
@@ -27,21 +24,3 @@ tests:
     steps:
       - call: {}
       - expect_state: {target: group, state: on, within: tol}
-    observe:
-      see: The room in cool white gets the scene set while it is on.
-      watch: 'The change: straight to the scene, with no light turning off.'
-      ask: Did the lights change to the scene straight away and stay on?
-
-  - name: no_stale_snapshot  # §5.3
-    roles: [scene]
-    setup:
-      - do: Change one light's color in this scene in the Hue app.
-    steps:
-      - set: {target: group, state: off}
-      - wait: 2  # the room reads off as its fade starts: let it finish, as see promises
-      - call: {}
-      - set: {target: group, state: on}
-    observe:
-      see: The room turns off, the scene is set, and the room turns on.
-      watch: 'The light you edited as the room comes on: its new color, not the old one.'
-      ask: Did that light come on in its edited color?

@@ -139,6 +139,7 @@ class Observe:
     watch: str
     ask: str
     roles: frozenset[str] | None = None  # the roles watched; None for every role the test lists
+    only: frozenset[str] | None = None  # the integrations watched; None for every one the test runs on
 
 
 # How far a steady sample may spread, in its source's units: a Zigbee bulb can settle one level step (1/254) after a
@@ -166,9 +167,13 @@ class RigTest:
             return True
         return any(step.kind in CHECKS for step in self.steps) and not any(step.kind == "do" for step in self.setup)
 
-    def observed_on(self, role: str) -> bool:
-        """Whether the test has an observed case on `role`."""
-        return self.observe is not None and (self.observe.roles is None or role in self.observe.roles)
+    def observed_on(self, role: str, integration: str) -> bool:
+        """Whether the test has an observed case on `role` in `integration`'s suite."""
+        if self.observe is None:
+            return False
+        return (self.observe.roles is None or role in self.observe.roles) and (
+            self.observe.only is None or integration in self.observe.only
+        )
 
     def roles_needed(self, role: str) -> list[str]:
         """The case's own role and every role a step targets, in first-use order."""
@@ -367,17 +372,26 @@ def _parse_steps(raw: Any, key: str) -> tuple[Step, ...]:
 
 def _parse_observe(raw: Any) -> Observe:
     try:
-        args = _mapping(raw, required=("see", "watch", "ask"), allowed=("roles",))
+        args = _mapping(raw, required=("see", "watch", "ask"), allowed=("roles", "only"))
         roles = args.pop("roles", None)
+        only = args.pop("only", None)
         if not all(isinstance(value, str) and value.strip() for value in args.values()):
             raise ValueError("see, watch and ask must be non-empty strings")
         if roles is not None and (
             not isinstance(roles, list) or not roles or not all(isinstance(r, str) for r in roles)
         ):
             raise ValueError("roles must be a non-empty list of roles")
+        if only is not None and (not isinstance(only, list) or not only or not all(isinstance(i, str) for i in only)):
+            raise ValueError("only must be a non-empty list of integration keys")
     except ValueError as err:
         raise ValueError(f"observe: {err}") from None
-    return Observe(args["see"].strip(), args["watch"].strip(), args["ask"].strip(), frozenset(roles) if roles else None)
+    return Observe(
+        args["see"].strip(),
+        args["watch"].strip(),
+        args["ask"].strip(),
+        frozenset(roles) if roles else None,
+        frozenset(only) if only else None,
+    )
 
 
 def _parse_test(raw: Any) -> RigTest:
@@ -398,20 +412,23 @@ def _parse_test(raw: Any) -> RigTest:
             raise ValueError("only must be a non-empty list of integration keys")
         steps, setup, observe = _parse_phases(raw)
         test = RigTest(name, tuple(roles), frozenset(only) if only else None, steps, setup, observe)
-        _check_observe_roles(test)
+        _check_observe_scope(test)
     except ValueError as err:
         raise ValueError(f"test {name}, {err}") from None
     return test
 
 
-def _check_observe_roles(test: RigTest) -> None:
-    """`observe: roles` names some of the test's roles, and the roles it leaves out still get an automated run."""
-    if test.observe is None or test.observe.roles is None:
+def _check_observe_scope(test: RigTest) -> None:
+    """`observe: roles` and `only` name some of the test's roles and integrations, and the ones they leave out still
+    get an automated run."""
+    if test.observe is None or (test.observe.roles is None and test.observe.only is None):
         return
-    if outside := sorted(test.observe.roles - set(test.roles)):
+    if outside := sorted((test.observe.roles or frozenset()) - set(test.roles)):
         raise ValueError(f"observe roles {', '.join(outside)} are not the test's roles")
+    if test.only is not None and (outside := sorted((test.observe.only or frozenset()) - test.only)):
+        raise ValueError(f"observe only {', '.join(outside)} are not in the test's only")
     if not test.automated:
-        raise ValueError("observe roles needs an automated run for the roles it leaves out")
+        raise ValueError("observe roles or only needs an automated run for what it leaves out")
 
 
 def _parse_phases(raw: dict) -> tuple[tuple[Step, ...], tuple[Step, ...], Observe | None]:
@@ -496,7 +513,7 @@ class Case:
     @property
     def twin(self) -> str | None:
         """The id of the test's other case on this role, when it has both: either proves nothing alone."""
-        if not self.test.observed_on(self.role) or not self.test.automated:
+        if not self.test.observed_on(self.role, self.suite.integration) or not self.test.automated:
             return None
         return replace(self, observed=not self.observed).id
 
@@ -509,7 +526,7 @@ def cases(suite: Suite, inventory: Inventory, keyword: str | None = None) -> lis
         if test.only is not None and suite.integration not in test.only:
             continue
         for role in test.roles:
-            for observed in [False] * test.automated + [True] * test.observed_on(role):
+            for observed in [False] * test.automated + [True] * test.observed_on(role, suite.integration):
                 case = Case(suite, test, role, {}, observed=observed)
                 if keyword and keyword not in case.id:
                     continue

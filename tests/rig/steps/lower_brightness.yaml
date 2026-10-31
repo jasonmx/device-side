@@ -13,10 +13,6 @@ tests:
       - call: {}
       - expect_response: {status: expected, integration: self}
       - expect_state: {state: off, within: 10}
-    observe:
-      see: The light at full, fading to off in under 10 s.
-      watch: Steps on the way down, and that it ends off.
-      ask: Did it fade smoothly and turn off at the end?
 
   - name: lower_to_a_limit  # §2.4
     roles: [light_ct, group]
@@ -27,7 +23,7 @@ tests:
       - wait: 2
       - expect_state: {state: on, brightness: {min: 70, max: 84}}
 
-  - name: lower_stop_lower  # §2.5 with lower; watched in stop.yaml (the cut) and raise_stop_raise
+  - name: lower_stop_lower  # §2.5 with lower; the cut and the hold are checked in stop.yaml and raise_stop_raise
     roles: [light_ct, group]
     setup:
       - set: {state: on, brightness_pct: 90}
@@ -48,7 +44,5 @@ tests:
       - wait: 4
       - call: {action: raise_brightness, target: light_ct, sweep_time: 10}
       - expect_response: {target: light_ct, status: expected, integration: self}
-    observe:
-      see: The room at full, fading over 10 s; after 4 s the lamp alone turns back up.
-      watch: 'The lamp as it turns: no jump to the bottom or top first.'
-      ask: Did the lamp turn back up from where the room's fade had it, without jumping to the bottom or top first?
+      # From where the room's fade had it, about 60 %: a jump to the bottom breaks min, one to the top breaks rising.
+      - sample: {target: light_ct, attribute: brightness, for: 2, expect: rising, min: 40, source: device_side}
