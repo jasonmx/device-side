@@ -190,3 +190,52 @@ declares `native_groups`, in the same way, and remove it before the next move.
   - No skips beyond the accepted 9b list.
   - No `not observed` outside the pruned set.
   - `scripts/check_release.py --release` passes.
+
+## Observed-test ledger (PR 2, 2026-10-31)
+
+From `git log -p -- docs/bench`: every `observed` row that ever read `pass`, its record and the commit that added it.
+Only three runs were ever watched: Hue at #48 (record commit `3533b73`, rig run on `b7f2228`), Z2M `turn_on_for` at
+#80 (`de2f6f5`) and Shelly `turn_on_for` at #87 (`c62a0fb`). Every other observed row is `not observed` or
+`skipped`. Old names: `move.md` held the raise/lower tests, `light_moved_mid_room_move` is now
+`light_raised_mid_room_lower`, and `halts_a_move_to_off` is now `halts_a_lower_to_off`.
+
+A "live read" is `source: device_side` on Z2M and ZHA, which read the bulb; on Hue the same read returns Device Side's
+prediction, so it proves nothing about the light there.
+
+| Test | Integration | Watches | Class | Evidence |
+|---|---|---|---|---|
+| `raise_brightness: raise` | Hue | smooth climb, no steps or flashes | seen | `hue/move.md`, #48 |
+| | Z2M | | deducible | one end-point publish the bulb fades itself; live reads check rising, then steady at ≥99 % |
+| `raise_brightness: raise_after_soft_off` | Hue | climbs from the bottom, not from the kept 60 % | seen | `hue/move.md`, #48 |
+| | Z2M | | deducible, with a new check | observed-only today; a live `sample` after the stop (steady, 15-50 %) measures where it held: from the bottom it holds near 30 %, from 60 % near 90 % |
+| `raise_brightness: raise_stop_raise` | Hue | no drift while held, no jump on resume | seen | `hue/move.md`, #48 |
+| | Z2M | | deducible | live reads check steady for 4 s, then rising with max 78 % |
+| `lower_brightness: lower_to_off` | Hue | smooth fade, ends off | seen | `hue/move.md`, #48 |
+| | Z2M | | deducible | one soft-off publish the bulb fades itself; `expect_state` checks off within 10 s |
+| `lower_brightness: light_raised_mid_room_lower[group]` | Hue | the lamp turns back up without a jump | seen | `hue/move.md` (`light_moved_mid_room_move`), #48 |
+| | Z2M | | deducible, with a new check | never run (light_ct joins the group in phase A); Z2M publishes only an end point, so the bulb fades from its own level; a live `sample` on light_ct (rising, min 40 %) catches a jump to the bottom or top |
+| `stop: halts_a_lower_to_off` | Hue | holds part way, no flash, jump or blink off | seen | `hue/stop.md` (`halts_a_move_to_off`), #48 |
+| | Z2M | | **needs eyes** (light_ct) | checks see HA on and a steady live level, not a blink off at the stop; Z2M's soft off and its stop differ from Hue's |
+| `stop: hue_cycle_stop` | Z2M | no jump at the stop or a second later | **needs eyes** | reads catch drift after the stop, not a jump in output: a Hue bulb's output departs from what it reports mid-fade (every CT stop jumps) |
+| `stop: saturation_down_stop` | Z2M | holds, no drift toward white, no jump | **needs eyes** | as `hue_cycle_stop` |
+| `stop: halts_brightness_and_saturation` | Z2M | both freeze at once | deducible from the two above | the single stops in sequence, one publish each; checks prove both froze in range and held for 3 s |
+| `stop: halts_brightness_and_hue` | Z2M | both freeze at once | deducible from the two above | as above |
+| `raise_hue: cycles_up_the_wheel` | Z2M | direction: orange toward yellow | deducible | `expect_state` hue 72-96° after 3 s at 18°/s is reachable only turning that way |
+| `lower_hue: cycles_down_the_wheel` | Z2M | direction: blue toward green | deducible | as above |
+| `raise_saturation: saturation_to_a_limit` | Z2M | stays the same blue | deducible | the bulb fades in xy along a straight line between two points of one hue, which stays near it; end checked in range and against a live read |
+| `lower_saturation: saturation_to_a_limit` | Z2M | stays the same blue | deducible | as above |
+| `set_attributes: sets_color_while_off` | Z2M, Hue, ZHA | lights red from the start, no flash of the old color | **needs eyes** (each A60 visit) | never watched: Hue and ZHA records skipped it (no color bulb), Z2M has no record; a flash is a transient no read sees, and this bulb on Z2M flashes its last color when on and color are sent apart (watched probe, 2026-10-27) |
+| `set_scene: sets_while_off` | Hue | every light comes on in the scene | seen | `hue/set_scene.md`, #48 |
+| `set_scene: applies_while_on` | Hue | straight to the scene, no light off | seen | `hue/set_scene.md`, #48 |
+| `set_scene: no_stale_snapshot` | Hue | an app edit applies | seen | `hue/set_scene.md`, #48; re-read on each call is unit-tested (`test_scene_is_reread_on_each_call`) |
+| `raise_brightness-predicted_state: bridge_scene_recall_mid_fade_shows_at_once` | Hue | lights jump to the scene; HA shows it | deducible | the jump is the bridge's own (Device Side sends nothing then); Device Side's part, HA at the scene's level and not the fade's full, is the `expect_state` |
+| `turn_on_for: rgbcct_bulb_rgb_then_off` | Shelly | red from the start, off at 6 s | seen | `shelly/turn_on_for.md`, #87 |
+| `turn_on_for: bulb_rgb_then_off` | Z2M | red from the start, off at 6 s | seen | `zigbee2mqtt/turn_on_for.md`, #80 |
+| `turn_on_for: group_on_then_off` | Z2M | both off at once | seen | `zigbee2mqtt/turn_on_for.md`, #80 |
+| | ZHA | | deducible | one group command, as on Z2M; HA's group reads off only once every member is, checked within 2 × tol |
+
+Needs eyes, approved by Jason on 2026-10-31: Z2M `halts_a_lower_to_off[light_ct]`, `hue_cycle_stop[light_color]`,
+`saturation_down_stop[light_color]`, and `sets_color_while_off[light_color]` on each of the A60's three visits (it
+moves on, so each is watched during its own visit, not in the closing session). Every other `observe` block is
+gone, `no_stale_snapshot` with it, and `observe:` takes `only:` as a test does, so the Z2M stop is watched without
+Hue's.

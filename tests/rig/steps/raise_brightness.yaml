@@ -16,10 +16,6 @@ tests:
       # HA may end on a bulb's mid-ramp report (Tested behavior), so read the prediction.
       - wait: 1 + tol
       - sample: {attribute: brightness, for: 0.5, expect: steady, min: 99, source: device_side}
-    observe:
-      see: The light at 20 %, climbing to full over 5 s.
-      watch: Steps or flashes on the way up.
-      ask: Did brightness climb smoothly to 100%, with no steps or flashes?
 
   - name: raise_from_off  # §2.3; the start is watched in raise_after_soft_off
     roles: [light_ct, group]
@@ -40,10 +36,9 @@ tests:
       - call: {sweep_time: 10}
       - wait: 3
       - call: {action: stop}
-    observe:
-      see: The light, just faded off from 60 %, climbing slowly, stopped after 3 s.
-      watch: 'Where it holds: about a third of full means it climbed from the bottom; about three quarters means it jumped to 60 % first.'
-      ask: Did it light low and hold at about a third of full, rather than jump up first and hold near three quarters?
+      - expect_response: {status: expected}
+      # From the bottom it holds near 30 %; from the kept 60 % it would hold near 90 %.
+      - sample: {attribute: brightness, for: 2, expect: steady, min: 15, max: 50, source: device_side}
 
   - name: raise_stop_raise  # §2.5
     roles: [light_ct, group]
@@ -57,10 +52,6 @@ tests:
       - sample: {attribute: brightness, for: 4, expect: steady, source: device_side}
       - call: {sweep_time: 10}
       - sample: {attribute: brightness, for: 2, expect: rising, max: 78, source: device_side}
-    observe:
-      see: 'The light at 10 %: a slow climb for 3 s, a 4 s hold, then the climb again.'
-      watch: 'The hold and the restart: no drift while held, no jump when it resumes.'
-      ask: Did it hold where it stopped, then continue from that point?
 
   - name: ha_change_mid_raise  # a light.turn_on from HA drops the prediction, so the next lower starts from it
     roles: [light_ct, group]

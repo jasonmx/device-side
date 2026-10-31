@@ -27,6 +27,8 @@ tests:
       - expect_state: {state: on, within: tol}
       - sample: {attribute: brightness, for: 4, expect: steady, min: 47, max: 82, source: device_side}
     observe:
+      roles: [light_ct]  # Hue's was watched in #48, and a group gets the same command
+      only: [zigbee2mqtt]
       see: The light at full, fading slowly toward off, stopped after 3 s.
       watch: 'The stop: it holds about two thirds up, with no flash, jump or blink off first.'
       ask: Did it stop part way down and hold there, with no flash, jump or blink off?
@@ -99,11 +101,6 @@ tests:
       - sample: {attribute: brightness, for: 3, expect: steady, min: 38, max: 70, source: device_side}
       - expect_matches_read: {attributes: [xy_color.0, xy_color.1], tolerance: 0.01}
       - expect_state: {state: on, hs_color.1: {min: 60, max: 82}}
-    observe:
-      roles: [light_color]  # the group_color case is automated only
-      see: 'The light at 20 % (level 51), hue 200° (sky blue) at 90 % saturation, brightening 10 % a second; 1 s in it starts paling 10 % a second. Both stop at 3 s, near 50 % (level 128) and 70 % saturation.'
-      watch: 'The stop and the 2 s after it: brightness and color both freeze at once, with no color carrying on, no flash and no jump a second later.'
-      ask: Did brightness and color both stop together and hold, with no drift, flash or jump?
 
   - name: halts_brightness_and_hue
     roles: [light_color, group_color]
@@ -123,8 +120,3 @@ tests:
       - sample: {attribute: brightness, for: 3, expect: steady, min: 25, max: 50, source: device_side}
       - expect_matches_read: {attributes: [xy_color.0, xy_color.1], tolerance: 0.01}
       - expect_state: {state: on, hs_color.0: {min: 54, max: 78}}
-    observe:
-      roles: [light_color]  # the group_color case is automated only
-      see: 'The light at 20 % (level 51), hue 30° (orange) at 90 % saturation, brightening 5 % a second; 1 s in it starts turning toward yellow at 18° a second. Both stop at 3 s, near 35 % (level 89) and hue 66° (yellow).'
-      watch: 'The stop and the 2 s after it: brightness and hue both freeze at once, with no hue carrying on, no flash and no jump a second later.'
-      ask: Did brightness and hue both stop together and hold, with no drift, flash or jump?

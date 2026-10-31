@@ -15,8 +15,3 @@ tests:
       - call: {action: stop}
       - expect_matches_read: {attributes: [xy_color.0, xy_color.1], tolerance: 0.01, within: 3}
       - expect_state: {state: on, hs_color.0: {min: 72, max: 96}}
-    observe:
-      roles: [light_color]  # the group_color case is automated only
-      see: 'The light at hue 30° (orange), 90 % saturation, turning through yellow at 18° a second, stopped after 3 s near 84° (yellow-green).'
-      watch: 'The direction: orange to yellow, never toward red or magenta.'
-      ask: Did it turn from orange toward yellow and green, then stop?

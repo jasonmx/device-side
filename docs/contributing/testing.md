@@ -108,9 +108,9 @@ raise, lower or `stop`, so a later test on that light waits until it reads the d
 ### Observed tests
 
 Some things need eyes, such as a light climbing smoothly without flashing. A test asks for them with an
-`observe:` block and puts its start state in `setup:`. Each question costs the person at the rig, so ask as
-few as cover everything a check can't measure: watch a behavior once, in the test that shows it best, and
-leave its other tests automated.
+`observe:` block and puts its start state in `setup:`. Each question costs the person at the rig, so observe
+only what hardware has never shown and a check can't measure: once watched on an integration, a behavior stays
+automated there.
 
 ```yaml
   - name: raise
@@ -136,7 +136,8 @@ Such a test runs twice, so you are asked only what a machine can't check:
    the test and asks what you saw instead. It is skipped if its automated run failed, and if a step fails after Enter it prints
    `nothing to observe` and the reason.
 
-`roles: [<role>]` in `observe:` limits the observed run to those roles; the test's other roles run automated only.
+`roles: [<role>]` in `observe:` limits the observed run to those roles, and `only: [<integration>]` to those
+integrations; the rest run automated only.
 
 `--unattended` skips the observed runs and reports them `not observed`. They don't fail, but a test counts toward
 a bench record only when both of its runs pass.

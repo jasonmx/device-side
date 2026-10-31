@@ -103,7 +103,17 @@ def observed(observe: str = "{see: s, watch: w, ask: a}", setup: str = "[{wait: 
         ),
         (
             observed("{see: s, watch: w, ask: a, roles: [switch_plug]}") + "      - wait: 0\n",
-            "observe roles needs an automated run",
+            "observe roles or only needs an automated run",
+        ),
+        (observed("{see: s, watch: w, ask: a, only: []}") + "      - wait: 0\n", "observe: only must be a non-empty"),
+        (
+            observed("{see: s, watch: w, ask: a, only: [hue]}") + "      - wait: 0\n",
+            "observe roles or only needs an automated run",
+        ),
+        (
+            observed("{see: s, watch: w, ask: a, only: [hue]}").replace("    steps:\n", "    only: [zha]\n    steps:\n")
+            + "      - expect_state: {state: on}\n",
+            "observe only hue are not in the test's only",
         ),
         (
             HEADER.replace("    steps:\n", "    observe: {see: s, watch: w, ask: a}\n    steps:\n")
@@ -162,8 +172,18 @@ def test_observe_roles_limit_the_observed_cases_to_those_roles(tmp_path: Path):
     path.write_text(text + "      - expect_state: {state: on}\n")
     (test,) = load_step_file(path).tests
     assert test.observe.roles == {"light_color"}
-    assert test.observed_on("light_color")
-    assert not test.observed_on("group_color")
+    assert test.observed_on("light_color", "zha")
+    assert not test.observed_on("group_color", "zha")
+
+
+def test_observe_only_limits_the_observed_cases_to_those_integrations(tmp_path: Path):
+    path = tmp_path / "observed.yaml"
+    path.write_text(observed("{see: s, watch: w, ask: a, only: [zigbee2mqtt]}") + "      - expect_state: {state: on}\n")
+    (test,) = load_step_file(path).tests
+    assert test.observe.only == {"zigbee2mqtt"}
+    assert test.observed_on("switch_plug", "zigbee2mqtt")
+    assert not test.observed_on("switch_plug", "hue")
+    assert test.automated
 
 
 @pytest.mark.parametrize(

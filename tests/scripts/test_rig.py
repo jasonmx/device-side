@@ -172,7 +172,6 @@ def test_select_plan_lines_and_estimate(inventory):
         "    bulb_color_temp_then_off[light_ct]: no light_ct entity in inventory",
         "    bulb_transition_then_off[light_dimmable]: no light_dimmable entity in inventory",
         "    rgbcct_bulb_rgb_then_off[light_color]: no light_color entity in inventory",
-        "    rgbcct_bulb_rgb_then_off[light_color] observed: no light_color entity in inventory",
         "hue / turn_off_for (no adapter, will skip)",
     ]
     assert rig.plan_lines(shelly_on, inventory, registry, "on_then") == [

@@ -46,9 +46,3 @@ tests:
       - wait: 20  # past the fade's end, which would show the zone at full
       # the scene's level, not the fade's full; needs the scene to hold light_ct (in the group) below full
       - expect_state: {target: light_ct, state: on, brightness: {max: 240}}
-    observe:
-      see: The zone off, then fading up from its dimmest in cool white over 20 s; 8 s in, its scene is recalled on the
-        Hue bridge.
-      watch: The lights at the recall, then HA's card for the zone once the 20 s have passed.
-      ask: Did the lights jump to the scene's colors and levels at the recall and stay there, with HA showing the scene
-        rather than full brightness?

@@ -20,6 +20,7 @@ from tests.rig.engine import (
     RunResult,
     Suite,
     SuiteResult,
+    cases,
     load_step_file,
     render_record,
     rig_facts,
@@ -634,6 +635,16 @@ async def test_only_and_missing_roles_narrow_the_cases(tmp_path):
         "everywhere[switch_plug] observed": (Outcome.PASS, ""),
         "needs_a_dimmer[light_dimmable] observed": (Outcome.SKIPPED, "no light_dimmable entity in inventory"),
     }
+
+
+def test_observe_only_watches_in_those_integrations_and_runs_automated_elsewhere(tmp_path):
+    text = OBSERVED.replace("ask: 'Did it click twice?'}", "ask: 'Did it click twice?', only: [zha]}")
+    inv = Inventory({key: [RigEntity("switch.plug", frozenset({"switch_plug"}))] for key in ("shelly", "zha")})
+    shelly, zha = (cases(suite(tmp_path, text, key), inv) for key in ("shelly", "zha"))
+    assert [case.id for case in shelly] == [AUTOMATED]
+    assert [case.id for case in zha] == [AUTOMATED, WATCHED]
+    assert shelly[0].twin is None
+    assert zha[0].twin == WATCHED
 
 
 async def test_a_keyword_runs_a_subset_and_marks_the_suite_partial(tmp_path):
