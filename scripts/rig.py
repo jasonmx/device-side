@@ -70,6 +70,9 @@ SERVICE = ("device_side", "turn_on_for")
 # HA's bootstrap stage-1 (120 s) and stage-2 (300 s) timeouts, after which a stuck dependency is let go, plus the
 # container's start. A restart behind a hung ZHA took about 350 s.
 READY_TIMEOUT_S = 450
+# A target still unavailable this long after HA is ready is most likely unpowered, so the run stops rather than fail
+# every case; the grace covers an integration whose entities come back just after the restart.
+TARGETS_TIMEOUT_S = 60
 RESTART_ESTIMATE_S = 90
 LOCK_NAME = "device_side-rig.lock"
 LOCK_POLL_S = 2.0  # how often a waiting run retries the lock
@@ -648,6 +651,7 @@ async def run_rig(
         bridge = HueBridge(env["HUE_BRIDGE_HOST"], env["HUE_APP_KEY"])
     paused: list[str] = []
     try:
+        await wait_for_targets(ha, suites, inventory, registry, keyword)
         await pause(ha, pause_list(env), paused, journal)
         result = await run(
             suites,
@@ -677,6 +681,43 @@ async def run_rig(
         if admin:
             await admin.close()
     return 1 if result.failed else 0
+
+
+async def wait_for_targets(
+    ha: HAClient,
+    suites: list[Suite],
+    inventory: Inventory,
+    registry: AdapterRegistry,
+    keyword: str | None,
+    timeout: float = TARGETS_TIMEOUT_S,
+) -> None:
+    """Until every entity a case will move is available; exits the runner, naming the rest, after `timeout`."""
+
+    def available(state: dict | None) -> bool:
+        return state is not None and state["state"] != "unavailable"
+
+    entities = {
+        entity
+        for suite in suites
+        if registry.adapter(suite.action, suite.integration)
+        for case in cases(suite, inventory, keyword)
+        if not case.skip
+        for entity in case.entities.values()
+    }
+    waiting = sorted([entity for entity in entities if not available(await ha.get_state(entity))])
+    if not waiting:
+        return
+    print(f"Waiting up to {timeout:.0f} s for {', '.join(waiting)} to become available.")
+    results = await asyncio.gather(
+        *(ha.wait_for(entity, available, timeout) for entity in waiting), return_exceptions=True
+    )
+    for result in results:
+        if isinstance(result, BaseException) and not isinstance(result, TimeoutError):
+            raise result
+    if still := [entity for entity, result in zip(waiting, results, strict=True) if isinstance(result, TimeoutError)]:
+        raise SystemExit(
+            f"Still unavailable after {timeout:.0f} s: {', '.join(still)}. Check it is powered; nothing was changed."
+        )
 
 
 def cancel_on_signals() -> None:

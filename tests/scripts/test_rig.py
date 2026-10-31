@@ -937,3 +937,36 @@ def test_a_signal_before_the_tests_ends_the_run_on_one_line():
     with pytest.raises(rig.Aborted, match="^Aborted.$"), rig.end_on_signals():
         os.kill(os.getpid(), signal.SIGHUP)
     assert signal.getsignal(signal.SIGHUP) is before
+
+
+def target_suite(tmp_path: Path) -> list[rig.Suite]:
+    return [rig.Suite(load_step_file(write(tmp_path, "steps.yaml", fakes.WAITING_MIDWAY)), "shelly")]
+
+
+async def test_a_target_coming_back_within_the_grace_lets_the_run_start(tmp_path, capsys):
+    ha = fakes.FakeHA({"light.a": {"state": "unavailable"}})
+    ha.later(0.02, "light.a", "off")
+    inventory = fakes.inventory("shelly", light_ct="light.a")
+
+    await rig.wait_for_targets(ha, target_suite(tmp_path), inventory, fakes.OPTION_REGISTRY, None, timeout=5)
+
+    assert "Waiting up to 5 s for light.a" in capsys.readouterr().out
+    assert ha.calls == []
+
+
+async def test_a_target_still_unavailable_stops_the_run_before_it_changes_anything(tmp_path):
+    ha = fakes.FakeHA({"light.a": {"state": "unavailable"}})
+    inventory = fakes.inventory("shelly", light_ct="light.a")
+
+    with pytest.raises(SystemExit, match=r"Still unavailable after 0 s: light.a\. Check it is powered"):
+        await rig.wait_for_targets(ha, target_suite(tmp_path), inventory, fakes.OPTION_REGISTRY, None, timeout=0.05)
+    assert ha.calls == []
+
+
+async def test_targets_already_available_need_no_wait(tmp_path, capsys):
+    ha = fakes.FakeHA({"light.a": {"state": "on"}})
+    inventory = fakes.inventory("shelly", light_ct="light.a")
+
+    await rig.wait_for_targets(ha, target_suite(tmp_path), inventory, fakes.OPTION_REGISTRY, None, timeout=5)
+
+    assert capsys.readouterr().out == ""
