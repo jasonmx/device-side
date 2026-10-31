@@ -42,6 +42,7 @@ v0.1.0 is the next release.
 | 9d (PR 2 of 3) | Observed-test ledger: observe only the four never-seen cases, `observe: only` | #134 |
 | 9d (rig fix) | Rig waits up to 60 s for unavailable targets, then stops before changing anything | #136 |
 | 13k (step 1, part) | Z2M hue and saturation bench records on the A60 (`light_color`; `group_color` still to do) | #138 |
+| 9d (A0) | A60 move probe: join windows self-close on Z2M and Hue; Z2M → Hue and ZHA → Z2M scriptable, Hue → ZHA manual for now | #142 |
 
 ## To go, in order
 
@@ -79,7 +80,8 @@ and Hue (from the A60 move on). The rig lock and the bulb moves are shared.
 - [ ] **13f** ZHA raise, lower and `stop`, after the `Transition` PR. ZHA code freezes. Paused on
   `wt/zha-move-stop`: its move adapter splits into the raise and lower actions when it resumes, and its edit to
   `_CaseRun.reading` (group means) is kept alongside this branch's when it merges.
-- [ ] **Move the A60 to ZHA.**
+- [ ] **Move the A60 to ZHA.** By hand for now: delete it in the Hue app, then `zha.permit`
+  ([probe](docs/plans/2026-10-31-a60-move-probe.md)).
 - [ ] **ZHA A60 run** (13k step 3): ZHA color suites, `set_attributes` hs and xy included. Attended for
   `sets_color_while_off`. Clears `experimental` on the ZHA adapters it proves.
 - [ ] **9d** Rig coverage sweep for the non-color scope
@@ -95,7 +97,8 @@ and Hue (from the A60 move on). The rig lock and the bulb moves are shared.
 ## Candidates
 
 - **15** Test bench, if the 9d A0 probe shows scripted A60 moves and self-closing join windows are reliable
-  ([plan](docs/plans/2026-10-30-rig-coverage-sweep.md)). The bench is three lamps in the maintainer's own room,
+  ([plan](docs/plans/2026-10-30-rig-coverage-sweep.md)). [Probe](docs/plans/2026-10-31-a60-move-probe.md): two of
+  three moves scripted; Hue → ZHA waits on a delete probe on the new firmware. The bench is three lamps in the maintainer's own room,
   which no one else uses, near the bridge and the coordinators. They hold a Hue white ambiance bulb, a Hue color
   bulb and a Hue White bulb. The rig moves them between Z2M, ZHA and Hue. Rig-made groups, zones and scenes are
   named `ds-rig-*` and removed after each suite, and `--recover` removes them after a crash. Tests can then run
