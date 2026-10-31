@@ -38,6 +38,7 @@ v0.1.0 is the next release.
 | — | Color temperature moves dropped on every integration: no halt of a Hue bulb's fade is clean | #125 |
 | — | Six raise and lower actions replace `move` | #128 |
 | 13j | Z2M `set_attributes` (experimental; rig run and bench record still to do) | #130 |
+| 9d (PR 1 of 3) | Rig coverage sweep: `group_color` role, `observe: roles`, color step cases for 13k | #132 |
 
 ## To go, in order
 
