@@ -95,13 +95,19 @@ and Hue (from the A60 move on). The rig lock and the bulb moves are shared.
 ## Candidates
 
 - **15** Test bench, if the 9d A0 probe shows scripted A60 moves and self-closing join windows are reliable
-  ([plan](docs/plans/2026-10-30-rig-coverage-sweep.md)). A few rig-only bulbs that the rig moves between Z2M, ZHA
-  and Hue, replace house devices. Rig-made groups, zones and scenes are named `ds-rig-*` and removed after each
-  suite, and `--recover` removes them after a crash. Tests can then run while the house is in use, with no test
-  fixtures left in it.
-  - A pool of two or three bulbs: Hue color, Hue white ambiance, and a non-Hue bulb that resets on a power cycle.
-  - Each bulb powered by a fixed Shelly relay, for resets and power-loss cases.
-  - The bench placed within touchlink range of the bridge and the coordinators.
+  ([plan](docs/plans/2026-10-30-rig-coverage-sweep.md)). The bench is three lamps in the maintainer's own room,
+  which no one else uses, near the bridge and the coordinators. They hold a Hue white ambiance bulb, a Hue color
+  bulb and a Hue White bulb. The rig moves them between Z2M, ZHA and Hue. Rig-made groups, zones and scenes are
+  named `ds-rig-*` and removed after each suite, and `--recover` removes them after a crash. Tests can then run
+  while the rest of the house is in use, with no test fixtures left in it.
+  - **Home network is Hue.** Before a bulb's first move, save its room membership and its scene actions. After the
+    suite, move it back and restore both against the bulb's new light ID.
+  - **Fixed HA entity IDs**: rename after every join, so automations and dashboards survive.
+  - **The room's automations** go in `RIG_PAUSE`. Optionally, an empty-room check runs before an unattended run.
+  - **A Zigbee plug (TS011F or similar) on each lamp**, plain on/off, set to power on after an outage. It brings a
+    lamp back on if it was switched off, and runs power-loss cases. The lamps' inline switches stay on. Probe first:
+    the plug's relay latency, and whether its power metering is fast enough to confirm on and off.
+  - The house run before each release adds the mesh, a second brand (the Sengleds) and mixed groups. Records say
+    bench or house.
   - Hue `set_scene` §5.4-5.8 scene kinds come within reach.
-  - One house run before each release keeps the mesh and mixed-group realism; records say bench or house.
   - Plan in /plan first.
