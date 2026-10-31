@@ -107,12 +107,13 @@ Worktree `wt/rig-coverage-sweep` (this one), into `release/v0.0.2`. It must merg
 ### Rig phase A0: moving the A60 by script (when the rig is back, before its first move)
 
 Jason, 2026-10-31: the A60 exists only for the rig, so the rig should move it between networks itself. Each move
-removes the bulb from its current network, which sends a Leave, then opens joining on the target network only.
+removes the bulb from its current network, which sends a Leave, then opens joining on the target network only. Hue
+calls are CLIP v2 only: Device Side's Hue integration doesn't support v1.
 
 | Move | Remove | Join | Fallback |
 |---|---|---|---|
-| Z2M → Hue | Z2M `bridge/request/device/remove` | CLIP v2 `zigbee_device_discovery` `action: search` (or v1 `POST /lights`) | Bridge touchlink by serial: v1 `POST /lights` `{"deviceid": [...]}` |
-| Hue → ZHA | v1 `DELETE /lights/<id>` | `zha.permit` | Z2M `bridge/request/touchlink/factory_reset`, with only ZHA open |
+| Z2M → Hue | Z2M `bridge/request/device/remove` | CLIP v2 `zigbee_device_discovery` `action: search` | none |
+| Hue → ZHA | CLIP v2 `DELETE device/<id>` | `zha.permit` | Z2M `bridge/request/touchlink/factory_reset`, with only ZHA open |
 | ZHA → Z2M | `zha.remove` | Z2M `bridge/request/permit_join` | Same Z2M touchlink |
 
 - **Probe**: run each move once from a scratch script, after the Z2M A60 run, in place of the manual moves 13k
@@ -121,13 +122,12 @@ removes the bulb from its current network, which sends a Leave, then opens joini
 - **Auto-close check**, before the first move (Jason, 2026-10-31): does each network close joining by itself, so a
   script crash can't leave it open? With no device trying to join (the A60 on another network or not pairing):
   - Open joining for 60 s, and never close it from the script: Z2M `bridge/request/permit_join` with `time`,
-    `zha.permit` with `duration`, Hue v1 `POST /lights` or a v2 `zigbee_device_discovery` search.
+    `zha.permit` with `duration`, a Hue v2 `zigbee_device_discovery` search.
   - Poll that network's own join state until it reads closed (Z2M `bridge/info` `permit_join` and
     `permit_join_end`; the Hue search status leaving `searching`), and record how long it took.
   - After the window plus a margin, close joining explicitly and record "did not auto-close".
   - If ZHA shows its join state nowhere readable, record that, and use the coordinator's permit response or logs.
-  - Expected, unverified: Z2M 1-254 s and ZHA up to 254 s close on their timers; a Hue v1 search stops after about
-    40 s and a v2 search times out.
+  - Expected, unverified: Z2M 1-254 s and ZHA up to 254 s close on their timers; a Hue v2 search times out.
 - **Safety**:
   - Always open joining with a finite, short duration, never "until closed", so a crash is bounded by the network's
     own timer.
