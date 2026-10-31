@@ -9,7 +9,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.service import async_register_admin_service
-from homeassistant.util.color import color_hs_to_xy, color_RGB_to_xy, color_temperature_to_hs, color_xy_to_hs
+from homeassistant.util.color import color_xy_to_hs
 from pytest_homeassistant_custom_component.common import async_mock_service
 
 from custom_components.device_side.const import DOMAIN
@@ -79,29 +79,10 @@ def bulb(hass, attributes: dict, entity_id: str = "light.bulb") -> str:
     ("data", "attributes", "expected"),
     [
         pytest.param({"brightness": 40}, DIMMABLE, [level(102)], id="brightness"),
-        pytest.param({"brightness": 0}, DIMMABLE, [level(1)], id="brightness_0_is_the_lowest_level"),
-        pytest.param({"brightness": 100}, DIMMABLE, [level(254)], id="brightness_100"),
-        pytest.param({"color_temp_kelvin": 2700}, CT, [mireds(370)], id="ct"),
-        pytest.param({"color_temp_kelvin": 1000}, CT, [mireds(454)], id="ct_clamped_warm"),
-        pytest.param({"color_temp_kelvin": 9000}, CT, [mireds(153)], id="ct_clamped_cool"),
-        pytest.param(
-            {"color_temp_kelvin": 9000}, {"supported_color_modes": ["color_temp"]}, [mireds(111)], id="ct_no_range"
-        ),
         pytest.param(
             {"brightness": 40, "color_temp_kelvin": 2700}, CT, [level(102), mireds(370)], id="brightness_and_ct"
         ),
         pytest.param({"xy_color": [0.369, 0.445]}, COLOR, [xy(0.369, 0.445)], id="xy"),
-        pytest.param({"hs_color": [30, 80]}, COLOR, [xy(*color_hs_to_xy(30, 80))], id="hs_on_xy_bulb"),
-        pytest.param({"rgb_color": [255, 128, 0]}, COLOR, [xy(*color_RGB_to_xy(255, 128, 0))], id="rgb_on_xy_bulb"),
-        pytest.param(
-            {"xy_color": [0.369, 0.445], "color_temp_kelvin": 2700}, COLOR, [xy(0.369, 0.445)], id="color_wins_over_ct"
-        ),
-        pytest.param(
-            {"color_temp_kelvin": 2700},
-            {"supported_color_modes": ["xy"]},
-            [xy(*color_hs_to_xy(*color_temperature_to_hs(2700)))],
-            id="ct_as_a_color_without_ct_mode",
-        ),
     ],
 )
 async def test_writes_with_the_override(hass, commands, refreshes, data, attributes, expected):
@@ -128,7 +109,6 @@ async def test_color_on_an_hs_only_bulb_sends_hue_and_saturation(hass, commands,
     [
         pytest.param({"min_brightness": 60}, [level(152)], id="min_raises"),
         pytest.param({"max_brightness": 30}, [level(76)], id="max_lowers"),
-        pytest.param({"min_brightness": 20, "brightness": 10}, [level(25)], id="brightness_wins"),
     ],
 )
 async def test_limits_clamp_the_current_level(hass, commands, refreshes, level_read, data, expected):
@@ -136,10 +116,7 @@ async def test_limits_clamp_the_current_level(hass, commands, refreshes, level_r
 
     assert await call(hass, "set_attributes", {"entity_id": "light.bulb", **data}) == {"light.bulb": SENT}
     assert sent(commands) == expected
-    if "brightness" in data:
-        level_read.assert_not_awaited()
-    else:
-        level_read.assert_awaited_once_with(hass, (IEEE, 11), 0x0008, (0x0000,))
+    level_read.assert_awaited_once_with(hass, (IEEE, 11), 0x0008, (0x0000,))
 
 
 async def test_within_limits_sends_nothing(hass, commands, refreshes):
@@ -165,10 +142,8 @@ async def test_a_field_the_light_cant_take_is_dropped(hass, commands, refreshes)
 @pytest.mark.parametrize(
     ("attributes", "data"),
     [
-        pytest.param(ONOFF, {"brightness": 40, "color_temp_kelvin": 2700}, id="onoff_light"),
         pytest.param(ONOFF, {"min_brightness": 40}, id="onoff_light_limits"),
         pytest.param(DIMMABLE, {"rgb_color": [255, 0, 0], "color_temp_kelvin": 2700}, id="every_field_dropped"),
-        pytest.param({}, {"brightness": 40, "rgb_color": [255, 0, 0], "color_temp_kelvin": 2700}, id="no_color_modes"),
     ],
 )
 async def test_a_light_that_takes_no_field_is_unchanged(hass, commands, refreshes, level_read, attributes, data):

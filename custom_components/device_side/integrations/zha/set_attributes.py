@@ -6,20 +6,22 @@ from typing import Any, ClassVar
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import Unauthorized
-from homeassistant.util.color import (
-    color_hs_to_xy,
-    color_temperature_kelvin_to_mired,
-    color_temperature_to_hs,
-    color_xy_to_hs,
-)
 
 from . import zcl
 from .addressing import address, unsupported_reason
 from ...actions.set_attributes import SetAttributesRequest
 from ...core.adapter import Adapter
-from ...core.color import color_xy
 from ...core.models import EntityResult, Status, Target
 from ...core.scope import AdapterScope
+from ...core.zcl_write import (
+    Command,
+    MoveToColor,
+    MoveToColorTemp,
+    MoveToHueAndSaturation,
+    MoveToLevel,
+    commands,
+    wants_level,
+)
 
 # 0.4 s, the Hue bridge's default write fade, so a call looks alike on both; a light that is off doesn't fade.
 # The override sets ExecuteIfOff for this command only, so the light takes it while off; Options stays untouched.
@@ -29,91 +31,22 @@ _EXECUTE_IF_OFF = {"transition_time": 4, "options_mask": 1, "options_override": 
 # override and comes on at full (docs/integrations.md, ZHA tested behavior).
 _DROPS_WHILE_OFF = frozenset({"E11-G13"})
 
-_COLOR_MODES = frozenset({"xy", "hs"})
-
-Command = tuple[int, int, dict[str, Any]]
+Wire = tuple[int, int, dict[str, Any]]
 
 
-def _level(percent: float) -> int:
-    """CurrentLevel for a brightness percent; 0 is the lowest level, 1, as Hue sets its lowest."""
-    return max(1, round(percent * 254 / 100))
-
-
-def _brightness(request: SetAttributesRequest, current_level: int | None) -> Command | None:
-    """The MoveToLevel for the request: its brightness, or the current level clamped to min/max; None if unchanged."""
-    if request.brightness is not None:
-        level = _level(request.brightness)
-    else:
-        percent = current_level * 100 / 254
-        if request.min_brightness is not None:
-            percent = max(request.min_brightness, percent)
-        if request.max_brightness is not None:
-            percent = min(request.max_brightness, percent)
-        if (level := _level(percent)) == current_level:
-            return None
-    return zcl.LEVEL_CLUSTER, zcl.MOVE_TO_LEVEL, {"level": level, **_EXECUTE_IF_OFF}
-
-
-def _mireds(kelvin: int, attrs: dict) -> int:
-    """The kelvin as mireds, within the light's own range where its state gives one."""
-    mireds = color_temperature_kelvin_to_mired(kelvin)
-    if (warmest := attrs.get("min_color_temp_kelvin")) is not None:
-        mireds = min(mireds, color_temperature_kelvin_to_mired(warmest))
-    if (coolest := attrs.get("max_color_temp_kelvin")) is not None:
-        mireds = max(mireds, color_temperature_kelvin_to_mired(coolest))
-    return mireds
-
-
-def _color(xy: tuple[float, float], modes: set[str]) -> Command:
-    """MoveToColor on an xy light, else MoveToHueAndSaturation. The light clamps the color to its own gamut."""
-    if "xy" in modes:
-        params = {"color_x": round(xy[0] * 65535), "color_y": round(xy[1] * 65535)}
-        return zcl.COLOR_CLUSTER, zcl.MOVE_TO_COLOR, {**params, **_EXECUTE_IF_OFF}
-    hue, saturation = color_xy_to_hs(*xy)
-    params = {"hue": round(hue * 254 / 360), "saturation": round(saturation * 254 / 100)}
-    return zcl.COLOR_CLUSTER, zcl.MOVE_TO_HUE_AND_SATURATION, {**params, **_EXECUTE_IF_OFF}
-
-
-def wants_level(request: SetAttributesRequest, modes: set[str]) -> bool:
-    """Whether the commands need the light's CurrentLevel: min/max_brightness alone, on a light that dims."""
-    limits = request.min_brightness is not None or request.max_brightness is not None
-    return request.brightness is None and limits and bool(modes - {"onoff"})
-
-
-def commands(
-    request: SetAttributesRequest, modes: set[str], attrs: dict, current_level: int | None
-) -> tuple[list[Command], bool]:
-    """The commands for one light, from its supported_color_modes and state attributes, and whether a field the light
-    can't take was dropped. current_level is read only when wants_level() says so.
-
-    The dispatcher already dropped what the modes rule out; what is left to drop here is for a state that lists no
-    modes. Given a color and color_temp_kelvin, only the color is sent: both are Color cluster commands, so the last
-    would win anyway. A color light without color temperature takes it as a color, as in core.
-    """
-    fields = request.light
-    sent: list[Command] = []
-    dropped = False
-    if request.brightness is not None or request.min_brightness is not None or request.max_brightness is not None:
-        if not modes - {"onoff"}:
-            dropped = True
-        elif (command := _brightness(request, current_level)) is not None:
-            sent.append(command)
-    kelvin = fields.color_temp_kelvin
-    colors = bool(modes & _COLOR_MODES)
-    if (xy := color_xy(fields)) is None and kelvin is not None and colors and "color_temp" not in modes:
-        xy = color_hs_to_xy(*color_temperature_to_hs(kelvin))  # as core's light.turn_on converts it
-    if xy is not None:
-        if colors:
-            sent.append(_color(xy, modes))
-        else:
-            dropped = True
-    if kelvin is not None and not (xy is not None and colors):
-        if "color_temp" in modes:
-            params = {"color_temp_mireds": _mireds(kelvin, attrs), **_EXECUTE_IF_OFF}
-            sent.append((zcl.COLOR_CLUSTER, zcl.MOVE_TO_COLOR_TEMP, params))
-        else:
-            dropped = True
-    return sent, dropped
+def _wire(command: Command) -> Wire:
+    """The command as zha's (cluster, command, params), with the fade and the override."""
+    match command:
+        case MoveToLevel(level):
+            return zcl.LEVEL_CLUSTER, zcl.MOVE_TO_LEVEL, {"level": level, **_EXECUTE_IF_OFF}
+        case MoveToColorTemp(mireds):
+            return zcl.COLOR_CLUSTER, zcl.MOVE_TO_COLOR_TEMP, {"color_temp_mireds": mireds, **_EXECUTE_IF_OFF}
+        case MoveToColor(x, y):
+            params = {"color_x": round(x * 65535), "color_y": round(y * 65535)}
+            return zcl.COLOR_CLUSTER, zcl.MOVE_TO_COLOR, {**params, **_EXECUTE_IF_OFF}
+        case MoveToHueAndSaturation(hue, saturation):
+            params = {"hue": hue, "saturation": saturation}
+            return zcl.COLOR_CLUSTER, zcl.MOVE_TO_HUE_AND_SATURATION, {**params, **_EXECUTE_IF_OFF}
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -164,7 +97,7 @@ class ZHASetAttributes(Adapter[SetAttributesRequest]):
             if not sent:
                 return self.result(target, Status.UNCHANGED, detail=detail or "within_limits")
             try:
-                for cluster_id, command_id, params in sent:
+                for cluster_id, command_id, params in map(_wire, sent):
                     await zcl.command(hass, addr, cluster_id, command_id, params, request.context)
             except Unauthorized:
                 return self.result(target, Status.REJECTED, detail="admin_required")

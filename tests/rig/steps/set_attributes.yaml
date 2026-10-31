@@ -1,13 +1,27 @@
 # hue_dimmer tests/RELEASE_CHECKLIST.md §3 as steps.
 # A room is written light by light, so on the group role the response and expect_state cover every member.
-# Color steps run on the light_color role only.
+# Color steps run on the light_color role, and the hs and xy ones on group_color too (a Z2M color groupcast).
 action: set_attributes
-rig_seconds: 125
+rig_seconds: 145
 tests:
   - name: sets_while_off  # §3.1
     roles: [light_ct, group]
     steps:
       - set: {state: off}
+      - call: {brightness: 40, color_temp_kelvin: 2700}
+      - expect_response: {status: expected, integration: self}
+      - wait: 1
+      - expect_state: {state: off}
+      - set: {state: on}
+      - expect_state: {brightness: {min: 100, max: 104}, color_temp_kelvin: {min: 2650, max: 2750}, within: tol}
+
+  # After an off with a transition, Zigbee2MQTT keeps the level from before it for the next plain on (probe 13j).
+  - name: sets_after_a_soft_off
+    roles: [light_ct, group]
+    steps:
+      - set: {state: on, brightness_pct: 100}
+      - set: {state: off, transition: 2}
+      - wait: 3
       - call: {brightness: 40, color_temp_kelvin: 2700}
       - expect_response: {status: expected, integration: self}
       - wait: 1
@@ -31,7 +45,7 @@ tests:
 
   # A color from another, set while off: the light comes on at it. Hue converts hs to xy, and HA derives hs back.
   - name: sets_hs_while_off
-    roles: [light_color]
+    roles: [light_color, group_color]
     setup:
       - set: {state: on, hs_color: [240, 90]}
       - wait: 2  # as in get_attributes' reads_while_off: let the color land before the off
@@ -45,7 +59,7 @@ tests:
       - expect_state: {hs_color.0: {min: 25, max: 35}, hs_color.1: {min: 75, max: 85}, within: tol}
 
   - name: sets_xy_while_off
-    roles: [light_color]
+    roles: [light_color, group_color]
     setup:
       - set: {state: on, hs_color: [240, 90]}
       - wait: 2
