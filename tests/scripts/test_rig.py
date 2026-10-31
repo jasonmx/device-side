@@ -91,6 +91,15 @@ def test_inventory_reads_a_groups_members(tmp_path):
     assert inventory.members("zigbee2mqtt", "light.other") == ()
 
 
+def test_inventory_reads_a_group_colors_members(tmp_path):
+    path = write(
+        tmp_path,
+        "inventory.yaml",
+        "zigbee2mqtt:\n  - entity_id: light.g\n    roles: [group_color]\n    members: [light.a]\n",
+    )
+    assert Inventory.load(path).members("zigbee2mqtt", "light.g") == ("light.a",)
+
+
 def test_inventory_rejects_members_without_the_group_role(tmp_path):
     path = write(
         tmp_path, "inventory.yaml", "zha:\n  - entity_id: light.a\n    roles: [light_ct]\n    members: [light.b]\n"

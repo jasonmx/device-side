@@ -750,6 +750,29 @@ async def test_a_group_case_targeting_a_light_outside_the_group_is_skipped(tmp_p
     assert outcomes(result) == {"every_member[group]": (Outcome.SKIPPED, "light_ct is not one of the group's members")}
 
 
+async def test_a_group_color_is_a_group(tmp_path):
+    """A group_color case checks the inventory's members and is never read as one light."""
+    ha = FakeHA({"light.colors": {}, "light.a": {}, "light.b": {}}, members_on("light.a", "light.b"))
+    text = GROUP.replace("roles: [group]", "roles: [group_color]")
+    inv = Inventory({"fake": [RigEntity("light.colors", frozenset({"group_color"}), members=("light.a", "light.b"))]})
+    result = await run_one(ha, suite(tmp_path, text, "fake"), inv, registry=NO_ATTRIBUTES_REGISTRY)
+    assert outcomes(result) == {"every_member[group_color]": (Outcome.PASS, "")}
+    assert ha.states["light.a"]["state"] == "off"  # restored: its members were snapshotted too
+
+
+async def test_observe_roles_leave_the_other_roles_automated_only(tmp_path):
+    text = OBSERVED.replace("roles: [switch_plug]", "roles: [switch_plug, light_onoff]").replace(
+        "observe: {", "observe: {roles: [switch_plug], "
+    )
+    inv = inventory(switch_plug="switch.plug", light_onoff="light.relay")
+    result = await run_one(
+        FakeHA({"switch.plug": {}, "light.relay": {}}, timer_on), suite(tmp_path, text), inv, ask=None
+    )
+    assert set(outcomes(result)) == {AUTOMATED, WATCHED, "on_then_off[light_onoff]"}
+    (relay,) = (case for case in result.suites[0].cases if case.role == "light_onoff")
+    assert relay.twin is None
+
+
 async def test_a_group_with_no_members_anywhere_fails(tmp_path):
     ha = FakeHA({"light.room": {}}, members_on())
     steps = suite(tmp_path, GROUP, "fake")

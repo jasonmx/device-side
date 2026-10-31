@@ -22,7 +22,7 @@ import yaml
 
 from .bridge import BridgeError, HueBridge
 from .client import HAClient, HAError
-from .inventory import RIG_DIR, ROLES, SETTLE_S, TOLERANCE_S, Inventory
+from .inventory import GROUP_ROLES, RIG_DIR, ROLES, SETTLE_S, TOLERANCE_S, Inventory
 from .journal import Journal
 
 _LOGGER = logging.getLogger(__name__)
@@ -138,6 +138,7 @@ class Observe:
     see: str
     watch: str
     ask: str
+    roles: frozenset[str] | None = None  # the roles watched; None for every role the test lists
 
 
 # How far a steady sample may spread, in its source's units: a Zigbee bulb can settle one level step (1/254) after a
@@ -164,6 +165,10 @@ class RigTest:
         if self.observe is None:
             return True
         return any(step.kind in CHECKS for step in self.steps) and not any(step.kind == "do" for step in self.setup)
+
+    def observed_on(self, role: str) -> bool:
+        """Whether the test has an observed case on `role`."""
+        return self.observe is not None and (self.observe.roles is None or role in self.observe.roles)
 
     def roles_needed(self, role: str) -> list[str]:
         """The case's own role and every role a step targets, in first-use order."""
@@ -362,12 +367,17 @@ def _parse_steps(raw: Any, key: str) -> tuple[Step, ...]:
 
 def _parse_observe(raw: Any) -> Observe:
     try:
-        args = _mapping(raw, required=("see", "watch", "ask"), allowed=())
+        args = _mapping(raw, required=("see", "watch", "ask"), allowed=("roles",))
+        roles = args.pop("roles", None)
         if not all(isinstance(value, str) and value.strip() for value in args.values()):
             raise ValueError("see, watch and ask must be non-empty strings")
+        if roles is not None and (
+            not isinstance(roles, list) or not roles or not all(isinstance(r, str) for r in roles)
+        ):
+            raise ValueError("roles must be a non-empty list of roles")
     except ValueError as err:
         raise ValueError(f"observe: {err}") from None
-    return Observe(args["see"].strip(), args["watch"].strip(), args["ask"].strip())
+    return Observe(args["see"].strip(), args["watch"].strip(), args["ask"].strip(), frozenset(roles) if roles else None)
 
 
 def _parse_test(raw: Any) -> RigTest:
@@ -387,9 +397,21 @@ def _parse_test(raw: Any) -> RigTest:
         if only is not None and (not isinstance(only, list) or not only):
             raise ValueError("only must be a non-empty list of integration keys")
         steps, setup, observe = _parse_phases(raw)
+        test = RigTest(name, tuple(roles), frozenset(only) if only else None, steps, setup, observe)
+        _check_observe_roles(test)
     except ValueError as err:
         raise ValueError(f"test {name}, {err}") from None
-    return RigTest(name, tuple(roles), frozenset(only) if only else None, steps, setup, observe)
+    return test
+
+
+def _check_observe_roles(test: RigTest) -> None:
+    """`observe: roles` names some of the test's roles, and the roles it leaves out still get an automated run."""
+    if test.observe is None or test.observe.roles is None:
+        return
+    if outside := sorted(test.observe.roles - set(test.roles)):
+        raise ValueError(f"observe roles {', '.join(outside)} are not the test's roles")
+    if not test.automated:
+        raise ValueError("observe roles needs an automated run for the roles it leaves out")
 
 
 def _parse_phases(raw: dict) -> tuple[tuple[Step, ...], tuple[Step, ...], Observe | None]:
@@ -474,7 +496,7 @@ class Case:
     @property
     def twin(self) -> str | None:
         """The id of the test's other case on this role, when it has both: either proves nothing alone."""
-        if self.test.observe is None or not self.test.automated:
+        if not self.test.observed_on(self.role) or not self.test.automated:
             return None
         return replace(self, observed=not self.observed).id
 
@@ -487,7 +509,7 @@ def cases(suite: Suite, inventory: Inventory, keyword: str | None = None) -> lis
         if test.only is not None and suite.integration not in test.only:
             continue
         for role in test.roles:
-            for observed in [False] * test.automated + [True] * (test.observe is not None):
+            for observed in [False] * test.automated + [True] * test.observed_on(role):
                 case = Case(suite, test, role, {}, observed=observed)
                 if keyword and keyword not in case.id:
                     continue
@@ -496,7 +518,8 @@ def cases(suite: Suite, inventory: Inventory, keyword: str | None = None) -> lis
                 if missing := [name for name, entity_id in entities.items() if entity_id is None]:
                     case = Case(suite, test, role, {}, f"no {missing[0]} entity in inventory", observed)
                 else:
-                    members = inventory.members(suite.integration, entities["group"]) if "group" in entities else ()
+                    group = next((name for name in entities if name in GROUP_ROLES), None)
+                    members = inventory.members(suite.integration, entities[group]) if group else ()
                     # A group case that also targets a light means one of the group's: where the inventory lists them.
                     lights = [name for name in entities if name.startswith("light_")]
                     outside = [name for name in lights if members and entities[name] not in members]
@@ -828,7 +851,7 @@ class _CaseRun:
         return self.case.entities[role or self.case.role]
 
     def is_group(self, entity_id: str) -> bool:
-        return self.case.entities.get("group") == entity_id
+        return any(self.case.entities.get(role) == entity_id for role in GROUP_ROLES)
 
     async def members(self, entity_id: str) -> list[str]:
         """A group's member lights, from its `entity_id` attribute, else the inventory's `members:` (a Z2M group light

@@ -92,6 +92,19 @@ def observed(observe: str = "{see: s, watch: w, ask: a}", setup: str = "[{wait: 
         ),
         (observed("[a]") + "      - wait: 0\n", "observe: expected a mapping"),
         (observed(setup="[]") + "      - wait: 0\n", "setup must be a non-empty list"),
+        (observed("{see: s, watch: w, ask: a, roles: []}") + "      - wait: 0\n", "observe: roles must be a non-empty"),
+        (
+            observed("{see: s, watch: w, ask: a, roles: [[a]]}") + "      - wait: 0\n",
+            "observe: roles must be a non-empty",
+        ),
+        (
+            observed("{see: s, watch: w, ask: a, roles: [group]}") + "      - expect_state: {state: on}\n",
+            "observe roles group are not the test's roles",
+        ),
+        (
+            observed("{see: s, watch: w, ask: a, roles: [switch_plug]}") + "      - wait: 0\n",
+            "observe roles needs an automated run",
+        ),
         (
             HEADER.replace("    steps:\n", "    observe: {see: s, watch: w, ask: a}\n    steps:\n")
             + "      - wait: 0\n",
@@ -139,6 +152,18 @@ def test_an_observed_test_is_parsed_with_its_setup(tmp_path: Path):
     assert test.observe == Observe("It clicks.", "Twice.", "Two?")
     assert [step.label for step in test.setup] == ["setup step 1 (do)", "setup step 2 (set)"]
     assert not test.automated  # its setup needs the person
+
+
+def test_observe_roles_limit_the_observed_cases_to_those_roles(tmp_path: Path):
+    path = tmp_path / "observed.yaml"
+    text = observed("{see: s, watch: w, ask: a, roles: [light_color]}").replace(
+        "[switch_plug]", "[light_color, group_color]"
+    )
+    path.write_text(text + "      - expect_state: {state: on}\n")
+    (test,) = load_step_file(path).tests
+    assert test.observe.roles == {"light_color"}
+    assert test.observed_on("light_color")
+    assert not test.observed_on("group_color")
 
 
 @pytest.mark.parametrize(

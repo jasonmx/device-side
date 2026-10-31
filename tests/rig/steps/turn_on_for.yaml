@@ -84,7 +84,7 @@ tests:
   # Shelly sends transition in the same Set as the timer: the bulb fades up to the brightness, then turns itself off.
   - name: bulb_transition_then_off
     roles: [light_dimmable]
-    only: [shelly]
+    only: [shelly, zigbee2mqtt]  # ZHA's scope has no transition
     steps:
       - set: {state: off}
       - call: {duration: 6, brightness: 128, transition: 2}

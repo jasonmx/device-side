@@ -85,10 +85,11 @@ tests:
       - call: {}
       - expect_response: {attributes: {hs_color.0: {min: 235, max: 245}, hs_color.1: {min: 85, max: 95}}}
 
-  # ZHA reads the bulb's color live, and the bulb keeps it while off. Lists compare whole, so hs is read by index.
+  # ZHA reads the bulb's color live, and the bulb keeps it while off; Hue reads the bridge, which keeps it too and
+  # leaves color temperature out in color mode. Lists compare whole, so hs is read by index.
   - name: reads_color_while_off
     roles: [light_color]
-    only: [zha]
+    only: [zha, hue]
     steps:
       - set: {state: on, hs_color: [30, 80]}
       - set: {state: off}

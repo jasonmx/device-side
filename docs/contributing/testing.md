@@ -94,6 +94,10 @@ is skipped where the inventory lists the group's `members` and that light isn't 
 (the last call's), `tol` (the integration's timing tolerance) and `+ - *`. `only: [<integration>]` limits a
 test to some integrations; when those pile up, split the file.
 
+The roles are listed in `tests/rig/inventory.example.yaml`. `group_color` is a native group whose members all take
+color: color moves groupcast only to a group like that, so it runs the color cases a `group` can't. Everything this
+page says of a `group` holds for it too.
+
 An adapter with options runs each file for its action with them pinned through Device Side's options flow:
 `options: [<name>]` at the top of a file turns those on, and every other option in the adapter's scope runs off.
 Its record is `<action>-<name>.md`, with an `Options` row. The rig's own options are put back when the run ends.
@@ -131,6 +135,8 @@ Such a test runs twice, so you are asked only what a machine can't check:
    into waits, so the timing matches. Then you answer `ask`: Enter or `y` if you saw it, `n` if not, which fails
    the test and asks what you saw instead. It is skipped if its automated run failed, and if a step fails after Enter it prints
    `nothing to observe` and the reason.
+
+`roles: [<role>]` in `observe:` limits the observed run to those roles; the test's other roles run automated only.
 
 `--unattended` skips the observed runs and reports them `not observed`. They don't fail, but a test counts toward
 a bench record only when both of its runs pass.

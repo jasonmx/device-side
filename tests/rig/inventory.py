@@ -32,8 +32,10 @@ MAIN_CHECKOUT = main_checkout()
 INVENTORY = MAIN_CHECKOUT / RIG_DIR.relative_to(REPO) / "inventory.yaml"
 ENV_FILE = MAIN_CHECKOUT / ".env.rig"
 
+# A native group's roles: `group_color` is one whose members all take color.
+GROUP_ROLES = frozenset({"group", "group_color"})
 ROLES = frozenset(
-    {"light_onoff", "light_wrapped", "light_dimmable", "light_ct", "light_color", "switch_plug", "group", "scene"}
+    {"light_onoff", "light_wrapped", "light_dimmable", "light_ct", "light_color", "switch_plug", "scene"} | GROUP_ROLES
 )
 
 # Seconds either side of a duration within which a device may flip. Zigbee and Matter hop through a mesh.
@@ -73,7 +75,7 @@ class Inventory:
                 if not isinstance(members, list) or not all(isinstance(member, str) for member in members):
                     raise ValueError(f"{path.name}: {item['entity_id']} members must be a list of entity IDs")
                 members = tuple(members)
-                if members and "group" not in roles:
+                if members and not roles & GROUP_ROLES:
                     raise ValueError(f"{path.name}: {item['entity_id']} lists members but has no group role")
                 inventory.integrations[integration].append(
                     RigEntity(item["entity_id"], roles, item.get("powered_by"), members)

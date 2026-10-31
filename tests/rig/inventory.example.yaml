@@ -1,11 +1,11 @@
 # Copy to tests/rig/inventory.yaml (gitignored) and name the rig's own entities.
 # One list per integration key (shelly, zigbee2mqtt, zha, matter, hue). Roles pick which test uses an entity:
 #   switch_plug, light_onoff (a relay shown as a light), light_wrapped (a switch_as_x light over a switch),
-#   light_dimmable, light_ct, light_color, group, scene
+#   light_dimmable, light_ct, light_color, group, group_color (a native group whose members all take color), scene
 # Tests restore each entity's prior state afterwards, but every entity here will visibly change state.
 # powered_by names the inventory switch an entity draws power through: its cases need that switch on, and a case
 # that switches it puts the entity back once power returns.
-# members lists a group's lights, for a group light that has no entity_id attribute (a Zigbee2MQTT group).
+# members lists a group's (or group_color's) lights, for a group light that has no entity_id attribute (a Zigbee2MQTT group).
 
 shelly:
   - entity_id: switch.office_plug
@@ -29,3 +29,6 @@ zigbee2mqtt:
   - entity_id: light.bulb_group  # a Z2M group of bulb_a and bulb_b
     roles: [group]
     members: [light.bulb_a, light.bulb_b]
+  - entity_id: light.color_group  # a Z2M group of color bulbs only
+    roles: [group_color]
+    members: [light.bulb_c]
