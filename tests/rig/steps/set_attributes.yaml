@@ -1,8 +1,8 @@
 # hue_dimmer tests/RELEASE_CHECKLIST.md §3 as steps.
 # A room is written light by light, so on the group role the response and expect_state cover every member.
-# Color steps run on the light_color role only.
+# Color steps run on the light_color role, and the hs and xy ones on group_color too (a Z2M color groupcast).
 action: set_attributes
-rig_seconds: 105
+rig_seconds: 145
 tests:
   - name: sets_while_off  # §3.1
     roles: [light_ct, group]
@@ -42,6 +42,47 @@ tests:
       see: The color lamp, off, gets red set while off, then turns on.
       watch: 'The first moment it lights: red from the start, with no flash of its old color.'
       ask: Did it come on red?
+
+  # A color from another, set while off: the light comes on at it. Hue converts hs to xy, and HA derives hs back.
+  - name: sets_hs_while_off
+    roles: [light_color, group_color]
+    setup:
+      - set: {state: on, hs_color: [240, 90]}
+      - wait: 2  # as in get_attributes' reads_while_off: let the color land before the off
+      - set: {state: off}
+    steps:
+      - call: {hs_color: [30, 80]}
+      - expect_response: {status: expected, integration: self}
+      - wait: 1
+      - expect_state: {state: off}
+      - set: {state: on}
+      - expect_state: {hs_color.0: {min: 25, max: 35}, hs_color.1: {min: 75, max: 85}, within: tol}
+
+  - name: sets_xy_while_off
+    roles: [light_color, group_color]
+    setup:
+      - set: {state: on, hs_color: [240, 90]}
+      - wait: 2
+      - set: {state: off}
+    steps:
+      - call: {xy_color: [0.3, 0.5]}  # inside every Hue gamut, so it reads back as set
+      - expect_response: {status: expected, integration: self}
+      - wait: 1
+      - expect_state: {state: off}
+      - set: {state: on}
+      - expect_state: {xy_color.0: {min: 0.29, max: 0.31}, xy_color.1: {min: 0.49, max: 0.51}, within: tol}
+
+  # Hue clamps a color to the light's gamut. The A60 is gamut C, whose green corner (0.17, 0.7) is the nearest point
+  # to (0.1, 0.8).
+  - name: clamps_xy_to_the_gamut
+    roles: [light_color]
+    only: [hue]
+    setup:
+      - set: {state: on, hs_color: [240, 90]}
+    steps:
+      - call: {xy_color: [0.1, 0.8]}
+      - expect_response: {status: expected, integration: self}
+      - expect_state: {xy_color.0: {min: 0.16, max: 0.18}, xy_color.1: {min: 0.69, max: 0.71}, within: tol}
 
   - name: min_brightness_raises  # §3.3
     roles: [light_ct, group]

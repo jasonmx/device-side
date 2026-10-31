@@ -63,19 +63,21 @@ and Hue (from the A60 move on). The rig lock and the bulb moves are shared.
   record is in.
 - [x] **14** Z2M color modes fixed for HA, on by default, and 13i's xy write-back backed out
   ([`2026-10-28-z2m-color-modes.md`](docs/plans/2026-10-28-z2m-color-modes.md)). Counts toward the Z2M freeze.
-- [ ] **Z2M A60 run** (13k step 1): full Z2M suite, bulb in place. Clears `experimental` on the Z2M adapters it
-  proves.
+- [ ] **Z2M A60 run** (13k step 1): full Z2M suite, bulb in place, with the `group_color` cases on a temporary Z2M
+  group holding only the A60, created before the run and removed before the bulb moves. Clears `experimental` on the
+  Z2M adapters it proves.
 - [ ] **Move the A60 to the Hue bridge.**
 - [ ] **7c2** Hue `raise_saturation`/`lower_saturation`, built against the A60
   ([`2026-10-27-hue-move-color.md`](docs/plans/2026-10-27-hue-move-color.md)).
-- [ ] **Hue A60 run** (13k step 2): `set_attributes` color and gamut clamp, 7c saturation, with no `light_color`
-  skips. Hue code freezes. Clears `experimental` on the Hue adapters it proves.
+- [ ] **Hue A60 run** (13k step 2): `set_attributes` color (rgb, hs and xy) and gamut clamp, the `get_attributes`
+  color read, 7c saturation, with no `light_color` skips. Hue code freezes. Clears `experimental` on the Hue adapters it proves.
 - [ ] **13f** ZHA raise, lower and `stop`, after the `Transition` PR. ZHA code freezes. Paused on
   `wt/zha-move-stop`: its move adapter splits into the raise and lower actions when it resumes, and its edit to
   `_CaseRun.reading` (group means) is kept alongside this branch's when it merges.
 - [ ] **Move the A60 to ZHA.**
-- [ ] **ZHA A60 run** (13k step 3): ZHA color suites. Clears `experimental` on the ZHA adapters it proves.
-- [ ] **9d** Rig coverage sweep for the non-color scope (plan in /plan first). 13k covers the color part.
+- [ ] **ZHA A60 run** (13k step 3): ZHA color suites, `set_attributes` hs and xy included. Clears `experimental` on the ZHA adapters it proves.
+- [ ] **9d** Rig coverage sweep for the non-color scope
+  ([`2026-10-30-rig-coverage-sweep.md`](docs/plans/2026-10-30-rig-coverage-sweep.md)). 13k covers the color part.
 - [ ] **12** v0.1.0: no adapter left `experimental` (`scripts/check_release.py --release`); README feature table
   current; release checklist adapted from hue_dimmer; `predicted_state` default reviewed against the rig runs and
   regression issues since #77.
