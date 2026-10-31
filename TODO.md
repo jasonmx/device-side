@@ -91,3 +91,17 @@ and Hue (from the A60 move on). The rig lock and the bulb moves are shared.
 ## After v0.1.0
 
 - **9b** Remote tester flow, once an adapter needs hardware the rig lacks.
+
+## Candidates
+
+- **15** Test bench, if the 9d A0 probe shows scripted A60 moves and self-closing join windows are reliable
+  ([plan](docs/plans/2026-10-30-rig-coverage-sweep.md)). A few rig-only bulbs that the rig moves between Z2M, ZHA
+  and Hue, replace house devices. Rig-made groups, zones and scenes are named `ds-rig-*` and removed after each
+  suite, and `--recover` removes them after a crash. Tests can then run while the house is in use, with no test
+  fixtures left in it.
+  - A pool of two or three bulbs: Hue color, Hue white ambiance, and a non-Hue bulb that resets on a power cycle.
+  - Each bulb powered by a fixed Shelly relay, for resets and power-loss cases.
+  - The bench placed within touchlink range of the bridge and the coordinators.
+  - Hue `set_scene` §5.4-5.8 scene kinds come within reach.
+  - One house run before each release keeps the mesh and mixed-group realism; records say bench or house.
+  - Plan in /plan first.
