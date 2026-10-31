@@ -106,9 +106,9 @@ and Hue (from the A60 move on). The rig lock and the bulb moves are shared.
     suite, move it back and restore both against the bulb's new light ID.
   - **Fixed HA entity IDs**: rename after every join, so automations and dashboards survive.
   - **The room's automations** go in `RIG_PAUSE`. Optionally, an empty-room check runs before an unattended run.
-  - **A Zigbee plug (TS011F or similar) on each lamp**, plain on/off, set to power on after an outage. It brings a
-    lamp back on if it was switched off, and runs power-loss cases. The lamps' inline switches stay on. Probe first:
-    the plug's relay latency, and whether its power metering is fast enough to confirm on and off.
+  - **No plugs on the lamps.** The lamps' inline switches stay on, and the rig's availability check stops a run on
+    a lamp that's switched off. Power-loss cases are out of scope. Switch tests stay on the Shelly relays and the
+    Matter plug.
   - The house run before each release adds the mesh, a second brand (the Sengleds) and mixed groups. Records say
     bench or house.
   - Hue `set_scene` §5.4-5.8 scene kinds come within reach.
