@@ -75,12 +75,12 @@ split found one defect, fixed in `7f56d4d`: the re-plan from HA's state forgot e
 lost its prediction and a stop sent it no `StopMoveStep`. 1119 tests pass, ZHA modules at 100 %. Pushed, no PR:
 the PR waits for a passing rig run. Watched probes (b) and (c) were never run.
 
-**Open from the audit, Jason's call (a change to the fit):** `sync_to_bulb` solves for the start by dividing by
+**From the audit, decided 2026-10-31: no guard until the probe.** `sync_to_bulb` solves for the start by dividing by
 `1 − f`, and times the read at its round trip's middle. A request held in a busy coordinator's queue (the second
 run's `BUSY` sends) reads later than the middle, so `f` is underestimated and, on a raise, the start comes out
 high: that matches both unexplained `light_ct` failures (cause 1 below). A guard, such as skipping the fit when the
-round trip exceeds a bound or when `f` is past one half, would trade a stale-start fix for robustness. Recommended:
-no guard until the probe in step 2 says which cause it is (measure before guardrails).
+round trip exceeds a bound or when `f` is past one half, would trade a stale-start fix for robustness. Jason chose
+to wait for the probe in step 2 to say which cause it is, then fix that cause.
 
 **Second rig run (2026-10-29, `move` and `stop` on ZHA, `655693f`):** every `light_ct` case that failed on
 2026-10-28 passed. 12 cases failed:
