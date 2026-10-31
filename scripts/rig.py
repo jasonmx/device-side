@@ -691,20 +691,26 @@ async def wait_for_targets(
     keyword: str | None,
     timeout: float = TARGETS_TIMEOUT_S,
 ) -> None:
-    """Until every entity a case will move is available; exits the runner, naming the rest, after `timeout`."""
+    """Until every entity a case will move, a group's listed members included, is available; exits the runner, naming
+    the rest, after `timeout`, or at once for one HA doesn't have."""
 
     def available(state: dict | None) -> bool:
         return state is not None and state["state"] != "unavailable"
 
-    entities = {
-        entity
-        for suite in suites
-        if registry.adapter(suite.action, suite.integration)
-        for case in cases(suite, inventory, keyword)
-        if not case.skip
-        for entity in case.entities.values()
-    }
-    waiting = sorted([entity for entity in entities if not available(await ha.get_state(entity))])
+    entities = sorted(
+        {
+            entity
+            for suite in suites
+            if registry.adapter(suite.action, suite.integration)
+            for case in cases(suite, inventory, keyword)
+            if not case.skip
+            for entity in (*case.entities.values(), *case.members)
+        }
+    )
+    states = dict(zip(entities, await asyncio.gather(*map(ha.get_state, entities)), strict=True))
+    if missing := [entity for entity, state in states.items() if state is None]:
+        raise SystemExit(f"Not in HA: {', '.join(missing)}. Check inventory.yaml; nothing was changed.")
+    waiting = [entity for entity, state in states.items() if not available(state)]
     if not waiting:
         return
     print(f"Waiting up to {timeout:.0f} s for {', '.join(waiting)} to become available.")
