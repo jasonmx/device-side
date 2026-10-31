@@ -40,6 +40,7 @@ v0.1.0 is the next release.
 | 13j | Z2M `set_attributes` (experimental; rig run and bench record still to do) | #130 |
 | 9d (PR 1 of 3) | Rig coverage sweep: `group_color` role, `observe: roles`, color step cases for 13k | #132 |
 | 9d (PR 2 of 3) | Observed-test ledger: observe only the four never-seen cases, `observe: only` | #134 |
+| 9d (rig fix) | Rig waits up to 60 s for unavailable targets, then stops before changing anything | #136 |
 
 ## To go, in order
 
